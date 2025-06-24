@@ -1,0 +1,86 @@
+import { motion } from "framer-motion";
+import { CheckCircle } from "lucide-react";
+
+export default function Hero() {
+  const scrollToSection = (sectionId: string) => {
+    const element = document.getElementById(sectionId);
+    if (element) {
+      element.scrollIntoView({ behavior: "smooth" });
+    }
+  };
+
+  return (
+    <section id="home" className="relative pt-16 pb-20 lg:pt-20 lg:pb-28 overflow-hidden">
+      <div className="absolute inset-0 bg-gradient-to-br from-cuci-primary/10 to-cuci-secondary/10"></div>
+      <div className="relative max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
+        <div className="grid lg:grid-cols-2 gap-12 items-center">
+          <motion.div
+            initial={{ opacity: 0, x: -50 }}
+            animate={{ opacity: 1, x: 0 }}
+            transition={{ duration: 0.8 }}
+            className="text-center lg:text-left"
+          >
+            <h1 className="text-4xl md:text-6xl font-bold text-gray-900 leading-tight mb-6">
+              We've cleaned over{" "}
+              <span className="text-cuci-primary">100,000</span> cars.
+              <span className="block text-cuci-secondary">
+                And we're just getting started.
+              </span>
+            </h1>
+            <p className="text-xl text-gray-600 mb-8 leading-relaxed">
+              From a single location to 4 thriving branches, Cuci Xpress has
+              revolutionized car washing with premium service, cutting-edge
+              technology, and unmatched customer satisfaction.
+            </p>
+            <div className="flex flex-col sm:flex-row gap-4 justify-center lg:justify-start">
+              <motion.button
+                whileHover={{ scale: 1.05 }}
+                whileTap={{ scale: 0.95 }}
+                onClick={() => scrollToSection("locations")}
+                className="bg-cuci-primary hover:bg-cuci-primary-dark text-white px-8 py-4 rounded-full text-lg font-semibold transition-all shadow-lg"
+              >
+                Find Our Locations
+              </motion.button>
+              <motion.button
+                whileHover={{ scale: 1.05 }}
+                whileTap={{ scale: 0.95 }}
+                onClick={() => scrollToSection("invest")}
+                className="border-2 border-cuci-secondary text-cuci-secondary hover:bg-cuci-secondary hover:text-white px-8 py-4 rounded-full text-lg font-semibold transition-all"
+              >
+                Join Our Growth
+              </motion.button>
+            </div>
+          </motion.div>
+          <motion.div
+            initial={{ opacity: 0, x: 50 }}
+            animate={{ opacity: 1, x: 0 }}
+            transition={{ duration: 0.8, delay: 0.2 }}
+            className="relative"
+          >
+            <img
+              src="https://pixabay.com/get/g5fe9704d3b25c3377cad960908aae2391e9a0384ffb9661f49aa74ad08d24781c379668a5ee40323f34bbd987e0c5288333178edc8e9a676259adeac340430f0_1280.jpg"
+              alt="Modern car wash facility"
+              className="rounded-2xl shadow-2xl w-full h-auto"
+            />
+            <motion.div
+              initial={{ opacity: 0, y: 50 }}
+              animate={{ opacity: 1, y: 0 }}
+              transition={{ duration: 0.8, delay: 0.5 }}
+              className="absolute -bottom-6 -left-6 bg-white p-6 rounded-xl shadow-lg"
+            >
+              <div className="flex items-center space-x-4">
+                <div className="bg-cuci-primary/10 p-3 rounded-full">
+                  <CheckCircle className="w-8 h-8 text-cuci-primary" />
+                </div>
+                <div>
+                  <p className="text-sm text-gray-600">Premium Quality</p>
+                  <p className="font-semibold text-gray-900">Guaranteed</p>
+                </div>
+              </div>
+            </motion.div>
+          </motion.div>
+        </div>
+      </div>
+    </section>
+  );
+}
