@@ -1,3 +1,4 @@
+import React, { useState, useEffect } from "react";
 import { motion } from "framer-motion";
 import { useIntersectionObserver } from "@/hooks/useIntersectionObserver";
 import { Calendar, DollarSign, MapPin, Star } from "lucide-react";
@@ -68,31 +69,39 @@ interface CountUpProps {
 }
 
 function CountUp({ end, duration, prefix = "", suffix = "", formatter }: CountUpProps) {
+  const [count, setCount] = useState(0);
+
+  useEffect(() => {
+    let startTime: number;
+    let animationFrame: number;
+
+    const animate = (timestamp: number) => {
+      if (!startTime) startTime = timestamp;
+      const progress = Math.min((timestamp - startTime) / (duration * 1000), 1);
+      
+      const easeOutProgress = 1 - Math.pow(1 - progress, 3);
+      const currentValue = end * easeOutProgress;
+      
+      setCount(currentValue);
+
+      if (progress < 1) {
+        animationFrame = requestAnimationFrame(animate);
+      }
+    };
+
+    animationFrame = requestAnimationFrame(animate);
+
+    return () => {
+      if (animationFrame) {
+        cancelAnimationFrame(animationFrame);
+      }
+    };
+  }, [end, duration]);
+
   return (
-    <motion.span
-      initial={{ opacity: 0 }}
-      animate={{ opacity: 1 }}
-      transition={{ duration }}
-    >
-      {prefix}
-      <motion.span
-        initial={{ textContent: "0" }}
-        animate={{ textContent: formatter(end) }}
-        transition={{
-          duration,
-          ease: "easeOut",
-        }}
-        onUpdate={(latest) => {
-          if (typeof latest.textContent === "string") {
-            const current = parseFloat(latest.textContent.replace(/[^\d.]/g, ""));
-            return formatter(current);
-          }
-        }}
-      >
-        0
-      </motion.span>
-      {suffix}
-    </motion.span>
+    <span>
+      {prefix}{formatter(count)}{suffix}
+    </span>
   );
 }
 

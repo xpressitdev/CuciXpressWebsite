@@ -136,16 +136,26 @@ export default function Footer() {
             <p className="text-gray-400 text-sm">
               © 2024 Cuci Xpress. All rights reserved.
             </p>
-            <div className="flex space-x-6 mt-4 md:mt-0">
-              <a href="#" className="text-gray-400 hover:text-cuci-primary text-sm transition-colors">
-                Privacy Policy
-              </a>
-              <a href="#" className="text-gray-400 hover:text-cuci-primary text-sm transition-colors">
-                Terms of Service
-              </a>
-              <a href="#" className="text-gray-400 hover:text-cuci-primary text-sm transition-colors">
-                Investor Relations
-              </a>
+            <div className="flex flex-col sm:flex-row items-center space-y-4 sm:space-y-0 sm:space-x-6 mt-4 md:mt-0">
+              <div className="flex space-x-6">
+                <a href="#" className="text-gray-400 hover:text-cuci-primary text-sm transition-colors">
+                  Privacy Policy
+                </a>
+                <a href="#" className="text-gray-400 hover:text-cuci-primary text-sm transition-colors">
+                  Terms of Service
+                </a>
+              </div>
+              <button
+                onClick={() => {
+                  const element = document.getElementById('invest');
+                  if (element) {
+                    element.scrollIntoView({ behavior: 'smooth' });
+                  }
+                }}
+                className="bg-cuci-primary hover:bg-cuci-primary-dark text-white px-4 py-2 rounded-full text-sm font-medium transition-colors"
+              >
+                Get in Touch
+              </button>
             </div>
           </div>
         </div>

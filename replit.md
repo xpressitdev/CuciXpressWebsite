@@ -97,8 +97,11 @@ Cuci Xpress is a full-stack web application built for a car wash business that h
 - **Process Management**: Node.js process with proper error handling
 
 ## Changelog
-- June 24, 2025. Initial setup
+- June 24, 2025. Initial setup - Created complete landing page with purple/orange branding
+- June 24, 2025. Updated footer to use subtle "Get in Touch" button instead of direct investment ask
+- June 24, 2025. Fixed animation warnings in stats counter component
 
 ## User Preferences
 
 Preferred communication style: Simple, everyday language.
+Landing page style: Professional but not overly pushy for investments - subtle business inquiry approach preferred.
