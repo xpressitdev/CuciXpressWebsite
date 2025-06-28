@@ -17,7 +17,7 @@ export default function Hero() {
   };
 
   return (
-    <section id="home" className="relative pt-16 pb-20 lg:pt-20 lg:pb-28 overflow-hidden">
+    <section id="home" className="relative pt-24 pb-20 lg:pt-32 lg:pb-28 overflow-hidden">
       <div className="absolute inset-0 bg-gradient-to-br from-cuci-primary/10 to-cuci-secondary/10"></div>
       <div className="relative max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
         <div className="grid lg:grid-cols-2 gap-12 items-center">

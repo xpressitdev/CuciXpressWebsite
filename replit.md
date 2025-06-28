@@ -112,6 +112,7 @@ Cuci Xpress is a full-stack web application built for a car wash business that h
 - June 28, 2025. Restored "Car Wash Subscriptions" header and added green color for Elite Detail plan
 - June 28, 2025. Changed investment section to collaboration form supporting local businesses
 - June 28, 2025. Updated navigation to highlight Live-Queue button linking to cuci-xpress.com
+- June 28, 2025. Fixed hero section spacing by adding proper top padding from navigation bar
 
 ## User Preferences
 
