@@ -1,10 +1,27 @@
 import { motion } from "framer-motion";
+import { useLocation } from "wouter";
 
 export default function Footer() {
-  const scrollToSection = (sectionId: string) => {
-    const element = document.getElementById(sectionId);
-    if (element) {
-      element.scrollIntoView({ behavior: "smooth" });
+  const [location] = useLocation();
+
+  const handleNavigation = (sectionId: string) => {
+    if (sectionId === "home") {
+      // Navigate to home and scroll to top
+      if (location !== "/") {
+        window.location.href = "/";
+      } else {
+        window.scrollTo({ top: 0, behavior: "smooth" });
+      }
+    } else {
+      // For other sections, ensure we're on home page first
+      if (location !== "/") {
+        window.location.href = `/#${sectionId}`;
+      } else {
+        const element = document.getElementById(sectionId);
+        if (element) {
+          element.scrollIntoView({ behavior: "smooth" });
+        }
+      }
     }
   };
 
@@ -97,7 +114,7 @@ export default function Footer() {
               {quickLinks.map((link) => (
                 <li key={link.id}>
                   <button
-                    onClick={() => scrollToSection(link.id)}
+                    onClick={() => handleNavigation(link.id)}
                     className="text-gray-300 hover:text-cuci-primary transition-colors"
                   >
                     {link.label}
@@ -146,12 +163,7 @@ export default function Footer() {
                 </a>
               </div>
               <button
-                onClick={() => {
-                  const element = document.getElementById('invest');
-                  if (element) {
-                    element.scrollIntoView({ behavior: 'smooth' });
-                  }
-                }}
+                onClick={() => handleNavigation('invest')}
                 className="bg-cuci-primary hover:bg-cuci-primary-dark text-white px-4 py-2 rounded-full text-sm font-medium transition-colors"
               >
                 Get in Touch

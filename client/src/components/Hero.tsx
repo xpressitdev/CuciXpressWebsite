@@ -1,12 +1,18 @@
 import { motion } from "framer-motion";
 import { CheckCircle } from "lucide-react";
-import { Link } from "wouter";
+import { Link, useLocation } from "wouter";
 
 export default function Hero() {
-  const scrollToSection = (sectionId: string) => {
-    const element = document.getElementById(sectionId);
-    if (element) {
-      element.scrollIntoView({ behavior: "smooth" });
+  const [location] = useLocation();
+
+  const handleNavigation = (sectionId: string) => {
+    if (location !== "/") {
+      window.location.href = `/#${sectionId}`;
+    } else {
+      const element = document.getElementById(sectionId);
+      if (element) {
+        element.scrollIntoView({ behavior: "smooth" });
+      }
     }
   };
 
@@ -37,7 +43,7 @@ export default function Hero() {
               <motion.button
                 whileHover={{ scale: 1.05 }}
                 whileTap={{ scale: 0.95 }}
-                onClick={() => scrollToSection("locations")}
+                onClick={() => handleNavigation("locations")}
                 className="bg-cuci-primary hover:bg-cuci-primary-dark text-white px-8 py-4 rounded-full text-lg font-semibold transition-all shadow-lg"
               >
                 Find Our Locations

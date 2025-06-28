@@ -103,6 +103,8 @@ Cuci Xpress is a full-stack web application built for a car wash business that h
 - June 28, 2025. Added subscription pricing page with animated pricing cards
 - June 28, 2025. Updated navigation to include pricing page with proper routing
 - June 28, 2025. Enhanced hero section with subscription link button
+- June 28, 2025. Fixed all navigation buttons to work across pages and scroll to top when returning home
+- June 28, 2025. Updated footer buttons to use proper navigation with page routing support
 
 ## User Preferences
 
