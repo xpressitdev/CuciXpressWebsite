@@ -1,5 +1,5 @@
 import { motion } from "framer-motion";
-import { MapPin } from "lucide-react";
+import { MapPin, Navigation } from "lucide-react";
 
 interface LocationProps {
   name: string;
@@ -7,14 +7,15 @@ interface LocationProps {
   hours: string;
   bgColor: string;
   iconBg: string;
+  coordinates: {
+    lat: number;
+    lng: number;
+  };
 }
 
-function LocationCard({ name, address, hours, bgColor, iconBg }: LocationProps) {
-  const getAccentColor = () => {
-    if (iconBg.includes("cuci-primary")) return "#6C5CE7";
-    if (iconBg.includes("cuci-secondary")) return "#FFA500";
-    if (iconBg.includes("green")) return "#22C55E";
-    return "#3B82F6";
+function LocationCard({ name, address, hours, bgColor, iconBg, coordinates }: LocationProps) {
+  const getDirectionsUrl = () => {
+    return `https://www.google.com/maps/dir/?api=1&destination=${coordinates.lat},${coordinates.lng}&destination_place_id=${encodeURIComponent(name)}`;
   };
 
   return (
@@ -35,7 +36,14 @@ function LocationCard({ name, address, hours, bgColor, iconBg }: LocationProps) 
         <div className="flex-1">
           <h3 className="text-lg font-semibold text-gray-900 mb-2">{name}</h3>
           <p className="text-gray-600 mb-2">{address}</p>
-          <p className="text-sm text-gray-500">{hours}</p>
+          <p className="text-sm text-gray-500 mb-3">{hours}</p>
+          <button
+            onClick={() => window.open(getDirectionsUrl(), '_blank')}
+            className="inline-flex items-center space-x-2 text-sm font-medium text-cuci-primary hover:text-cuci-secondary transition-colors"
+          >
+            <Navigation className="w-4 h-4" />
+            <span>Get Directions</span>
+          </button>
         </div>
       </div>
     </motion.div>
@@ -50,6 +58,7 @@ export default function Locations() {
       hours: "Mon-Thu & Sat-Sun: 8:00 AM - 7:00 PM | Fri: 8:00 AM - 12:00 PM, 2:00 - 7:00 PM",
       bgColor: "bg-gradient-to-r from-cuci-primary/5 to-cuci-secondary/5",
       iconBg: "bg-cuci-primary",
+      coordinates: { lat: 4.9239572, lng: 114.9112738 }
     },
     {
       name: "Cuci Xpress Salar Link",
@@ -57,6 +66,7 @@ export default function Locations() {
       hours: "Daily: 8:00 AM - 7:00 PM",
       bgColor: "bg-gradient-to-r from-cuci-secondary/5 to-cuci-primary/5",
       iconBg: "bg-cuci-secondary",
+      coordinates: { lat: 4.8434285, lng: 114.8728321 }
     },
     {
       name: "Cuci Xpress Bengkurong Link",
@@ -64,6 +74,7 @@ export default function Locations() {
       hours: "Daily: 8:00 AM - 7:00 PM",
       bgColor: "bg-gradient-to-r from-green-500/5 to-blue-500/5",
       iconBg: "bg-green-500",
+      coordinates: { lat: 4.8500000, lng: 114.7500000 }
     },
     {
       name: "Cuci Xpress Tutong Link",
@@ -71,6 +82,7 @@ export default function Locations() {
       hours: "Daily: 8:00 AM - 7:00 PM",
       bgColor: "bg-gradient-to-r from-blue-500/5 to-purple-500/5",
       iconBg: "bg-blue-500",
+      coordinates: { lat: 4.8007081, lng: 114.6520481 }
     },
   ];
 
@@ -104,20 +116,27 @@ export default function Locations() {
             viewport={{ once: true }}
             className="bg-gray-100 rounded-2xl p-4"
           >
-            <div className="aspect-w-16 aspect-h-12 rounded-xl overflow-hidden">
-              <iframe
-                src="https://www.google.com/maps/embed?pb=!1m18!1m12!1m3!1d63652.13359375!2d114.85!3d4.87!2m3!1f0!2f0!3f0!3m2!1i1024!2i768!4f13.1!3m3!1m2!1s0x32217370a7b90975%3A0x60217b50a93d96d!2sBrunei-Muara%2C%20Brunei!5e0!3m2!1sen!2s!4v1640995200000!5m2!1sen!2s"
-                width="100%"
-                height="400"
-                style={{ border: 0 }}
-                allowFullScreen
-                loading="lazy"
-                referrerPolicy="no-referrer-when-downgrade"
-                className="rounded-xl"
-              />
-            </div>
-            <div className="mt-4 text-center">
-              <p className="text-sm text-gray-600">Find our 4 convenient locations across Brunei-Muara</p>
+            <div className="bg-gradient-to-br from-cuci-primary/10 to-cuci-secondary/10 rounded-xl p-8 text-center">
+              <div className="grid grid-cols-2 gap-4 mb-6">
+                {locations.map((location, index) => (
+                  <button
+                    key={index}
+                    onClick={() => window.open(`https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(location.name + ' ' + location.address)}`, '_blank')}
+                    className="bg-white p-3 rounded-lg shadow hover:shadow-md transition-shadow text-left"
+                  >
+                    <div className="flex items-center space-x-2">
+                      <div className={`p-2 rounded-full ${location.iconBg}`}>
+                        <MapPin className="w-4 h-4 text-white" />
+                      </div>
+                      <div>
+                        <p className="font-semibold text-sm text-gray-900">{location.name.replace('Cuci Xpress ', '')}</p>
+                        <p className="text-xs text-gray-600">{location.address.split(',')[0]}</p>
+                      </div>
+                    </div>
+                  </button>
+                ))}
+              </div>
+              <p className="text-sm text-gray-600">Click any location above to view on Google Maps</p>
             </div>
           </motion.div>
         </div>
