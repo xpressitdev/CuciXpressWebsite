@@ -41,11 +41,10 @@ export default function Navigation() {
 
   const navItems = [
     { id: "home", label: "Home", path: "/" },
-    { id: "stats", label: "Our Success", path: "/" },
-    { id: "testimonials", label: "Reviews", path: "/" },
-    { id: "locations", label: "Locations", path: "/" },
-    { id: "gallery", label: "Gallery", path: "/" },
     { id: "pricing", label: "Pricing", path: "/" },
+    { id: "membership", label: "Membership", path: "/" },
+    { id: "locations", label: "Locations", path: "/" },
+    { id: "testimonials", label: "Reviews", path: "/" },
   ];
 
   return (
