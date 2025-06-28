@@ -1,5 +1,6 @@
 import { motion } from "framer-motion";
 import { MapPin, Navigation } from "lucide-react";
+import locationMapSvg from "../assets/cuci-xpress-locations-map.svg";
 
 interface LocationProps {
   name: string;
@@ -116,13 +117,21 @@ export default function Locations() {
             viewport={{ once: true }}
             className="bg-gray-100 rounded-2xl p-4"
           >
-            <div className="bg-gradient-to-br from-cuci-primary/10 to-cuci-secondary/10 rounded-xl p-8 text-center">
-              <div className="grid grid-cols-2 gap-4 mb-6">
+            <div className="bg-white rounded-xl p-6">
+              <h3 className="text-xl font-semibold text-gray-900 mb-4 text-center">Our Strategic Locations</h3>
+              <div className="w-full max-w-2xl mx-auto">
+                <img 
+                  src="/src/assets/cuci-xpress-locations-map.svg" 
+                  alt="Cuci Xpress Locations Overview Map showing all 4 branches across Brunei"
+                  className="w-full h-auto rounded-lg shadow-sm"
+                />
+              </div>
+              <div className="grid grid-cols-2 gap-3 mt-6">
                 {locations.map((location, index) => (
                   <button
                     key={index}
                     onClick={() => window.open(`https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(location.name + ' ' + location.address)}`, '_blank')}
-                    className="bg-white p-3 rounded-lg shadow hover:shadow-md transition-shadow text-left"
+                    className="bg-gradient-to-r from-cuci-primary/10 to-cuci-secondary/10 p-3 rounded-lg hover:shadow-md transition-all text-left border border-gray-200"
                   >
                     <div className="flex items-center space-x-2">
                       <div className={`p-2 rounded-full ${location.iconBg}`}>
@@ -136,7 +145,7 @@ export default function Locations() {
                   </button>
                 ))}
               </div>
-              <p className="text-sm text-gray-600">Click any location above to view on Google Maps</p>
+              <p className="text-sm text-gray-600 text-center mt-4">Click any location to get directions on Google Maps</p>
             </div>
           </motion.div>
         </div>
