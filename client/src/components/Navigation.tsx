@@ -77,12 +77,14 @@ export default function Navigation() {
                   {item.label}
                 </button>
               ))}
-              <button
-                onClick={() => handleNavigation({ id: "invest", path: "/" })}
+              <a
+                href="https://cuci-xpress.com"
+                target="_blank"
+                rel="noopener noreferrer"
                 className="bg-cuci-primary hover:bg-cuci-primary-dark text-white px-6 py-2 rounded-full text-sm font-medium transition-colors"
               >
-                Invest
-              </button>
+                Live-Queue
+              </a>
             </div>
           </div>
 
