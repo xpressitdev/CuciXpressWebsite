@@ -164,7 +164,7 @@ export default function Footer() {
                 </a>
               </div>
               <button
-                onClick={() => handleNavigation('invest')}
+                onClick={() => handleNavigation('collaborate')}
                 className="bg-cuci-primary hover:bg-cuci-primary-dark text-white px-4 py-2 rounded-full text-sm font-medium transition-colors"
               >
                 Get in Touch
