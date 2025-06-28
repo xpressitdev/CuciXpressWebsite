@@ -85,10 +85,7 @@ export default function Footer() {
                 Cuci<span className="text-cuci-secondary">Xpress</span>
               </span>
             </div>
-            <p className="text-gray-300 mb-6 leading-relaxed">
-              Premium car wash service with 100,000+ satisfied customers across 4 locations.
-              Experience the difference of professional car care with cutting-edge technology.
-            </p>
+            <p className="text-gray-300 mb-6 leading-relaxed">Xpress car wash service with 100,000+ satisfied customers across 4 locations. Experience time saving quick and clean car wash.</p>
             <div className="flex space-x-4">
               {socialLinks.map((link, index) => (
                 <motion.a
