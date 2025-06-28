@@ -8,6 +8,7 @@ import { Textarea } from "@/components/ui/textarea";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { useToast } from "@/hooks/use-toast";
 import { apiRequest } from "@/lib/queryClient";
+import { Link } from "wouter";
 
 export default function Investment() {
   const [formData, setFormData] = useState({
@@ -98,9 +99,18 @@ export default function Investment() {
           className="text-center mb-12"
         >
           <h2 className="text-4xl font-bold text-gray-900 mb-4">Join Our Expansion Journey</h2>
-          <p className="text-xl text-gray-600 max-w-3xl mx-auto">
+          <p className="text-xl text-gray-600 max-w-3xl mx-auto mb-6">
             We're expanding to 10 branches and looking for partners who believe in our vision. Be part of our profitable growth story.
           </p>
+          <Link href="/pricing">
+            <motion.button
+              whileHover={{ scale: 1.05 }}
+              whileTap={{ scale: 0.95 }}
+              className="bg-cuci-secondary hover:bg-cuci-secondary-dark text-white px-6 py-3 rounded-full font-semibold transition-all shadow-lg"
+            >
+              View Our Subscription Plans
+            </motion.button>
+          </Link>
         </motion.div>
 
         <div className="grid lg:grid-cols-2 gap-12 items-center">

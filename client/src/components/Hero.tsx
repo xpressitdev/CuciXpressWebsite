@@ -1,5 +1,6 @@
 import { motion } from "framer-motion";
 import { CheckCircle } from "lucide-react";
+import { Link } from "wouter";
 
 export default function Hero() {
   const scrollToSection = (sectionId: string) => {
@@ -41,14 +42,15 @@ export default function Hero() {
               >
                 Find Our Locations
               </motion.button>
-              <motion.button
-                whileHover={{ scale: 1.05 }}
-                whileTap={{ scale: 0.95 }}
-                onClick={() => scrollToSection("invest")}
-                className="border-2 border-cuci-secondary text-cuci-secondary hover:bg-cuci-secondary hover:text-white px-8 py-4 rounded-full text-lg font-semibold transition-all"
-              >
-                Join Our Growth
-              </motion.button>
+              <Link href="/pricing">
+                <motion.button
+                  whileHover={{ scale: 1.05 }}
+                  whileTap={{ scale: 0.95 }}
+                  className="border-2 border-cuci-secondary text-cuci-secondary hover:bg-cuci-secondary hover:text-white px-8 py-4 rounded-full text-lg font-semibold transition-all"
+                >
+                  View Subscriptions
+                </motion.button>
+              </Link>
             </div>
           </motion.div>
           <motion.div
