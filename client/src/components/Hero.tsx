@@ -48,15 +48,14 @@ export default function Hero() {
               >
                 Find Our Locations
               </motion.button>
-              <Link href="/pricing">
-                <motion.button
-                  whileHover={{ scale: 1.05 }}
-                  whileTap={{ scale: 0.95 }}
-                  className="border-2 border-cuci-secondary text-cuci-secondary hover:bg-cuci-secondary hover:text-white px-8 py-4 rounded-full text-lg font-semibold transition-all"
-                >
-                  View Subscriptions
-                </motion.button>
-              </Link>
+              <motion.button
+                whileHover={{ scale: 1.05 }}
+                whileTap={{ scale: 0.95 }}
+                onClick={() => handleNavigation("pricing")}
+                className="border-2 border-cuci-secondary text-cuci-secondary hover:bg-cuci-secondary hover:text-white px-8 py-4 rounded-full text-lg font-semibold transition-all"
+              >
+                View Subscriptions
+              </motion.button>
             </div>
           </motion.div>
           <motion.div

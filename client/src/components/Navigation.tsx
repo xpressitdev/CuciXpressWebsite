@@ -45,7 +45,7 @@ export default function Navigation() {
     { id: "testimonials", label: "Reviews", path: "/" },
     { id: "locations", label: "Locations", path: "/" },
     { id: "gallery", label: "Gallery", path: "/" },
-    { id: "pricing", label: "Pricing", path: "/pricing" },
+    { id: "pricing", label: "Pricing", path: "/" },
   ];
 
   return (
@@ -69,23 +69,13 @@ export default function Navigation() {
           <div className="hidden md:block">
             <div className="ml-10 flex items-baseline space-x-8">
               {navItems.map((item) => (
-                item.path === "/pricing" ? (
-                  <Link
-                    key={item.id}
-                    href={item.path}
-                    className="text-gray-700 hover:text-cuci-primary px-3 py-2 text-sm font-medium transition-colors"
-                  >
-                    {item.label}
-                  </Link>
-                ) : (
-                  <button
-                    key={item.id}
-                    onClick={() => handleNavigation(item)}
-                    className="text-gray-700 hover:text-cuci-primary px-3 py-2 text-sm font-medium transition-colors"
-                  >
-                    {item.label}
-                  </button>
-                )
+                <button
+                  key={item.id}
+                  onClick={() => handleNavigation(item)}
+                  className="text-gray-700 hover:text-cuci-primary px-3 py-2 text-sm font-medium transition-colors"
+                >
+                  {item.label}
+                </button>
               ))}
               <button
                 onClick={() => handleNavigation({ id: "invest", path: "/" })}
@@ -122,24 +112,13 @@ export default function Navigation() {
         >
           <div className="px-2 pt-2 pb-3 space-y-1 sm:px-3">
             {navItems.map((item) => (
-              item.path === "/pricing" ? (
-                <Link
-                  key={item.id}
-                  href={item.path}
-                  className="block px-3 py-2 text-base font-medium text-gray-700 hover:text-cuci-primary transition-colors w-full text-left"
-                  onClick={() => setIsMobileMenuOpen(false)}
-                >
-                  {item.label}
-                </Link>
-              ) : (
-                <button
-                  key={item.id}
-                  onClick={() => handleNavigation(item)}
-                  className="block px-3 py-2 text-base font-medium text-gray-700 hover:text-cuci-primary transition-colors w-full text-left"
-                >
-                  {item.label}
-                </button>
-              )
+              <button
+                key={item.id}
+                onClick={() => handleNavigation(item)}
+                className="block px-3 py-2 text-base font-medium text-gray-700 hover:text-cuci-primary transition-colors w-full text-left"
+              >
+                {item.label}
+              </button>
             ))}
             <button
               onClick={() => handleNavigation({ id: "invest", path: "/" })}

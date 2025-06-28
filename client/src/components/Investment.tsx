@@ -102,15 +102,19 @@ export default function Investment() {
           <p className="text-xl text-gray-600 max-w-3xl mx-auto mb-6">
             We're expanding to 10 branches and looking for partners who believe in our vision. Be part of our profitable growth story.
           </p>
-          <Link href="/pricing">
-            <motion.button
-              whileHover={{ scale: 1.05 }}
-              whileTap={{ scale: 0.95 }}
-              className="bg-cuci-secondary hover:bg-cuci-secondary-dark text-white px-6 py-3 rounded-full font-semibold transition-all shadow-lg"
-            >
-              View Our Subscription Plans
-            </motion.button>
-          </Link>
+          <motion.button
+            whileHover={{ scale: 1.05 }}
+            whileTap={{ scale: 0.95 }}
+            onClick={() => {
+              const element = document.getElementById('pricing');
+              if (element) {
+                element.scrollIntoView({ behavior: 'smooth' });
+              }
+            }}
+            className="bg-cuci-secondary hover:bg-cuci-secondary-dark text-white px-6 py-3 rounded-full font-semibold transition-all shadow-lg"
+          >
+            View Our Subscription Plans
+          </motion.button>
         </motion.div>
 
         <div className="grid lg:grid-cols-2 gap-12 items-center">

@@ -4,6 +4,7 @@ import Stats from "@/components/Stats";
 import Testimonials from "@/components/Testimonials";
 import Locations from "@/components/Locations";
 import Gallery from "@/components/Gallery";
+import PricingSection from "@/components/PricingSection";
 import Investment from "@/components/Investment";
 import Footer from "@/components/Footer";
 
@@ -17,6 +18,7 @@ export default function Home() {
         <Testimonials />
         <Locations />
         <Gallery />
+        <PricingSection />
         <Investment />
       </main>
       <Footer />
