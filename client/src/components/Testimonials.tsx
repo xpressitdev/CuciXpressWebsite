@@ -144,23 +144,10 @@ export default function Testimonials() {
             className="text-center mb-16"
           >
             <h2 className="text-4xl font-bold text-gray-900 mb-4">What Our Customers Say</h2>
-            <div className="bg-blue-50 border border-blue-200 rounded-lg p-6 max-w-4xl mx-auto">
-              <p className="text-blue-800 font-semibold mb-3">Google Reviews Integration Status</p>
-              <div className="text-blue-700 space-y-2">
-                <p><strong>Current Issue:</strong> API key validation failed</p>
-                <div className="text-sm">
-                  <p><strong>Required Steps:</strong></p>
-                  <ul className="list-disc ml-5 space-y-1">
-                    <li>Enable Places API in Google Cloud Console</li>
-                    <li>Configure API key restrictions for Places API</li>
-                    <li>Ensure active billing account</li>
-                    <li>Wait 5-10 minutes for propagation</li>
-                  </ul>
-                </div>
-                <p className="text-xs text-blue-600 mt-3">
-                  Showing sample testimonials until Google Reviews are configured
-                </p>
-              </div>
+            <div className="bg-amber-50 border border-amber-200 rounded-lg p-4 max-w-2xl mx-auto">
+              <p className="text-amber-800 text-sm">
+                Temporarily showing recent customer testimonials while reviews load.
+              </p>
             </div>
           </motion.div>
           
