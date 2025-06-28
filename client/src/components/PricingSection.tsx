@@ -7,11 +7,10 @@ const pricingPlans = [
     monthlyPrice: 15,
     yearlyPrice: 144, // 20% discount
     features: [
-      "Exterior wash",
-      "Wheel cleaning",
-      "Basic interior vacuum",
-      "1 wash per month",
-      "Basic soap & rinse"
+      "Exterior Wash",
+      "Rinse & Dry",
+      "Basic Interior Vacuum",
+      "Tire Cleaning"
     ],
     accent: "#6C5CE7",
   },
@@ -20,12 +19,12 @@ const pricingPlans = [
     monthlyPrice: 35,
     yearlyPrice: 336, // 20% discount
     features: [
-      "Everything in Basic",
-      "Interior detailing",
-      "Dashboard cleaning",
-      "Tire shine",
-      "2 washes per month",
-      "Premium cleaning products"
+      "Full Exterior Detail",
+      "Deep Interior Clean",
+      "Wax Protection",
+      "Dashboard Polish",
+      "Window Cleaning",
+      "Priority Queue"
     ],
     isPopular: true,
     accent: "#FFA500",
@@ -36,15 +35,14 @@ const pricingPlans = [
     monthlyPrice: 65,
     yearlyPrice: 624, // 20% discount
     features: [
-      "Everything in Premium",
-      "Complete interior detailing",
-      "Leather conditioning",
-      "Engine bay cleaning",
-      "Unlimited monthly washes",
-      "Priority booking",
-      "Free pickup & delivery"
+      "Premium Detailing",
+      "Paint Protection",
+      "Leather Treatment",
+      "Engine Bay Clean",
+      "Unlimited Visits",
+      "VIP Service"
     ],
-    accent: "#6C5CE7",
+    accent: "#22C55E",
     rotation: 2,
   },
 ];
@@ -54,30 +52,13 @@ export default function PricingSection() {
     <section id="pricing" className="py-20 bg-white">
       <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
         <motion.div
-          initial={{ opacity: 0, y: 30 }}
-          whileInView={{ opacity: 1, y: 0 }}
-          transition={{ duration: 0.6 }}
-          viewport={{ once: true }}
-          className="text-center mb-16"
-        >
-          <h2 className="text-4xl md:text-5xl font-bold text-gray-900 mb-6">
-            Choose Your Perfect{" "}
-            <span className="text-cuci-primary">Car Care</span> Plan
-          </h2>
-          <p className="text-xl text-gray-600 max-w-3xl mx-auto">
-            From basic maintenance to premium detailing, we have subscription plans 
-            designed to keep your car looking its best all year round.
-          </p>
-        </motion.div>
-
-        <motion.div
           initial={{ opacity: 0, y: 50 }}
           whileInView={{ opacity: 1, y: 0 }}
           transition={{ duration: 0.8, delay: 0.2 }}
           viewport={{ once: true }}
         >
           <PricingContainer
-            title=""
+            title="Car Wash Subscriptions"
             plans={pricingPlans}
             className="max-w-6xl mx-auto"
           />
