@@ -201,9 +201,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
       })) || [];
 
       // Filter to show only 4-5 star reviews for representative customer experience
-      console.log('All reviews before filtering:', allReviews.map(r => `${r.name}: ${r.rating} stars`));
       const positiveReviews = allReviews.filter((review: ReviewData) => review.rating >= 4);
-      console.log('Positive reviews after filtering:', positiveReviews.map(r => `${r.name}: ${r.rating} stars`));
 
       res.json({
         reviews: positiveReviews.slice(0, 6), // Show latest 6 positive reviews
