@@ -124,20 +124,37 @@ export default function Investment() {
             transition={{ duration: 0.6 }}
             viewport={{ once: true }}
           >
-            <div className="bg-gradient-to-br from-cuci-primary/5 to-cuci-secondary/5 p-8 rounded-2xl">
-              <h3 className="text-2xl font-bold text-gray-900 mb-6">Why Collaborate with Us?</h3>
+            <div className="bg-white p-8 rounded-xl border-3 border-black shadow-[6px_6px_0px_0px_rgba(0,0,0,0.9)]">
+              <h3 className="text-2xl font-black text-black mb-6">Why Collaborate with Us?</h3>
               <ul className="space-y-4">
-                {benefits.map((benefit, index) => (
-                  <li key={index} className="flex items-start">
-                    <div className={`${benefit.color} p-2 rounded-full mr-4 mt-1`}>
-                      <Check className="w-4 h-4" />
-                    </div>
-                    <div>
-                      <p className="font-semibold text-gray-900">{benefit.title}</p>
-                      <p className="text-gray-600 text-sm">{benefit.description}</p>
-                    </div>
-                  </li>
-                ))}
+                {benefits.map((benefit, index) => {
+                  const getAccentColor = () => {
+                    if (benefit.color.includes("cuci-primary")) return "#6C5CE7";
+                    if (benefit.color.includes("cuci-secondary")) return "#FFA500";
+                    if (benefit.color.includes("green")) return "#22C55E";
+                    return "#3B82F6";
+                  };
+
+                  return (
+                    <motion.li 
+                      key={index} 
+                      className="flex items-start p-3 bg-gray-50 rounded-md border-2 border-black shadow-[2px_2px_0px_0px_rgba(0,0,0,0.9)]"
+                      whileHover={{ scale: 1.02, x: 5 }}
+                    >
+                      <motion.div 
+                        className="p-2 rounded-full mr-4 mt-1 border border-black shadow-[1px_1px_0px_0px_rgba(0,0,0,0.9)]"
+                        style={{ backgroundColor: getAccentColor() }}
+                        whileHover={{ scale: 1.1, rotate: 360 }}
+                      >
+                        <Check className="w-4 h-4 text-white" />
+                      </motion.div>
+                      <div>
+                        <p className="font-black text-black">{benefit.title}</p>
+                        <p className="text-gray-700 text-sm font-bold">{benefit.description}</p>
+                      </div>
+                    </motion.li>
+                  );
+                })}
               </ul>
             </div>
           </motion.div>
@@ -148,8 +165,8 @@ export default function Investment() {
             transition={{ duration: 0.6 }}
             viewport={{ once: true }}
           >
-            <div className="bg-white p-8 rounded-2xl shadow-lg border border-gray-100">
-              <h3 className="text-2xl font-bold text-gray-900 mb-6">Let's Collaborate</h3>
+            <div className="bg-white p-8 rounded-xl border-3 border-black shadow-[6px_6px_0px_0px_rgba(0,0,0,0.9)]">
+              <h3 className="text-2xl font-black text-black mb-6">Let's Collaborate</h3>
               <form onSubmit={handleSubmit} className="space-y-6">
                 <div>
                   <Label htmlFor="name">Full Name *</Label>
