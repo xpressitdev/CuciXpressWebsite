@@ -1,10 +1,12 @@
 import { useState, useEffect } from "react";
 import { motion } from "framer-motion";
 import { Menu, X } from "lucide-react";
+import { Link, useLocation } from "wouter";
 
 export default function Navigation() {
   const [isScrolled, setIsScrolled] = useState(false);
   const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false);
+  const [location] = useLocation();
 
   useEffect(() => {
     const handleScroll = () => {
@@ -24,11 +26,12 @@ export default function Navigation() {
   };
 
   const navItems = [
-    { id: "home", label: "Home" },
-    { id: "stats", label: "Our Success" },
-    { id: "testimonials", label: "Reviews" },
-    { id: "locations", label: "Locations" },
-    { id: "gallery", label: "Gallery" },
+    { id: "home", label: "Home", path: "/" },
+    { id: "stats", label: "Our Success", path: "/" },
+    { id: "testimonials", label: "Reviews", path: "/" },
+    { id: "locations", label: "Locations", path: "/" },
+    { id: "gallery", label: "Gallery", path: "/" },
+    { id: "pricing", label: "Pricing", path: "/pricing" },
   ];
 
   return (
@@ -49,13 +52,23 @@ export default function Navigation() {
           <div className="hidden md:block">
             <div className="ml-10 flex items-baseline space-x-8">
               {navItems.map((item) => (
-                <button
-                  key={item.id}
-                  onClick={() => scrollToSection(item.id)}
-                  className="text-gray-700 hover:text-cuci-primary px-3 py-2 text-sm font-medium transition-colors"
-                >
-                  {item.label}
-                </button>
+                item.path === "/pricing" ? (
+                  <Link
+                    key={item.id}
+                    href={item.path}
+                    className="text-gray-700 hover:text-cuci-primary px-3 py-2 text-sm font-medium transition-colors"
+                  >
+                    {item.label}
+                  </Link>
+                ) : (
+                  <button
+                    key={item.id}
+                    onClick={() => scrollToSection(item.id)}
+                    className="text-gray-700 hover:text-cuci-primary px-3 py-2 text-sm font-medium transition-colors"
+                  >
+                    {item.label}
+                  </button>
+                )
               ))}
               <button
                 onClick={() => scrollToSection("invest")}
@@ -92,13 +105,24 @@ export default function Navigation() {
         >
           <div className="px-2 pt-2 pb-3 space-y-1 sm:px-3">
             {navItems.map((item) => (
-              <button
-                key={item.id}
-                onClick={() => scrollToSection(item.id)}
-                className="block px-3 py-2 text-base font-medium text-gray-700 hover:text-cuci-primary transition-colors w-full text-left"
-              >
-                {item.label}
-              </button>
+              item.path === "/pricing" ? (
+                <Link
+                  key={item.id}
+                  href={item.path}
+                  className="block px-3 py-2 text-base font-medium text-gray-700 hover:text-cuci-primary transition-colors w-full text-left"
+                  onClick={() => setIsMobileMenuOpen(false)}
+                >
+                  {item.label}
+                </Link>
+              ) : (
+                <button
+                  key={item.id}
+                  onClick={() => scrollToSection(item.id)}
+                  className="block px-3 py-2 text-base font-medium text-gray-700 hover:text-cuci-primary transition-colors w-full text-left"
+                >
+                  {item.label}
+                </button>
+              )
             ))}
             <button
               onClick={() => scrollToSection("invest")}
