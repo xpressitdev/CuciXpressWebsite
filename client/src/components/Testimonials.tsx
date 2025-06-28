@@ -1,5 +1,6 @@
 import { motion } from "framer-motion";
 import { Star } from "lucide-react";
+import { useQuery } from "@tanstack/react-query";
 
 interface TestimonialProps {
   name: string;
@@ -61,32 +62,55 @@ function TestimonialCard({ name, role, content, rating, initials, bgColor }: Tes
 }
 
 export default function Testimonials() {
-  const testimonials = [
-    {
-      name: "Ahmad Hassan",
-      role: "Regular Customer",
-      content: "Absolutely amazing service! My car has never looked better. The team is professional and the facility is top-notch. I'm a customer for life!",
-      rating: 5,
-      initials: "AH",
-      bgColor: "bg-cuci-primary/10 text-cuci-primary",
-    },
-    {
-      name: "Sarah Wong",
-      role: "Business Owner",
-      content: "Quick, efficient, and excellent results every time. The staff is friendly and the online queue system is brilliant. Highly recommended!",
-      rating: 5,
-      initials: "SW",
-      bgColor: "bg-cuci-secondary/10 text-cuci-secondary",
-    },
-    {
-      name: "Raj Kumar",
-      role: "Fleet Manager",
-      content: "Consistently excellent service across all locations. I've tried them all and the quality never disappoints. Great value for money too!",
-      rating: 4,
-      initials: "RK",
-      bgColor: "bg-green-500/10 text-green-500",
-    },
-  ];
+  const { data, isLoading, error } = useQuery({
+    queryKey: ['/api/reviews'],
+    staleTime: 5 * 60 * 1000, // Cache for 5 minutes
+    retry: 2,
+  });
+
+  const testimonials = data?.reviews || [];
+
+  if (isLoading) {
+    return (
+      <section id="testimonials" className="py-20 bg-gray-50">
+        <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
+          <div className="text-center mb-16">
+            <h2 className="text-4xl font-bold text-gray-900 mb-4">What Our Customers Say</h2>
+            <p className="text-xl text-gray-600">Loading real Google reviews...</p>
+          </div>
+          <div className="grid md:grid-cols-2 lg:grid-cols-3 gap-8">
+            {[1, 2, 3].map((i) => (
+              <div key={i} className="bg-white p-8 rounded-2xl shadow-lg animate-pulse">
+                <div className="h-5 bg-gray-200 rounded mb-4"></div>
+                <div className="h-20 bg-gray-200 rounded mb-6"></div>
+                <div className="flex items-center">
+                  <div className="w-12 h-12 bg-gray-200 rounded-full mr-4"></div>
+                  <div>
+                    <div className="h-4 bg-gray-200 rounded mb-2 w-24"></div>
+                    <div className="h-3 bg-gray-200 rounded w-20"></div>
+                  </div>
+                </div>
+              </div>
+            ))}
+          </div>
+        </div>
+      </section>
+    );
+  }
+
+  if (error) {
+    return (
+      <section id="testimonials" className="py-20 bg-gray-50">
+        <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
+          <div className="text-center">
+            <h2 className="text-4xl font-bold text-gray-900 mb-4">What Our Customers Say</h2>
+            <p className="text-xl text-red-600">Unable to load Google reviews at this time.</p>
+            <p className="text-gray-600 mt-2">Please check your Google API configuration.</p>
+          </div>
+        </div>
+      </section>
+    );
+  }
 
   return (
     <section id="testimonials" className="py-20 bg-gray-50">
@@ -100,8 +124,25 @@ export default function Testimonials() {
         >
           <h2 className="text-4xl font-bold text-gray-900 mb-4">What Our Customers Say</h2>
           <p className="text-xl text-gray-600 max-w-3xl mx-auto">
-            Real reviews from satisfied customers who trust Cuci Xpress with their vehicles.
+            Real Google reviews from satisfied customers who trust Cuci Xpress with their vehicles.
           </p>
+          {data?.averageRating && (
+            <div className="flex items-center justify-center mt-4 space-x-2">
+              <div className="flex">
+                {Array.from({ length: 5 }).map((_, i) => (
+                  <Star
+                    key={i}
+                    className={`w-6 h-6 ${
+                      i < Math.round(data.averageRating) ? "text-yellow-400 fill-current" : "text-gray-300"
+                    }`}
+                  />
+                ))}
+              </div>
+              <span className="text-lg font-semibold text-gray-900">
+                {data.averageRating.toFixed(1)} ({data.totalReviews} reviews)
+              </span>
+            </div>
+          )}
         </motion.div>
 
         <div className="grid md:grid-cols-2 lg:grid-cols-3 gap-8">
