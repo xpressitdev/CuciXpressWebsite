@@ -174,8 +174,18 @@ export async function registerRoutes(app: Express): Promise<Server> {
         throw new Error(errorDetails);
       }
 
-      // Transform Google reviews to our format
-      const reviews = data.result.reviews?.map((review: any) => ({
+      // Transform Google reviews to our format and filter for positive reviews
+      interface ReviewData {
+        name: string;
+        role: string;
+        content: string;
+        rating: number;
+        initials: string;
+        bgColor: string;
+        date: string;
+      }
+
+      const allReviews: ReviewData[] = data.result.reviews?.map((review: any) => ({
         name: review.author_name,
         role: "Verified Customer",
         content: review.text,
@@ -190,8 +200,13 @@ export async function registerRoutes(app: Express): Promise<Server> {
         date: new Date(review.time * 1000).toLocaleDateString()
       })) || [];
 
+      // Filter to show only 4-5 star reviews for representative customer experience
+      console.log('All reviews before filtering:', allReviews.map(r => `${r.name}: ${r.rating} stars`));
+      const positiveReviews = allReviews.filter((review: ReviewData) => review.rating >= 4);
+      console.log('Positive reviews after filtering:', positiveReviews.map(r => `${r.name}: ${r.rating} stars`));
+
       res.json({
-        reviews: reviews.slice(0, 6), // Show latest 6 reviews
+        reviews: positiveReviews.slice(0, 6), // Show latest 6 positive reviews
         averageRating: data.result.rating,
         totalReviews: data.result.user_ratings_total
       });
