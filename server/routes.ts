@@ -95,6 +95,41 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
+  // Test Google API key endpoint
+  app.get("/api/test-google-api", async (req, res) => {
+    try {
+      const apiKey = process.env.GOOGLE_PLACES_API_KEY;
+      const placeId = process.env.GOOGLE_BUSINESS_PLACE_ID;
+
+      if (!apiKey || !placeId) {
+        return res.json({ 
+          status: "error",
+          message: "API credentials not configured" 
+        });
+      }
+
+      // Simple test request to verify API key
+      const response = await fetch(
+        `https://maps.googleapis.com/maps/api/place/details/json?place_id=${placeId}&fields=name,rating&key=${apiKey}`
+      );
+
+      const data = await response.json();
+      
+      res.json({
+        status: data.status,
+        message: data.status === "OK" ? "API key is working!" : data.error_message || "API error",
+        businessName: data.result?.name || "Not available",
+        rating: data.result?.rating || "Not available"
+      });
+
+    } catch (error) {
+      res.json({ 
+        status: "error",
+        message: error instanceof Error ? error.message : "Unknown error"
+      });
+    }
+  });
+
   // Google Reviews API endpoint
   app.get("/api/reviews", async (req, res) => {
     try {
@@ -150,6 +185,11 @@ export async function registerRoutes(app: Express): Promise<Server> {
         details: error instanceof Error ? error.message : "Unknown error"
       });
     }
+  });
+
+  // Serve diagnostic page for API testing
+  app.get("/diagnostic", (req, res) => {
+    res.sendFile(process.cwd() + "/diagnostic.html");
   });
 
   const httpServer = createServer(app);
