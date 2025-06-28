@@ -106,7 +106,7 @@ export default function Locations() {
           >
             <div className="aspect-w-16 aspect-h-12 rounded-xl overflow-hidden">
               <iframe
-                src="https://www.google.com/maps/embed?pb=!1m76!1m12!1m3!1d254747.5234375!2d114.65205!3d4.8639!2m3!1f0!2f0!3f0!3m2!1i1024!2i768!4f13.1!4m61!4e1!4m60!1m5!1m1!1s0x3220f8bfbf1f8c8b:0x363a1c6d6bb3c49c!2m2!1d114.9112738!2d4.9239572!1m5!1m1!1s0x3220ee0ac6a44b4d:0x4a2d2a2b0b2d2a2b!2m2!1d114.8728321!2d4.8434285!1m5!1m1!1s0x3220e3e5e5e5e5e5:0x5e5e5e5e5e5e5e5e!2m2!1d114.7500000!2d4.8500000!1m5!1m1!1s0x3220a0a0a0a0a0a0:0x6a6a6a6a6a6a6a6a!2m2!1d114.6520481!2d4.8007081!5e0!3m2!1sen!2s!4v1751120995000!5m2!1sen!2s"
+                src="https://www.google.com/maps/embed?pb=!1m18!1m12!1m3!1d63652.13359375!2d114.85!3d4.87!2m3!1f0!2f0!3f0!3m2!1i1024!2i768!4f13.1!3m3!1m2!1s0x32217370a7b90975%3A0x60217b50a93d96d!2sBrunei-Muara%2C%20Brunei!5e0!3m2!1sen!2s!4v1640995200000!5m2!1sen!2s"
                 width="100%"
                 height="400"
                 style={{ border: 0 }}
@@ -117,7 +117,7 @@ export default function Locations() {
               />
             </div>
             <div className="mt-4 text-center">
-              <p className="text-sm text-gray-600">Interactive map showing all our locations</p>
+              <p className="text-sm text-gray-600">Find our 4 convenient locations across Brunei-Muara</p>
             </div>
           </motion.div>
         </div>
