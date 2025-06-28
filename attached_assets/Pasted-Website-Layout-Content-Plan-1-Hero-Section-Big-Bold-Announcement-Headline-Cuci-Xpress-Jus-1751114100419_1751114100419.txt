@@ -1,0 +1,102 @@
+Website Layout & Content Plan
+🟪 1. Hero Section – Big, Bold Announcement
+Headline:
+
+Cuci Xpress Just Got a Major Upgrade.
+New locations. New features. Same 12-minute wash.
+
+Subheadline:
+
+Serving 100,000+ cars — now expanding with smarter payments, cleaner chemicals, and unlimited washing.
+
+CTA Buttons:
+🔘 View Pricing
+🔘 See New Locations
+🔘 Subscribe Now
+
+Include:
+🧼 Cars cleaned counter | 💰 Revenue or cost-saving | 📍 6 Branches by [Month]
+
+🧾 2. “What’s New” Section (Cards or Grid)
+Feature	Description
+🏁 New Branches	Now open in [Location A] & [Location B] — more convenience near you.
+💳 New Payment Options	Pay with Pocket, Ding, MyDST, Tarus, and Olive apps. Cashless, seamless.
+🧼 Premium Wash Chemicals	Partnered with Osren for deeper, shinier results.
+🔁 New Pricing	Basic Wash: $9
+📅 New Membership	Unlimited washes from only $30/month. Wash anytime, any branch.
+
+Design: Use a clean grid or 2-column layout with minimal icons (in purple/orange) and a short animated fade-in.
+
+💲 3. Pricing Section
+Headline:
+
+Transparent Pricing. No Surprises.
+
+Table Layout Example:
+
+Wash Type	Price	Description
+Basic Wash	$9	Quick exterior clean (machine + blow dry)
+Full Wash	$12	Basic Wash + hand detailing
+Membership	$30/mo	Unlimited washes. Any time. Any branch.
+
+CTA: 🔘 Compare Packages → leads to /membership
+
+💼 4. Membership Section
+Headline:
+
+Wash More. Pay Less.
+
+Details:
+
+Wash as many times as you want
+
+Use at any branch
+
+Skip queues (future perk)
+
+Cancel anytime
+
+CTA: 🔘 Subscribe Now → Form or contact page
+
+Include testimonials:
+
+“I wash my car 3x a week — it’s a no-brainer.”
+“I save money and time. Love it.”
+
+📍 5. Branch Locations (Interactive)
+Headline:
+
+6 Locations — and Counting.
+
+Embed Google Map with pins
+
+Display location cards (with address, hours, and buttons for "Get Directions")
+
+💬 6. Testimonials Section (Social Proof)
+Pull real quotes from Google Reviews (as you already do)
+
+Consider using star icons or emojis for visual boost
+
+📣 7. Investor or Franchise Teaser (Optional)
+Interested in becoming part of our next branch?
+We’re expanding. Join our journey.
+
+🔘 Learn more → /invest
+
+📞 8. Contact + Footer
+WhatsApp button
+
+Email: hello@cucixpress.com
+
+Socials (Instagram, TikTok)
+
+Legal + T&Cs (basic)
+
+🧭 Navigation Bar
+Link	Destination
+Home	/
+Pricing	/pricing
+Membership	/membership
+Locations	/#locations
+Live Queue	External to cuci-xpress.com
+Contact	/contact
