@@ -45,30 +45,30 @@ function LocationCard({ name, address, hours, bgColor, iconBg }: LocationProps) 
 export default function Locations() {
   const locations = [
     {
-      name: "Bandar Seri Begawan - Main Branch",
-      address: "Jalan Tutong, Bandar Seri Begawan BA1511",
-      hours: "Open: 7:00 AM - 9:00 PM Daily",
+      name: "Cuci Xpress Tungku Link",
+      address: "A6, Ground Floor, Block A, Eng Ho Complex, Spg. 217-5-54 Jalan Lebuhraya Tungku, BE3119",
+      hours: "Mon-Thu & Sat-Sun: 8:00 AM - 7:00 PM | Fri: 8:00 AM - 12:00 PM, 2:00 - 7:00 PM",
       bgColor: "bg-gradient-to-r from-cuci-primary/5 to-cuci-secondary/5",
       iconBg: "bg-cuci-primary",
     },
     {
-      name: "Kiulap Branch",
-      address: "Kiulap Plaza, Jalan Kiulap BE1518",
-      hours: "Open: 8:00 AM - 8:00 PM Daily",
+      name: "Cuci Xpress Salar Link",
+      address: "Unit 12, Ground Floor, Block A, Rimba Point, Gadong BE4119",
+      hours: "Daily: 8:00 AM - 7:00 PM",
       bgColor: "bg-gradient-to-r from-cuci-secondary/5 to-cuci-primary/5",
       iconBg: "bg-cuci-secondary",
     },
     {
-      name: "Gadong Branch",
-      address: "Times Square, Jalan Gadong BE3519",
-      hours: "Open: 8:00 AM - 10:00 PM Daily",
+      name: "Cuci Xpress Bengkurong Link",
+      address: "Unit 4, Ground Floor, Block B, Bengkurong Shopping Complex, Brunei-Muara BF2320",
+      hours: "Daily: 8:00 AM - 7:00 PM",
       bgColor: "bg-gradient-to-r from-green-500/5 to-blue-500/5",
       iconBg: "bg-green-500",
     },
     {
-      name: "Seria Branch",
-      address: "Seria Plaza, Jalan Seria KB1133",
-      hours: "Open: 7:30 AM - 8:30 PM Daily",
+      name: "Cuci Xpress Tutong Link",
+      address: "Unit 5, Ground Floor, Block A, Fatimah Ahmad Complex, Tutong TA2341",
+      hours: "Daily: 8:00 AM - 7:00 PM",
       bgColor: "bg-gradient-to-r from-blue-500/5 to-purple-500/5",
       iconBg: "bg-blue-500",
     },
@@ -106,7 +106,7 @@ export default function Locations() {
           >
             <div className="aspect-w-16 aspect-h-12 rounded-xl overflow-hidden">
               <iframe
-                src="https://www.google.com/maps/embed?pb=!1m18!1m12!1m3!1d126743.63241384779!2d114.82732019726562!3d4.535276900000002!2m3!1f0!2f0!3f0!3m2!1i1024!2i768!4f13.1!3m3!1m2!1s0x3220d70e4d0b0129%3A0x9a55d20d7b98b25a!2sBandar%20Seri%20Begawan%2C%20Brunei!5e0!3m2!1sen!2s!4v1234567890123!5m2!1sen!2s"
+                src="https://www.google.com/maps/embed?pb=!1m76!1m12!1m3!1d254747.5234375!2d114.65205!3d4.8639!2m3!1f0!2f0!3f0!3m2!1i1024!2i768!4f13.1!4m61!4e1!4m60!1m5!1m1!1s0x3220f8bfbf1f8c8b:0x363a1c6d6bb3c49c!2m2!1d114.9112738!2d4.9239572!1m5!1m1!1s0x3220ee0ac6a44b4d:0x4a2d2a2b0b2d2a2b!2m2!1d114.8728321!2d4.8434285!1m5!1m1!1s0x3220e3e5e5e5e5e5:0x5e5e5e5e5e5e5e5e!2m2!1d114.7500000!2d4.8500000!1m5!1m1!1s0x3220a0a0a0a0a0a0:0x6a6a6a6a6a6a6a6a!2m2!1d114.6520481!2d4.8007081!5e0!3m2!1sen!2s!4v1751120995000!5m2!1sen!2s"
                 width="100%"
                 height="400"
                 style={{ border: 0 }}

@@ -116,6 +116,7 @@ Cuci Xpress is a full-stack web application built for a car wash business that h
 - June 28, 2025. Applied selective bold design style - kept clean design for Stats, Testimonials, Locations, and Gallery sections while maintaining bold styling for Hero, Pricing, and Collaboration components
 - June 28, 2025. Integrated Google Reviews API for authentic customer testimonials with comprehensive error handling, diagnostic tools, and fallback content for API configuration issues
 - June 28, 2025. Implemented review filtering to display only 4-5 star reviews, excluding resolved customer service cases for representative experience showcase
+- June 28, 2025. Updated all 4 shop locations with authentic Google Maps data: Tungku Link, Salar Link, Bengkurong Link, and Tutong Link with real addresses and operating hours
 
 ## User Preferences
 
