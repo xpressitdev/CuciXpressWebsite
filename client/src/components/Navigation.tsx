@@ -17,10 +17,24 @@ export default function Navigation() {
     return () => window.removeEventListener("scroll", handleScroll);
   }, []);
 
-  const scrollToSection = (sectionId: string) => {
-    const element = document.getElementById(sectionId);
-    if (element) {
-      element.scrollIntoView({ behavior: "smooth" });
+  const handleNavigation = (item: { id: string; path: string }) => {
+    if (item.id === "home") {
+      // Navigate to home and scroll to top
+      if (location !== "/") {
+        window.location.href = "/";
+      } else {
+        window.scrollTo({ top: 0, behavior: "smooth" });
+      }
+    } else if (item.path === "/") {
+      // For home page sections, ensure we're on home page first
+      if (location !== "/") {
+        window.location.href = `/#${item.id}`;
+      } else {
+        const element = document.getElementById(item.id);
+        if (element) {
+          element.scrollIntoView({ behavior: "smooth" });
+        }
+      }
     }
     setIsMobileMenuOpen(false);
   };
@@ -43,9 +57,12 @@ export default function Navigation() {
       <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
         <div className="flex justify-between items-center h-16">
           <div className="flex items-center">
-            <span className="text-2xl font-bold text-cuci-primary">
+            <button 
+              onClick={() => handleNavigation({ id: "home", path: "/" })}
+              className="text-2xl font-bold text-cuci-primary hover:opacity-80 transition-opacity"
+            >
               Cuci<span className="text-cuci-secondary">Xpress</span>
-            </span>
+            </button>
           </div>
 
           {/* Desktop Navigation */}
@@ -63,7 +80,7 @@ export default function Navigation() {
                 ) : (
                   <button
                     key={item.id}
-                    onClick={() => scrollToSection(item.id)}
+                    onClick={() => handleNavigation(item)}
                     className="text-gray-700 hover:text-cuci-primary px-3 py-2 text-sm font-medium transition-colors"
                   >
                     {item.label}
@@ -71,7 +88,7 @@ export default function Navigation() {
                 )
               ))}
               <button
-                onClick={() => scrollToSection("invest")}
+                onClick={() => handleNavigation({ id: "invest", path: "/" })}
                 className="bg-cuci-primary hover:bg-cuci-primary-dark text-white px-6 py-2 rounded-full text-sm font-medium transition-colors"
               >
                 Invest
@@ -117,7 +134,7 @@ export default function Navigation() {
               ) : (
                 <button
                   key={item.id}
-                  onClick={() => scrollToSection(item.id)}
+                  onClick={() => handleNavigation(item)}
                   className="block px-3 py-2 text-base font-medium text-gray-700 hover:text-cuci-primary transition-colors w-full text-left"
                 >
                   {item.label}
@@ -125,7 +142,7 @@ export default function Navigation() {
               )
             ))}
             <button
-              onClick={() => scrollToSection("invest")}
+              onClick={() => handleNavigation({ id: "invest", path: "/" })}
               className="block bg-cuci-primary hover:bg-cuci-primary-dark text-white px-6 py-2 rounded-full text-base font-medium transition-colors mx-3 my-2 text-center w-auto"
             >
               Invest
