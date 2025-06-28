@@ -34,13 +34,26 @@ function StatCard({ icon, value, label, prefix = "", suffix = "", color, bgColor
       initial={{ opacity: 0, y: 50 }}
       animate={isVisible ? { opacity: 1, y: 0 } : { opacity: 0, y: 50 }}
       transition={{ duration: 0.6 }}
-      className={`text-center p-8 ${bgColor} rounded-2xl`}
+      className="text-center p-8 bg-white rounded-xl border-3 border-black shadow-[6px_6px_0px_0px_rgba(0,0,0,0.9)] hover:shadow-[8px_8px_0px_0px_rgba(0,0,0,0.9)] transition-all duration-200"
+      whileHover={{ scale: 1.02 }}
     >
-      <div className={`inline-flex items-center justify-center w-16 h-16 ${color}/10 rounded-full mb-6`}>
-        <div className={`${color} w-8 h-8`}>{icon}</div>
-      </div>
+      <motion.div 
+        className="inline-flex items-center justify-center w-16 h-16 rounded-full mb-6 border-2 border-black shadow-[3px_3px_0px_0px_rgba(0,0,0,0.9)]"
+        style={{ backgroundColor: color === "text-cuci-primary" ? "#6C5CE7" : color === "text-cuci-secondary" ? "#FFA500" : "#22C55E" }}
+        animate={{
+          rotate: [0, 10, 0, -10, 0],
+          scale: [1, 1.1, 0.9, 1.1, 1]
+        }}
+        transition={{
+          duration: 5,
+          repeat: Infinity,
+          ease: [0.76, 0, 0.24, 1]
+        }}
+      >
+        <div className="text-white w-8 h-8 flex items-center justify-center">{icon}</div>
+      </motion.div>
       <motion.div
-        className={`text-4xl font-bold ${color} mb-2`}
+        className="text-4xl font-black text-black mb-2"
         initial={{ opacity: 0 }}
         animate={isVisible ? { opacity: 1 } : { opacity: 0 }}
         transition={{ duration: 1, delay: 0.3 }}
@@ -55,7 +68,7 @@ function StatCard({ icon, value, label, prefix = "", suffix = "", color, bgColor
           />
         )}
       </motion.div>
-      <p className="text-gray-600 font-medium">{label}</p>
+      <p className="text-black font-bold">{label}</p>
     </motion.div>
   );
 }

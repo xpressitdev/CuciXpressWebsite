@@ -41,20 +41,32 @@ export default function Hero() {
             </p>
             <div className="flex flex-col sm:flex-row gap-4 justify-center lg:justify-start">
               <motion.button
-                whileHover={{ scale: 1.05 }}
-                whileTap={{ scale: 0.95 }}
+                whileHover={{ 
+                  scale: 1.02,
+                  boxShadow: "6px 6px 0px 0px rgba(0,0,0,0.9)"
+                }}
+                whileTap={{ 
+                  scale: 0.95,
+                  boxShadow: "2px 2px 0px 0px rgba(0,0,0,0.9)"
+                }}
                 onClick={() => handleNavigation("locations")}
-                className="bg-cuci-primary hover:bg-cuci-primary-dark text-white px-8 py-4 rounded-full text-lg font-semibold transition-all shadow-lg"
+                className="bg-cuci-primary text-white px-8 py-4 rounded-lg text-lg font-black border-2 border-black shadow-[4px_4px_0px_0px_rgba(0,0,0,0.9)] transition-all duration-200"
               >
-                Find Our Locations
+                Find Our Locations →
               </motion.button>
               <motion.button
-                whileHover={{ scale: 1.05 }}
-                whileTap={{ scale: 0.95 }}
+                whileHover={{ 
+                  scale: 1.02,
+                  boxShadow: "6px 6px 0px 0px rgba(0,0,0,0.9)"
+                }}
+                whileTap={{ 
+                  scale: 0.95,
+                  boxShadow: "2px 2px 0px 0px rgba(0,0,0,0.9)"
+                }}
                 onClick={() => handleNavigation("pricing")}
-                className="border-2 border-cuci-secondary text-cuci-secondary hover:bg-cuci-secondary hover:text-white px-8 py-4 rounded-full text-lg font-semibold transition-all"
+                className="bg-cuci-secondary text-white px-8 py-4 rounded-lg text-lg font-black border-2 border-black shadow-[4px_4px_0px_0px_rgba(0,0,0,0.9)] transition-all duration-200"
               >
-                View Subscriptions
+                View Subscriptions →
               </motion.button>
             </div>
           </motion.div>

@@ -63,13 +63,16 @@ export default function Gallery() {
               whileInView={{ opacity: 1, scale: 1 }}
               transition={{ duration: 0.6, delay: index * 0.1 }}
               viewport={{ once: true }}
-              whileHover={{ scale: 1.02 }}
+              whileHover={{ 
+                scale: 1.02,
+                boxShadow: "8px 8px 0px 0px rgba(0,0,0,0.9)"
+              }}
               className={image.span}
             >
               <img
                 src={image.src}
                 alt={image.alt}
-                className="w-full h-full object-cover rounded-2xl shadow-lg hover:shadow-xl transition-shadow"
+                className="w-full h-full object-cover rounded-xl border-3 border-black shadow-[6px_6px_0px_0px_rgba(0,0,0,0.9)] transition-all duration-200"
               />
             </motion.div>
           ))}

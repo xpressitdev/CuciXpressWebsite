@@ -11,36 +11,74 @@ interface TestimonialProps {
 }
 
 function TestimonialCard({ name, role, content, rating, initials, bgColor }: TestimonialProps) {
+  const getAccentColor = () => {
+    if (bgColor.includes("cuci-primary")) return "#6C5CE7";
+    if (bgColor.includes("cuci-secondary")) return "#FFA500";
+    return "#22C55E";
+  };
+
   return (
     <motion.div
       initial={{ opacity: 0, y: 50 }}
       whileInView={{ opacity: 1, y: 0 }}
       transition={{ duration: 0.6 }}
       viewport={{ once: true }}
-      className="bg-white p-8 rounded-2xl shadow-lg"
+      className="bg-white p-8 rounded-xl border-3 border-black shadow-[6px_6px_0px_0px_rgba(0,0,0,0.9)] hover:shadow-[8px_8px_0px_0px_rgba(0,0,0,0.9)] transition-all duration-200 relative"
+      whileHover={{ scale: 1.02 }}
     >
+      {/* Rating Badge */}
+      <motion.div
+        className="absolute -top-4 -right-4 w-12 h-12 rounded-full flex items-center justify-center border-2 border-black shadow-[3px_3px_0px_0px_rgba(0,0,0,0.9)]"
+        style={{ backgroundColor: getAccentColor() }}
+        animate={{
+          rotate: [0, 10, 0, -10, 0]
+        }}
+        transition={{
+          duration: 4,
+          repeat: Infinity,
+          ease: [0.76, 0, 0.24, 1]
+        }}
+      >
+        <div className="text-center text-white">
+          <div className="text-sm font-black">{rating}</div>
+          <Star className="w-3 h-3 fill-current" />
+        </div>
+      </motion.div>
+
       <div className="flex items-center mb-4">
-        <div className="flex text-yellow-400">
+        <div className="flex gap-1">
           {Array.from({ length: 5 }).map((_, i) => (
-            <Star
+            <motion.div
               key={i}
-              className={`w-5 h-5 ${
-                i < rating ? "fill-current" : "text-gray-300"
-              }`}
-            />
+              whileHover={{ scale: 1.2, rotate: 180 }}
+              className={`w-6 h-6 rounded-md border border-black flex items-center justify-center text-xs font-bold shadow-[1px_1px_0px_0px_rgba(0,0,0,0.9)]`}
+              style={{ 
+                backgroundColor: i < rating ? getAccentColor() : "#f3f4f6",
+                color: i < rating ? "white" : "#9ca3af"
+              }}
+            >
+              ★
+            </motion.div>
           ))}
         </div>
       </div>
-      <blockquote className="text-gray-700 mb-6 text-lg leading-relaxed">
+      
+      <blockquote className="text-black mb-6 text-lg leading-relaxed font-bold">
         "{content}"
       </blockquote>
+      
       <div className="flex items-center">
-        <div className={`w-12 h-12 ${bgColor} rounded-full flex items-center justify-center mr-4`}>
-          <span className="font-semibold">{initials}</span>
-        </div>
+        <motion.div 
+          className="w-12 h-12 rounded-full flex items-center justify-center mr-4 border-2 border-black shadow-[2px_2px_0px_0px_rgba(0,0,0,0.9)]"
+          style={{ backgroundColor: getAccentColor() }}
+          whileHover={{ scale: 1.1, rotate: 360 }}
+          transition={{ duration: 0.3 }}
+        >
+          <span className="font-black text-white">{initials}</span>
+        </motion.div>
         <div>
-          <p className="font-semibold text-gray-900">{name}</p>
-          <p className="text-gray-600 text-sm">{role}</p>
+          <p className="font-black text-black">{name}</p>
+          <p className="text-gray-600 text-sm font-bold">{role}</p>
         </div>
       </div>
     </motion.div>

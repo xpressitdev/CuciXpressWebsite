@@ -218,13 +218,15 @@ export default function Investment() {
                   />
                 </div>
 
-                <Button
+                <motion.button
                   type="submit"
                   disabled={isSubmitting}
-                  className="w-full bg-gradient-to-r from-cuci-primary to-cuci-secondary hover:from-cuci-primary-dark hover:to-cuci-secondary-dark text-white px-8 py-4 rounded-lg text-lg font-semibold transition-all shadow-lg"
+                  className="w-full bg-cuci-primary text-white px-8 py-4 rounded-lg text-lg font-black border-2 border-black shadow-[4px_4px_0px_0px_rgba(0,0,0,0.9)] hover:shadow-[6px_6px_0px_0px_rgba(0,0,0,0.9)] active:shadow-[2px_2px_0px_0px_rgba(0,0,0,0.9)] transition-all duration-200"
+                  whileHover={{ scale: 1.02 }}
+                  whileTap={{ scale: 0.95 }}
                 >
-                  {isSubmitting ? "Submitting..." : "Send Collaboration Request"}
-                </Button>
+                  {isSubmitting ? "Submitting..." : "Send Collaboration Request →"}
+                </motion.button>
               </form>
 
               <div className="mt-6 pt-6 border-t border-gray-200">

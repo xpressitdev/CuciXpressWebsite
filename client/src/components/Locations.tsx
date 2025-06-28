@@ -10,22 +10,48 @@ interface LocationProps {
 }
 
 function LocationCard({ name, address, hours, bgColor, iconBg }: LocationProps) {
+  const getAccentColor = () => {
+    if (iconBg.includes("cuci-primary")) return "#6C5CE7";
+    if (iconBg.includes("cuci-secondary")) return "#FFA500";
+    if (iconBg.includes("green")) return "#22C55E";
+    return "#3B82F6";
+  };
+
   return (
     <motion.div
       initial={{ opacity: 0, x: -30 }}
       whileInView={{ opacity: 1, x: 0 }}
       transition={{ duration: 0.6 }}
       viewport={{ once: true }}
-      className={`${bgColor} p-6 rounded-xl border border-gray-100`}
+      className="bg-white p-6 rounded-xl border-3 border-black shadow-[6px_6px_0px_0px_rgba(0,0,0,0.9)] hover:shadow-[8px_8px_0px_0px_rgba(0,0,0,0.9)] transition-all duration-200"
+      whileHover={{ scale: 1.02 }}
     >
       <div className="flex items-start space-x-4">
-        <div className={`${iconBg} p-3 rounded-full`}>
+        <motion.div 
+          className="p-3 rounded-full border-2 border-black shadow-[3px_3px_0px_0px_rgba(0,0,0,0.9)]"
+          style={{ backgroundColor: getAccentColor() }}
+          animate={{
+            rotate: [0, 10, 0, -10, 0],
+            scale: [1, 1.1, 0.9, 1.1, 1]
+          }}
+          transition={{
+            duration: 5,
+            repeat: Infinity,
+            ease: [0.76, 0, 0.24, 1]
+          }}
+        >
           <MapPin className="w-6 h-6 text-white" />
-        </div>
+        </motion.div>
         <div className="flex-1">
-          <h3 className="text-lg font-semibold text-gray-900 mb-2">{name}</h3>
-          <p className="text-gray-600 mb-2">{address}</p>
-          <p className="text-sm text-gray-500">{hours}</p>
+          <h3 className="text-lg font-black text-black mb-2">{name}</h3>
+          <p className="text-gray-700 mb-2 font-bold">{address}</p>
+          <motion.p 
+            className="text-sm text-white font-bold px-3 py-1 rounded-md border border-black shadow-[2px_2px_0px_0px_rgba(0,0,0,0.9)] inline-block"
+            style={{ backgroundColor: getAccentColor() }}
+            whileHover={{ scale: 1.05 }}
+          >
+            {hours}
+          </motion.p>
         </div>
       </div>
     </motion.div>
