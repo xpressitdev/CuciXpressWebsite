@@ -171,11 +171,10 @@ const PricingCard = ({
         >
             {/* Price Badge */}
             <motion.div
-                className={cn(
-                    `absolute -top-4 -right-4 w-16 h-16 
+                className="absolute -top-4 -right-4 w-16 h-16 
                     rounded-full flex items-center justify-center border-2 border-black
-                    shadow-[3px_3px_0px_0px_rgba(0,0,0,0.9)]`
-                    , plan.accent)}
+                    shadow-[3px_3px_0px_0px_rgba(0,0,0,0.9)]"
+                style={{ backgroundColor: plan.accent }}
                 animate={{
                     rotate: [0, 10, 0, -10, 0],
                     scale: [1, 1.1, 0.9, 1.1, 1],
@@ -200,11 +199,10 @@ const PricingCard = ({
                 <h3 className="text-xl font-black text-black mb-2">{plan.name}</h3>
                 {plan.isPopular && (
                     <motion.span
-                        className={cn(
-                            `inline-block px-3 py-1 text-white
+                        className="inline-block px-3 py-1 text-white
                             font-bold rounded-md text-xs border-2 border-black
-                            shadow-[2px_2px_0px_0px_rgba(0,0,0,0.9)]`
-                            , plan.accent)}
+                            shadow-[2px_2px_0px_0px_rgba(0,0,0,0.9)]"
+                        style={{ backgroundColor: plan.accent }}
                         animate={{
                             y: [0, -3, 0],
                             scale: [1, 1.05, 1]
@@ -237,11 +235,10 @@ const PricingCard = ({
                     >
                         <motion.span
                             whileHover={{ scale: 1.2, rotate: 360 }}
-                            className={cn(
-                                `w-5 h-5 rounded-md  flex items-center justify-center
+                            className="w-5 h-5 rounded-md flex items-center justify-center
                                 text-white font-bold text-xs border border-black
-                                shadow-[1px_1px_0px_0px_rgba(0,0,0,0.9)]`
-                                , plan.accent)}
+                                shadow-[1px_1px_0px_0px_rgba(0,0,0,0.9)]"
+                            style={{ backgroundColor: plan.accent }}
                         >
                             ✓
                         </motion.span>
@@ -252,13 +249,12 @@ const PricingCard = ({
 
             {/* CTA Button */}
             <motion.button
-                className={cn(
-                    `w-full py-2 rounded-lg  text-white font-black text-sm
+                className="w-full py-2 rounded-lg text-white font-black text-sm
                     border-2 border-black shadow-[4px_4px_0px_0px_rgba(0,0,0,0.9)]
                     hover:shadow-[6px_6px_0px_0px_rgba(0,0,0,0.9)]
                     active:shadow-[2px_2px_0px_0px_rgba(0,0,0,0.9)]
-                    transition-all duration-200`
-                    , plan.accent)}
+                    transition-all duration-200"
+                style={{ backgroundColor: plan.accent }}
                 whileHover={{
                     scale: 1.02,
                     transition: { duration: 0.2 }
