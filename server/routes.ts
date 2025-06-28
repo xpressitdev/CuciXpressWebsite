@@ -153,7 +153,25 @@ export async function registerRoutes(app: Express): Promise<Server> {
       const data = await response.json();
 
       if (data.status !== "OK") {
-        throw new Error(`Google API status: ${data.status}`);
+        let errorDetails = `Status: ${data.status}`;
+        if (data.error_message) {
+          errorDetails += ` - ${data.error_message}`;
+        }
+        
+        // Provide specific guidance based on error type
+        if (data.status === "REQUEST_DENIED") {
+          if (data.error_message?.includes("invalid")) {
+            errorDetails += " (Check: API key validity, Places API enabled, billing active)";
+          } else {
+            errorDetails += " (Check: API restrictions, domain allowlist)";
+          }
+        } else if (data.status === "OVER_QUERY_LIMIT") {
+          errorDetails += " (API quota exceeded)";
+        } else if (data.status === "INVALID_REQUEST") {
+          errorDetails += " (Check Place ID format)";
+        }
+        
+        throw new Error(errorDetails);
       }
 
       // Transform Google reviews to our format
