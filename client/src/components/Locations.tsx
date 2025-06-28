@@ -121,7 +121,7 @@ export default function Locations() {
               <h3 className="text-xl font-semibold text-gray-900 mb-4 text-center">Our Strategic Locations</h3>
               <div className="w-full max-w-2xl mx-auto">
                 <img 
-                  src="/src/assets/cuci-xpress-locations-map.svg" 
+                  src={locationMapSvg} 
                   alt="Cuci Xpress Locations Overview Map showing all 4 branches across Brunei"
                   className="w-full h-auto rounded-lg shadow-sm"
                 />
