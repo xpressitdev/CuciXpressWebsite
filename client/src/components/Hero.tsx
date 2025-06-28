@@ -92,7 +92,7 @@ export default function Hero() {
                   <CheckCircle className="w-8 h-8 text-cuci-primary" />
                 </div>
                 <div>
-                  <p className="text-sm text-gray-600">Premium Quality</p>
+                  <p className="text-sm text-gray-600">Xpress, Convinient, Clean</p>
                   <p className="font-semibold text-gray-900">Guaranteed</p>
                 </div>
               </div>
