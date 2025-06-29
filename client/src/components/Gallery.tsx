@@ -3,7 +3,7 @@ import carWashBay from "@assets/WhatsApp Image 2025-06-26 at 23.35.45_3b66e14a_1
 import storefront from "@assets/WhatsApp Image 2025-06-26 at 23.11.24_5946c0a8_1751160533115.jpg";
 import washTunnel from "@assets/20220928_2008581_1751160753598.jpg";
 import nightView from "@assets/20241007_182239_1751160790928.jpg";
-import handWashing from "@assets/IMG-20220115-WA0070_1751160949647.jpg";
+import dingPayment from "@assets/ding pgh_1751161276778.png";
 import dualWash from "@assets/IMG-20220108-WA0042_1751160949648.jpg";
 
 export default function Gallery() {
@@ -29,8 +29,8 @@ export default function Gallery() {
       span: "col-span-1 row-span-1",
     },
     {
-      src: handWashing,
-      alt: "Professional team hand-washing white Honda sedan with branded Cuci Xpress logo",
+      src: dingPayment,
+      alt: "Smiling Cuci Xpress team member providing friendly service with 'pay with ding!' digital payment option",
       span: "col-span-1 row-span-1",
     },
     {
