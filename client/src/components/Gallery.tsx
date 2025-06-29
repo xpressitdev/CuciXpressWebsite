@@ -1,34 +1,40 @@
 import { motion } from "framer-motion";
+import carWashBay from "@assets/WhatsApp Image 2025-06-26 at 23.35.45_3b66e14a_1751160530356.jpg";
+import storefront from "@assets/WhatsApp Image 2025-06-26 at 23.11.24_5946c0a8_1751160533115.jpg";
+import washTunnel from "@assets/20220928_2008581_1751160753598.jpg";
+import nightView from "@assets/20241007_182239_1751160790928.jpg";
+import handWashing from "@assets/IMG-20220115-WA0070_1751160949647.jpg";
+import dualWash from "@assets/IMG-20220108-WA0042_1751160949648.jpg";
 
 export default function Gallery() {
   const galleryImages = [
     {
-      src: "/attached_assets/WhatsApp Image 2025-06-26 at 23.35.45_3b66e14a_1751160530356.jpg",
+      src: carWashBay,
       alt: "White Haval car getting washed in automated car wash bay with purple fans overhead",
       span: "col-span-2 row-span-2",
     },
     {
-      src: "/attached_assets/WhatsApp Image 2025-06-26 at 23.11.24_5946c0a8_1751160533115.jpg",
+      src: storefront,
       alt: "Cuci Xpress storefront with purple and orange branding at sunset",
       span: "col-span-1 row-span-1",
     },
     {
-      src: "/attached_assets/20220928_2008581_1751160753598.jpg",
+      src: washTunnel,
       alt: "Automated car wash tunnel with brushes and spray equipment",
       span: "col-span-1 row-span-1",
     },
     {
-      src: "/attached_assets/20241007_182239_1751160790928.jpg",
+      src: nightView,
       alt: "Cuci Xpress night view with purple branding and red car entering wash bay",
       span: "col-span-1 row-span-1",
     },
     {
-      src: "/attached_assets/IMG-20220115-WA0070_1751160949647.jpg",
+      src: handWashing,
       alt: "Professional team hand-washing white Honda sedan with branded Cuci Xpress logo",
       span: "col-span-1 row-span-1",
     },
     {
-      src: "/attached_assets/IMG-20220108-WA0042_1751160949648.jpg",
+      src: dualWash,
       alt: "Two white Audi cars being washed simultaneously in automated wash bays",
       span: "col-span-2 row-span-1",
     },
