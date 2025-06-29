@@ -3,39 +3,34 @@ import { motion } from "framer-motion";
 export default function Gallery() {
   const galleryImages = [
     {
-      src: "https://images.unsplash.com/photo-1558618666-fcd25c85cd64?ixlib=rb-4.0.3&ixid=MnwxMjA3fDB8MHxwaG90by1wYWdlfHx8fGVufDB8fHx8&auto=format&fit=crop&w=800&h=800",
-      alt: "Professional car wash team at work",
+      src: "/attached_assets/WhatsApp Image 2025-06-26 at 23.35.45_3b66e14a_1751160530356.jpg",
+      alt: "White Haval car getting washed in automated car wash bay with purple fans overhead",
       span: "col-span-2 row-span-2",
     },
     {
-      src: "https://images.unsplash.com/photo-1503376780353-7e6692767b70?ixlib=rb-4.0.3&ixid=MnwxMjA3fDB8MHxwaG90by1wYWdlfHx8fGVufDB8fHx8&auto=format&fit=crop&w=400&h=400",
-      alt: "Clean luxury car",
+      src: "/attached_assets/WhatsApp Image 2025-06-26 at 23.11.24_5946c0a8_1751160533115.jpg",
+      alt: "Cuci Xpress storefront with purple and orange branding at sunset",
       span: "col-span-1 row-span-1",
     },
     {
-      src: "https://images.unsplash.com/photo-1449824913935-59a10b8d2000?ixlib=rb-4.0.3&ixid=MnwxMjA3fDB8MHxwaG90by1wYWdlfHx8fGVufDB8fHx8&auto=format&fit=crop&w=400&h=400",
-      alt: "Modern car wash facility",
+      src: "/attached_assets/20220928_2008581_1751160753598.jpg",
+      alt: "Automated car wash tunnel with brushes and spray equipment",
       span: "col-span-1 row-span-1",
     },
     {
-      src: "https://images.unsplash.com/photo-1619642751034-765dfdf7c58e?ixlib=rb-4.0.3&ixid=MnwxMjA3fDB8MHxwaG90by1wYWdlfHx8fGVufDB8fHx8&auto=format&fit=crop&w=400&h=400",
-      alt: "Staff cleaning car interior",
+      src: "/attached_assets/20241007_182239_1751160790928.jpg",
+      alt: "Cuci Xpress night view with purple branding and red car entering wash bay",
       span: "col-span-1 row-span-1",
     },
     {
-      src: "https://pixabay.com/get/g320bcb2a9d3450838181926d1825a2df699a7fde3d1311cd5850ca3d0416e7770e290585ac3cc727d8e7799d7824a912dbbf37fff13967da001164c19645613e_1280.jpg",
-      alt: "Car wash equipment",
+      src: "/attached_assets/IMG-20220115-WA0070_1751160949647.jpg",
+      alt: "Professional team hand-washing white Honda sedan with branded Cuci Xpress logo",
       span: "col-span-1 row-span-1",
     },
     {
-      src: "https://images.unsplash.com/photo-1492144534655-ae79c964c9d7?ixlib=rb-4.0.3&ixid=MnwxMjA3fDB8MHxwaG90by1wYWdlfHx8fGVufDB8fHx8&auto=format&fit=crop&w=800&h=400",
-      alt: "Satisfied customer with clean car",
+      src: "/attached_assets/IMG-20220108-WA0042_1751160949648.jpg",
+      alt: "Two white Audi cars being washed simultaneously in automated wash bays",
       span: "col-span-2 row-span-1",
-    },
-    {
-      src: "https://images.unsplash.com/photo-1607860108855-64acf2078ed9?ixlib=rb-4.0.3&ixid=MnwxMjA3fDB8MHxwaG90by1wYWdlfHx8fGVufDB8fHx8&auto=format&fit=crop&w=400&h=400",
-      alt: "Car detailing process",
-      span: "col-span-1 row-span-1",
     },
   ];
 
