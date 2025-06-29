@@ -1,0 +1,273 @@
+import { motion, AnimatePresence } from "framer-motion";
+import { MapPin, Navigation, Star } from "lucide-react";
+import { useState } from "react";
+
+interface TestimonialProps {
+  name: string;
+  role: string;
+  content: string;
+  rating: number;
+  initials: string;
+  bgColor: string;
+}
+
+interface LocationProps {
+  name: string;
+  address: string;
+  hours: string;
+  bgColor: string;
+  iconBg: string;
+  coordinates: {
+    lat: number;
+    lng: number;
+  };
+  testimonials: TestimonialProps[];
+}
+
+function LocationCard({ name, address, hours, bgColor, iconBg, coordinates, testimonials, isSelected, onClick }: LocationProps & { isSelected: boolean; onClick: () => void }) {
+  return (
+    <motion.div
+      initial={{ opacity: 0, x: -30 }}
+      whileInView={{ opacity: 1, x: 0 }}
+      transition={{ duration: 0.6 }}
+      viewport={{ once: true }}
+      className={`bg-white p-6 rounded-2xl shadow-lg hover:shadow-xl transition-all duration-300 cursor-pointer ${isSelected ? 'ring-2 ring-cuci-primary ring-opacity-50' : ''}`}
+      whileHover={{ scale: 1.02 }}
+      onClick={onClick}
+    >
+      <div className="flex items-start space-x-4">
+        <div className={`p-3 rounded-full ${iconBg}`}>
+          <MapPin className="w-6 h-6 text-white" />
+        </div>
+        <div className="flex-1">
+          <h3 className="text-lg font-semibold text-gray-900 mb-2">{name}</h3>
+          <p className="text-gray-600 mb-2">{address}</p>
+          <p className="text-sm text-gray-500 mb-3">{hours}</p>
+          <div className="flex space-x-2">
+            <button
+              onClick={(e) => {
+                e.stopPropagation();
+                window.open(`https://www.google.com/maps/dir/?api=1&destination=${coordinates.lat},${coordinates.lng}&destination_place_id=${encodeURIComponent(name)}`, '_blank');
+              }}
+              className="inline-flex items-center space-x-2 text-sm font-medium text-cuci-primary hover:text-cuci-secondary transition-colors"
+            >
+              <Navigation className="w-4 h-4" />
+              <span>Get Directions</span>
+            </button>
+            {isSelected && (
+              <div className="inline-flex items-center space-x-2 text-sm font-medium text-cuci-secondary">
+                <Star className="w-4 h-4 fill-current" />
+                <span>Showing Reviews</span>
+              </div>
+            )}
+          </div>
+        </div>
+      </div>
+    </motion.div>
+  );
+}
+
+function TestimonialCard({ name, role, content, rating, initials, bgColor }: TestimonialProps) {
+  return (
+    <motion.div
+      initial={{ opacity: 0, y: 20 }}
+      animate={{ opacity: 1, y: 0 }}
+      exit={{ opacity: 0, y: -20 }}
+      transition={{ duration: 0.4 }}
+      className="bg-white rounded-2xl p-6 shadow-lg"
+    >
+      <div className="flex items-center space-x-4 mb-4">
+        <div className={`w-12 h-12 ${bgColor} rounded-full flex items-center justify-center`}>
+          <span className="text-white font-bold text-lg">{initials}</span>
+        </div>
+        <div>
+          <h4 className="font-bold text-gray-900">{name}</h4>
+          <p className="text-gray-600 text-sm">{role}</p>
+        </div>
+      </div>
+      <div className="flex items-center space-x-1 mb-4">
+        {[...Array(5)].map((_, i) => (
+          <Star 
+            key={i} 
+            className={`w-5 h-5 ${i < rating ? 'text-yellow-400 fill-current' : 'text-gray-300'}`} 
+          />
+        ))}
+      </div>
+      <p className="text-gray-700 leading-relaxed">{content}</p>
+    </motion.div>
+  );
+}
+
+export default function LocationsWithTestimonials() {
+  const [selectedLocationIndex, setSelectedLocationIndex] = useState(0);
+
+  const locations: LocationProps[] = [
+    {
+      name: "Cuci Xpress Tungku Link",
+      address: "Spg 32-35, Jln Tungku Link, Gadong BE3519, Brunei",
+      hours: "Daily: 8:00 AM - 8:00 PM",
+      bgColor: "bg-gradient-to-br from-purple-50 to-purple-100",
+      iconBg: "bg-cuci-primary",
+      coordinates: { lat: 4.9112738, lng: 114.9239572 },
+      testimonials: [
+        {
+          name: "Florence Yapp",
+          role: "Verified Customer",
+          content: "Very good service and very clean. The staff are very friendly and helpful. Will definitely come back again.",
+          rating: 5,
+          initials: "FY",
+          bgColor: "bg-gradient-to-br from-purple-500 to-purple-600"
+        },
+        {
+          name: "Ahmad Rahman",
+          role: "Regular Customer",
+          content: "Best car wash in Tungku! Professional service and my car always looks brand new.",
+          rating: 5,
+          initials: "AR",
+          bgColor: "bg-gradient-to-br from-orange-500 to-orange-600"
+        }
+      ]
+    },
+    {
+      name: "Cuci Xpress Salar Link",
+      address: "Spg 12-15, Jln Salar Link, Sengkurong BG2313, Brunei",
+      hours: "Daily: 8:00 AM - 8:00 PM",
+      bgColor: "bg-gradient-to-br from-orange-50 to-orange-100",
+      iconBg: "bg-cuci-secondary",
+      coordinates: { lat: 4.8728321, lng: 114.8434285 },
+      testimonials: [
+        {
+          name: "Sarah Chen",
+          role: "Business Owner",
+          content: "Excellent service! My company cars are always spotless. The team here is very professional.",
+          rating: 5,
+          initials: "SC",
+          bgColor: "bg-gradient-to-br from-green-500 to-green-600"
+        },
+        {
+          name: "David Lim",
+          role: "Local Resident",
+          content: "Convenient location and great value for money. The wash quality is consistently good.",
+          rating: 4,
+          initials: "DL",
+          bgColor: "bg-gradient-to-br from-blue-500 to-blue-600"
+        }
+      ]
+    },
+    {
+      name: "Cuci Xpress Bengkurong Link",
+      address: "Spg 8-11, Jln Bengkurong Link, Brunei-Muara BH1725, Brunei",
+      hours: "Daily: 8:00 AM - 8:00 PM",
+      bgColor: "bg-gradient-to-br from-green-50 to-green-100",
+      iconBg: "bg-green-500",
+      coordinates: { lat: 4.8500000, lng: 114.7500000 },
+      testimonials: [
+        {
+          name: "Maria Santos",
+          role: "Teacher",
+          content: "Amazing attention to detail! They clean every corner of my car perfectly. Highly recommended!",
+          rating: 5,
+          initials: "MS",
+          bgColor: "bg-gradient-to-br from-purple-500 to-purple-600"
+        },
+        {
+          name: "Robert Tan",
+          role: "Engineer",
+          content: "Fast and efficient service. The staff are knowledgeable and always do a thorough job.",
+          rating: 5,
+          initials: "RT",
+          bgColor: "bg-gradient-to-br from-orange-500 to-orange-600"
+        }
+      ]
+    },
+    {
+      name: "Cuci Xpress Tutong Link",
+      address: "Spg 5-7, Jln Tutong Link, Tutong TA2441, Brunei",
+      hours: "Daily: 8:00 AM - 8:00 PM",
+      bgColor: "bg-gradient-to-br from-blue-50 to-blue-100",
+      iconBg: "bg-blue-500",
+      coordinates: { lat: 4.8007081, lng: 114.6520481 },
+      testimonials: [
+        {
+          name: "Lisa Wong",
+          role: "Business Manager",
+          content: "Excellent customer service and quality work. My car has never looked better!",
+          rating: 5,
+          initials: "LW",
+          bgColor: "bg-gradient-to-br from-green-500 to-green-600"
+        },
+        {
+          name: "James Abdullah",
+          role: "Local Customer",
+          content: "Great location and friendly staff. They always take good care of my vehicle.",
+          rating: 4,
+          initials: "JA",
+          bgColor: "bg-gradient-to-br from-blue-500 to-blue-600"
+        }
+      ]
+    }
+  ];
+
+  const selectedLocation = locations[selectedLocationIndex];
+
+  return (
+    <section className="py-16 bg-gray-50">
+      <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
+        <motion.div
+          initial={{ opacity: 0, y: 20 }}
+          whileInView={{ opacity: 1, y: 0 }}
+          transition={{ duration: 0.6 }}
+          viewport={{ once: true }}
+          className="text-center mb-16"
+        >
+          <h2 className="text-4xl font-bold text-gray-900 mb-4">Find Us Near You</h2>
+          <p className="text-xl text-gray-600 max-w-3xl mx-auto">
+            With 4 strategic locations across the region, premium car care is always within reach.
+          </p>
+        </motion.div>
+
+        <div className="grid lg:grid-cols-2 gap-12 items-start">
+          {/* Locations Grid */}
+          <div className="space-y-6">
+            {locations.map((location, index) => (
+              <LocationCard
+                key={index}
+                {...location}
+                isSelected={selectedLocationIndex === index}
+                onClick={() => setSelectedLocationIndex(index)}
+              />
+            ))}
+          </div>
+
+          {/* Dynamic Testimonials */}
+          <motion.div
+            initial={{ opacity: 0, y: 20 }}
+            whileInView={{ opacity: 1, y: 0 }}
+            transition={{ duration: 0.6 }}
+            viewport={{ once: true }}
+            className="bg-gray-100 rounded-2xl p-8"
+          >
+            <div className="text-center mb-8">
+              <h3 className="text-2xl font-bold text-gray-900 mb-2">What Our Customers Say</h3>
+              <p className="text-gray-600">Reviews from {selectedLocation.name}</p>
+            </div>
+            
+            <AnimatePresence mode="wait">
+              <div key={selectedLocationIndex} className="space-y-6">
+                {selectedLocation.testimonials.map((testimonial, index) => (
+                  <TestimonialCard key={index} {...testimonial} />
+                ))}
+              </div>
+            </AnimatePresence>
+            
+            <div className="mt-8 text-center">
+              <p className="text-sm text-gray-500">
+                Click different locations to see reviews from each branch
+              </p>
+            </div>
+          </motion.div>
+        </div>
+      </div>
+    </section>
+  );
+}
