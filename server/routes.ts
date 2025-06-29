@@ -134,7 +134,11 @@ export async function registerRoutes(app: Express): Promise<Server> {
   app.get("/api/reviews", async (req, res) => {
     try {
       const apiKey = process.env.GOOGLE_PLACES_API_KEY;
-      const placeId = process.env.GOOGLE_BUSINESS_PLACE_ID;
+      const requestedPlaceId = req.query.placeId as string;
+      const defaultPlaceId = process.env.GOOGLE_BUSINESS_PLACE_ID;
+      
+      // Use requested place ID or fall back to default (Tungku branch)
+      const placeId = requestedPlaceId || defaultPlaceId;
 
       if (!apiKey || !placeId) {
         return res.status(500).json({ 

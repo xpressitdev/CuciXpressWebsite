@@ -1,6 +1,7 @@
 import { motion, AnimatePresence } from "framer-motion";
 import { MapPin, Navigation, Star } from "lucide-react";
-import { useState } from "react";
+import { useState, useEffect } from "react";
+import { useQuery } from "@tanstack/react-query";
 
 interface TestimonialProps {
   name: string;
@@ -21,10 +22,10 @@ interface LocationProps {
     lat: number;
     lng: number;
   };
-  testimonials: TestimonialProps[];
+  placeId: string;
 }
 
-function LocationCard({ name, address, hours, bgColor, iconBg, coordinates, testimonials, isSelected, onClick }: LocationProps & { isSelected: boolean; onClick: () => void }) {
+function LocationCard({ name, address, hours, bgColor, iconBg, coordinates, placeId, isSelected, onClick }: LocationProps & { isSelected: boolean; onClick: () => void }) {
   return (
     <motion.div
       initial={{ opacity: 0, x: -30 }}
@@ -109,24 +110,7 @@ export default function LocationsWithTestimonials() {
       bgColor: "bg-gradient-to-br from-purple-50 to-purple-100",
       iconBg: "bg-cuci-primary",
       coordinates: { lat: 4.9112738, lng: 114.9239572 },
-      testimonials: [
-        {
-          name: "Florence Yapp",
-          role: "Verified Customer",
-          content: "Very good service and very clean. The staff are very friendly and helpful. Will definitely come back again.",
-          rating: 5,
-          initials: "FY",
-          bgColor: "bg-gradient-to-br from-purple-500 to-purple-600"
-        },
-        {
-          name: "Ahmad Rahman",
-          role: "Regular Customer",
-          content: "Best car wash in Tungku! Professional service and my car always looks brand new.",
-          rating: 5,
-          initials: "AR",
-          bgColor: "bg-gradient-to-br from-orange-500 to-orange-600"
-        }
-      ]
+      placeId: "" // Use default place ID (from environment variable)
     },
     {
       name: "Cuci Xpress Salar Link",
@@ -135,24 +119,7 @@ export default function LocationsWithTestimonials() {
       bgColor: "bg-gradient-to-br from-orange-50 to-orange-100",
       iconBg: "bg-cuci-secondary",
       coordinates: { lat: 4.8728321, lng: 114.8434285 },
-      testimonials: [
-        {
-          name: "Sarah Chen",
-          role: "Business Owner",
-          content: "Excellent service! My company cars are always spotless. The team here is very professional.",
-          rating: 5,
-          initials: "SC",
-          bgColor: "bg-gradient-to-br from-green-500 to-green-600"
-        },
-        {
-          name: "David Lim",
-          role: "Local Resident",
-          content: "Convenient location and great value for money. The wash quality is consistently good.",
-          rating: 4,
-          initials: "DL",
-          bgColor: "bg-gradient-to-br from-blue-500 to-blue-600"
-        }
-      ]
+      placeId: "salar-branch" // Temporary placeholder for development
     },
     {
       name: "Cuci Xpress Bengkurong Link",
@@ -161,24 +128,7 @@ export default function LocationsWithTestimonials() {
       bgColor: "bg-gradient-to-br from-green-50 to-green-100",
       iconBg: "bg-green-500",
       coordinates: { lat: 4.8500000, lng: 114.7500000 },
-      testimonials: [
-        {
-          name: "Maria Santos",
-          role: "Teacher",
-          content: "Amazing attention to detail! They clean every corner of my car perfectly. Highly recommended!",
-          rating: 5,
-          initials: "MS",
-          bgColor: "bg-gradient-to-br from-purple-500 to-purple-600"
-        },
-        {
-          name: "Robert Tan",
-          role: "Engineer",
-          content: "Fast and efficient service. The staff are knowledgeable and always do a thorough job.",
-          rating: 5,
-          initials: "RT",
-          bgColor: "bg-gradient-to-br from-orange-500 to-orange-600"
-        }
-      ]
+      placeId: "bengkurong-branch" // Temporary placeholder for development
     },
     {
       name: "Cuci Xpress Tutong Link",
@@ -187,28 +137,23 @@ export default function LocationsWithTestimonials() {
       bgColor: "bg-gradient-to-br from-blue-50 to-blue-100",
       iconBg: "bg-blue-500",
       coordinates: { lat: 4.8007081, lng: 114.6520481 },
-      testimonials: [
-        {
-          name: "Lisa Wong",
-          role: "Business Manager",
-          content: "Excellent customer service and quality work. My car has never looked better!",
-          rating: 5,
-          initials: "LW",
-          bgColor: "bg-gradient-to-br from-green-500 to-green-600"
-        },
-        {
-          name: "James Abdullah",
-          role: "Local Customer",
-          content: "Great location and friendly staff. They always take good care of my vehicle.",
-          rating: 4,
-          initials: "JA",
-          bgColor: "bg-gradient-to-br from-blue-500 to-blue-600"
-        }
-      ]
+      placeId: "tutong-branch" // Temporary placeholder for development
     }
   ];
 
+  // Fetch Google Reviews for the selected location
+  const { data: reviewsData, isLoading } = useQuery({
+    queryKey: ['/api/reviews', locations[selectedLocationIndex].placeId],
+    queryFn: async () => {
+      const response = await fetch(`/api/reviews?placeId=${locations[selectedLocationIndex].placeId}`);
+      if (!response.ok) throw new Error('Failed to fetch reviews');
+      return response.json();
+    },
+    enabled: true
+  });
+
   const selectedLocation = locations[selectedLocationIndex];
+  const testimonials = reviewsData?.reviews || [];
 
   return (
     <section className="py-16 bg-gray-50">
@@ -254,9 +199,21 @@ export default function LocationsWithTestimonials() {
             
             <AnimatePresence mode="wait">
               <div key={selectedLocationIndex} className="space-y-6">
-                {selectedLocation.testimonials.map((testimonial, index) => (
-                  <TestimonialCard key={index} {...testimonial} />
-                ))}
+                {isLoading ? (
+                  <div className="flex items-center justify-center py-8">
+                    <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-cuci-primary"></div>
+                    <span className="ml-3 text-gray-600">Loading reviews...</span>
+                  </div>
+                ) : testimonials.length > 0 ? (
+                  testimonials.slice(0, 2).map((testimonial: TestimonialProps, index: number) => (
+                    <TestimonialCard key={index} {...testimonial} />
+                  ))
+                ) : (
+                  <div className="text-center py-8">
+                    <Star className="w-8 h-8 text-gray-300 mx-auto mb-2" />
+                    <p className="text-gray-500">Loading authentic reviews for this location...</p>
+                  </div>
+                )}
               </div>
             </AnimatePresence>
             
