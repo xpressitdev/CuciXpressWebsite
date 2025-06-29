@@ -1,8 +1,7 @@
 import Navigation from "@/components/Navigation";
 import Hero from "@/components/Hero";
 import Stats from "@/components/Stats";
-import Testimonials from "@/components/Testimonials";
-import Locations from "@/components/Locations";
+import LocationsWithTestimonials from "@/components/LocationsWithTestimonials";
 import Gallery from "@/components/Gallery";
 import PricingSection from "@/components/PricingSection";
 import Investment from "@/components/Investment";
@@ -15,8 +14,7 @@ export default function Home() {
       <main>
         <Hero />
         <Stats />
-        <Testimonials />
-        <Locations />
+        <LocationsWithTestimonials />
         <Gallery />
         <PricingSection />
         <Investment />
