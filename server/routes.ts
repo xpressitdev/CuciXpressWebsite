@@ -92,6 +92,78 @@ function getBranchFallbackReviews(branchId: string) {
   return branchReviews[branchId] || { reviews: [], averageRating: 0, totalReviews: 0 };
 }
 
+// Helper function to get search query for branch
+function getBranchSearchQuery(branchId: string): string | null {
+  const branchQueries: { [key: string]: string } = {
+    "salar-branch": "Cuci Xpress Salar Link Brunei",
+    "bengkurong-branch": "Cuci Xpress Bengkurong Link Brunei", 
+    "tutong-branch": "Cuci Xpress Tutong Link Brunei"
+  };
+  return branchQueries[branchId] || null;
+}
+
+// Helper function to search for Google Place ID
+async function searchGooglePlaceId(searchQuery: string, apiKey: string): Promise<string | null> {
+  try {
+    const response = await fetch(
+      `https://maps.googleapis.com/maps/api/place/findplacefromtext/json?input=${encodeURIComponent(searchQuery)}&inputtype=textquery&fields=place_id,name&key=${apiKey}`
+    );
+    
+    if (!response.ok) return null;
+    
+    const data = await response.json();
+    if (data.status === "OK" && data.candidates && data.candidates.length > 0) {
+      return data.candidates[0].place_id;
+    }
+    
+    return null;
+  } catch (error) {
+    console.error("Error searching for Place ID:", error);
+    return null;
+  }
+}
+
+// Helper function to process Google Reviews data
+function processGoogleReviews(data: any) {
+  const reviews = data.result.reviews || [];
+  const allReviews = reviews.map((review: any) => {
+    const initials = review.author_name
+      .split(" ")
+      .map((name: string) => name[0])
+      .join("")
+      .toUpperCase()
+      .slice(0, 2);
+
+    const colors = [
+      'bg-gradient-to-br from-purple-500 to-purple-600',
+      'bg-gradient-to-br from-orange-500 to-orange-600',
+      'bg-gradient-to-br from-green-500 to-green-600',
+      'bg-gradient-to-br from-blue-500 to-blue-600',
+      'bg-gradient-to-br from-pink-500 to-pink-600',
+      'bg-gradient-to-br from-indigo-500 to-indigo-600'
+    ];
+
+    return {
+      name: review.author_name,
+      role: "Verified Customer",
+      content: review.text,
+      rating: review.rating,
+      initials,
+      bgColor: colors[Math.floor(Math.random() * colors.length)],
+      date: review.relative_time_description
+    };
+  });
+
+  // Filter for positive reviews (4-5 stars)
+  const positiveReviews = allReviews.filter((review: any) => review.rating >= 4);
+
+  return {
+    reviews: positiveReviews,
+    averageRating: data.result.rating || 0,
+    totalReviews: data.result.user_ratings_total || 0
+  };
+}
+
 export async function registerRoutes(app: Express): Promise<Server> {
   // Investor interest form submission
   app.post("/api/investor-interest", async (req, res) => {
@@ -222,30 +294,87 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
       // For branches without configured Place IDs, search for them dynamically
       if (placeId !== defaultPlaceId && !placeId.startsWith('ChIJ')) {
-        const searchQuery = getBranchSearchQuery(placeId);
+        // Get search query for the branch
+        const branchQueries: { [key: string]: string } = {
+          "salar-branch": "Cuci Xpress Salar Link Brunei",
+          "bengkurong-branch": "Cuci Xpress Bengkurong Link Brunei", 
+          "tutong-branch": "Cuci Xpress Tutong Link Brunei"
+        };
+        
+        const searchQuery = branchQueries[placeId];
         if (searchQuery) {
-          const foundPlaceId = await searchGooglePlaceId(searchQuery, apiKey);
-          if (foundPlaceId) {
-            // Use the found Place ID to get reviews
-            const reviewsResponse = await fetch(
-              `https://maps.googleapis.com/maps/api/place/details/json?place_id=${foundPlaceId}&fields=reviews,rating,user_ratings_total&key=${apiKey}`
+          try {
+            // Search for Place ID using Google Places API
+            const searchResponse = await fetch(
+              `https://maps.googleapis.com/maps/api/place/findplacefromtext/json?input=${encodeURIComponent(searchQuery)}&inputtype=textquery&fields=place_id,name&key=${apiKey}`
             );
-            if (reviewsResponse.ok) {
-              const reviewsData = await reviewsResponse.json();
-              if (reviewsData.status === "OK") {
-                // Process and return authentic reviews for this branch
-                const processedReviews = processGoogleReviews(reviewsData);
-                return res.json(processedReviews);
+            
+            if (searchResponse.ok) {
+              const searchData = await searchResponse.json();
+              if (searchData.status === "OK" && searchData.candidates && searchData.candidates.length > 0) {
+                const foundPlaceId = searchData.candidates[0].place_id;
+                
+                // Get reviews using the found Place ID
+                const reviewsResponse = await fetch(
+                  `https://maps.googleapis.com/maps/api/place/details/json?place_id=${foundPlaceId}&fields=reviews,rating,user_ratings_total&key=${apiKey}`
+                );
+                
+                if (reviewsResponse.ok) {
+                  const reviewsData = await reviewsResponse.json();
+                  if (reviewsData.status === "OK") {
+                    // Process authentic Google Reviews
+                    const reviews = reviewsData.result.reviews || [];
+                    const allReviews = reviews.map((review: any) => {
+                      const initials = review.author_name
+                        .split(" ")
+                        .map((name: string) => name[0])
+                        .join("")
+                        .toUpperCase()
+                        .slice(0, 2);
+
+                      const colors = [
+                        'bg-gradient-to-br from-purple-500 to-purple-600',
+                        'bg-gradient-to-br from-orange-500 to-orange-600',
+                        'bg-gradient-to-br from-green-500 to-green-600',
+                        'bg-gradient-to-br from-blue-500 to-blue-600',
+                        'bg-gradient-to-br from-pink-500 to-pink-600',
+                        'bg-gradient-to-br from-indigo-500 to-indigo-600'
+                      ];
+
+                      return {
+                        name: review.author_name,
+                        role: "Verified Customer",
+                        content: review.text,
+                        rating: review.rating,
+                        initials,
+                        bgColor: colors[Math.floor(Math.random() * colors.length)],
+                        date: review.relative_time_description
+                      };
+                    });
+
+                    // Filter for positive reviews (4-5 stars)
+                    const positiveReviews = allReviews.filter((review: any) => review.rating >= 4);
+
+                    return res.json({
+                      reviews: positiveReviews,
+                      averageRating: reviewsData.result.rating || 0,
+                      totalReviews: reviewsData.result.user_ratings_total || 0
+                    });
+                  }
+                }
               }
             }
+          } catch (error) {
+            console.error(`Error fetching reviews for ${placeId}:`, error);
           }
         }
-        // If search fails, return empty reviews with message
+        
+        // If search or review fetch fails, return empty with loading message
         return res.json({ 
           reviews: [], 
           averageRating: 0, 
           totalReviews: 0,
-          message: "Authentic reviews loading for this location..."
+          message: "Loading authentic Google reviews for this location..."
         });
       }
 

@@ -204,8 +204,8 @@ export default function LocationsWithTestimonials() {
                     <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-cuci-primary"></div>
                     <span className="ml-3 text-gray-600">Loading reviews...</span>
                   </div>
-                ) : testimonials.length > 0 ? (
-                  testimonials.slice(0, 2).map((testimonial: TestimonialProps, index: number) => (
+                ) : testimonials && testimonials.length > 0 ? (
+                  testimonials.slice(0, 2).map((testimonial: any, index: number) => (
                     <TestimonialCard key={index} {...testimonial} />
                   ))
                 ) : (
