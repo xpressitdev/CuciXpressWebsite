@@ -9,8 +9,8 @@ import dualWash from "@assets/IMG-20220108-WA0042_1751160949648.jpg";
 export default function Gallery() {
   const galleryImages = [
     {
-      src: carWashBay,
-      alt: "White Haval car getting washed in automated car wash bay with purple fans overhead",
+      src: dingPayment,
+      alt: "Smiling Cuci Xpress team member providing friendly service with 'pay with ding!' digital payment option",
       span: "col-span-2 row-span-2",
     },
     {
@@ -29,8 +29,8 @@ export default function Gallery() {
       span: "col-span-1 row-span-1",
     },
     {
-      src: dingPayment,
-      alt: "Smiling Cuci Xpress team member providing friendly service with 'pay with ding!' digital payment option",
+      src: carWashBay,
+      alt: "White Haval car getting washed in automated car wash bay with purple fans overhead",
       span: "col-span-1 row-span-1",
     },
     {
