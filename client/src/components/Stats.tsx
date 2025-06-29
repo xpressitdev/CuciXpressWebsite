@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from "react";
 import { motion } from "framer-motion";
 import { useIntersectionObserver } from "@/hooks/useIntersectionObserver";
+import { useQuery } from "@tanstack/react-query";
 import { Calendar, DollarSign, MapPin, Star } from "lucide-react";
 
 interface StatCardProps {
@@ -110,6 +111,17 @@ function CountUp({ end, duration, prefix = "", suffix = "", formatter }: CountUp
 }
 
 export default function Stats() {
+  // Fetch real average rating across all branches
+  const { data: ratingData } = useQuery({
+    queryKey: ['/api/average-rating'],
+    queryFn: async () => {
+      const response = await fetch('/api/average-rating');
+      if (!response.ok) throw new Error('Failed to fetch average rating');
+      return response.json();
+    },
+    staleTime: 5 * 60 * 1000, // Cache for 5 minutes
+  });
+
   const stats = [
     {
       icon: <Calendar className="w-8 h-8" />,
@@ -136,7 +148,7 @@ export default function Stats() {
     },
     {
       icon: <Star className="w-8 h-8" />,
-      value: 5,
+      value: ratingData?.averageRating || 4.8,
       label: "Average Rating",
       suffix: "/5",
       color: "text-yellow-500",
