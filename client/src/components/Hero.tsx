@@ -34,11 +34,12 @@ export default function Hero() {
                 And we're just getting started.
               </span>
             </h1>
-            <p className="text-xl text-gray-600 mb-8 leading-relaxed">
-              From a single location to 4 thriving branches, Cuci Xpress has
-              revolutionized car washing with premium service, cutting-edge
-              technology, and unmatched customer satisfaction.
-            </p>
+            <p className="text-xl text-gray-600 mb-8 leading-relaxed">From a single location to 4 thriving branches, Cuci Xpress provide fast, consistent drive-thru car washes focus on convenience, reliability, and customer satisfaction.
+
+            Built for Brunei. Washed for speed.
+
+            It’s all part of our mission to Bina Wawasan Negara (BWN) — building time-saving services that help move Brunei forward.
+</p>
             <div className="flex flex-col sm:flex-row gap-4 justify-center lg:justify-start">
               <motion.button
                 whileHover={{ 
