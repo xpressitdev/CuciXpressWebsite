@@ -8,13 +8,14 @@ interface StatCardProps {
   icon: React.ReactNode;
   value: number;
   label: string;
+  subtitle?: string;
   prefix?: string;
   suffix?: string;
   color: string;
   bgColor: string;
 }
 
-function StatCard({ icon, value, label, prefix = "", suffix = "", color, bgColor }: StatCardProps) {
+function StatCard({ icon, value, label, subtitle, prefix = "", suffix = "", color, bgColor }: StatCardProps) {
   const [ref, isVisible] = useIntersectionObserver({ threshold: 0.5 });
 
   const formatValue = (val: number) => {
@@ -60,7 +61,12 @@ function StatCard({ icon, value, label, prefix = "", suffix = "", color, bgColor
           />
         )}
       </motion.div>
-      <p className="text-gray-600">{label}</p>
+      <div className="text-center">
+        <p className="text-gray-600">{label}</p>
+        {subtitle && (
+          <p className="text-sm text-gray-500 mt-1">{subtitle}</p>
+        )}
+      </div>
     </motion.div>
   );
 }
@@ -141,8 +147,8 @@ export default function Stats() {
     {
       icon: <MapPin className="w-8 h-8" />,
       value: 4,
-      label: "Action Branches",
-      suffix: " (2 coming soon)",
+      label: "Active Branches",
+      subtitle: "(2 more coming soon)",
       color: "text-green-500",
       bgColor: "bg-gradient-to-br from-green-500/5 to-green-500/10",
     },

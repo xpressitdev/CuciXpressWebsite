@@ -124,6 +124,8 @@ Cuci Xpress is a full-stack web application built for a car wash business that h
 - June 29, 2025. Integrated real-time average rating calculation (4.7/5) from authentic Google Reviews across all branches
 - June 29, 2025. Fixed navigation: "Reviews" and "Locations" buttons now scroll to the combined locations section
 - June 29, 2025. Replaced gallery stock images with 6 authentic Cuci Xpress business photos showcasing real facilities, equipment, branding, and services
+- June 29, 2025. Updated active branches stat to show "4 Active Branches" with "(2 more coming soon)" subtitle below
+- June 29, 2025. Added "pay with ding!" image as main gallery feature showcasing customer service and digital payment options
 
 ## User Preferences
 
