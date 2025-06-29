@@ -20,7 +20,7 @@ function StatCard({ icon, value, label, prefix = "", suffix = "", color, bgColor
   const formatValue = (val: number) => {
     if (val >= 1000000) {
       return `${Math.floor(val / 1000000)}M+`;
-    } else if (val >= 100000) {
+    } else if (val >= 100000 && val !== 100592) {
       return `${Math.floor(val / 1000)}K+`;
     } else if (val < 10) {
       return val.toFixed(1);
@@ -125,8 +125,8 @@ export default function Stats() {
   const stats = [
     {
       icon: <Calendar className="w-8 h-8" />,
-      value: 100000,
-      label: "Cars Cleaned",
+      value: 100592,
+      label: "Cars Cleaned and counting",
       color: "text-cuci-primary",
       bgColor: "bg-gradient-to-br from-cuci-primary/5 to-cuci-primary/10",
     },
