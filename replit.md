@@ -120,6 +120,9 @@ Cuci Xpress is a full-stack web application built for a car wash business that h
 - June 29, 2025. Combined testimonials and locations sections into one interactive component with dynamic Google Reviews for all branches
 - June 29, 2025. Fixed branch naming: removed "Link" suffix from Salar, Bengkurong, and Tutong branches (kept only for Tungku Link)
 - June 29, 2025. Expanded testimonials display to show 3-4 authentic Google Reviews in 2-column grid layout for better user experience
+- June 29, 2025. Updated Stats section to display exact numbers: "100,592 Cars Cleaned and counting" and "4 Action Branches (2 coming soon)"
+- June 29, 2025. Integrated real-time average rating calculation (4.7/5) from authentic Google Reviews across all branches
+- June 29, 2025. Fixed navigation: "Reviews" and "Locations" buttons now scroll to the combined locations section
 
 ## User Preferences
 

@@ -42,7 +42,7 @@ export default function Navigation() {
   const navItems = [
     { id: "home", label: "Home", path: "/" },
     { id: "stats", label: "Our Success", path: "/" },
-    { id: "testimonials", label: "Reviews", path: "/" },
+    { id: "locations", label: "Reviews", path: "/" },
     { id: "locations", label: "Locations", path: "/" },
     { id: "gallery", label: "Gallery", path: "/" },
     { id: "pricing", label: "Pricing", path: "/" },
@@ -68,9 +68,9 @@ export default function Navigation() {
           {/* Desktop Navigation */}
           <div className="hidden md:block">
             <div className="ml-10 flex items-baseline space-x-8">
-              {navItems.map((item) => (
+              {navItems.map((item, index) => (
                 <button
-                  key={item.id}
+                  key={`${item.id}-${index}`}
                   onClick={() => handleNavigation(item)}
                   className="text-gray-700 hover:text-cuci-primary px-3 py-2 text-sm font-medium transition-colors"
                 >
@@ -113,9 +113,9 @@ export default function Navigation() {
           className="md:hidden bg-white border-t"
         >
           <div className="px-2 pt-2 pb-3 space-y-1 sm:px-3">
-            {navItems.map((item) => (
+            {navItems.map((item, index) => (
               <button
-                key={item.id}
+                key={`mobile-${item.id}-${index}`}
                 onClick={() => handleNavigation(item)}
                 className="block px-3 py-2 text-base font-medium text-gray-700 hover:text-cuci-primary transition-colors w-full text-left"
               >
