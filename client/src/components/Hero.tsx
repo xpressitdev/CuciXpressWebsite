@@ -1,18 +1,15 @@
 import { motion } from "framer-motion";
 import { CheckCircle } from "lucide-react";
-import { useLocation } from "wouter";
+import { Link, useLocation } from "wouter";
 
 export default function Hero() {
-  const [, setLocation] = useLocation();
+  const [location] = useLocation();
 
-  const handleNavigation = (section: string) => {
-    if (section === "locations") {
-      const element = document.getElementById("locations");
-      if (element) {
-        element.scrollIntoView({ behavior: "smooth" });
-      }
-    } else if (section === "pricing") {
-      const element = document.getElementById("pricing");
+  const handleNavigation = (sectionId: string) => {
+    if (location !== "/") {
+      window.location.href = `/#${sectionId}`;
+    } else {
+      const element = document.getElementById(sectionId);
       if (element) {
         element.scrollIntoView({ behavior: "smooth" });
       }
@@ -20,12 +17,13 @@ export default function Hero() {
   };
 
   return (
-    <section className="relative min-h-screen flex items-center bg-gradient-to-br from-purple-50 to-orange-50 pt-20">
-      <div className="container mx-auto px-6">
+    <section id="home" className="relative pt-24 pb-20 lg:pt-32 lg:pb-28 overflow-hidden">
+      <div className="absolute inset-0 bg-gradient-to-br from-cuci-primary/10 to-cuci-secondary/10"></div>
+      <div className="relative max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
         <div className="grid lg:grid-cols-2 gap-12 items-center">
           <motion.div
-            initial={{ opacity: 0, y: 50 }}
-            animate={{ opacity: 1, y: 0 }}
+            initial={{ opacity: 0, x: -50 }}
+            animate={{ opacity: 1, x: 0 }}
             transition={{ duration: 0.8 }}
             className="text-center lg:text-left"
           >
@@ -36,9 +34,12 @@ export default function Hero() {
                 And we're just getting started.
               </span>
             </h1>
-            <p className="text-xl text-gray-600 mb-8 leading-relaxed">
-              From a single location to 4 thriving branches, Cuci Xpress provide fast, consistent drive-thru car washes focus on convenience, reliability, and customer satisfaction. Built for Brunei. Washed for speed. It's all part of our mission to Bina Wawasan Negara (BWN) — building time-saving services that help move Brunei forward.
-            </p>
+            <p className="text-xl text-gray-600 mb-8 leading-relaxed">From a single location to 4 thriving branches, Cuci Xpress provide fast, consistent drive-thru car washes focus on convenience, reliability, and customer satisfaction.
+
+            Built for Brunei. Washed for speed.
+
+            It’s all part of our mission to Bina Wawasan Negara (BWN) — building time-saving services that help move Brunei forward.
+</p>
             <div className="flex flex-col sm:flex-row gap-4 justify-center lg:justify-start">
               <motion.button
                 whileHover={{ 
