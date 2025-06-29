@@ -126,6 +126,7 @@ Cuci Xpress is a full-stack web application built for a car wash business that h
 - June 29, 2025. Replaced gallery stock images with 6 authentic Cuci Xpress business photos showcasing real facilities, equipment, branding, and services
 - June 29, 2025. Updated active branches stat to show "4 Active Branches" with "(2 more coming soon)" subtitle below
 - June 29, 2025. Added "pay with ding!" image as main gallery feature showcasing customer service and digital payment options
+- June 29, 2025. Updated subscription pricing to authentic rates: Basic Wash BND100/mo, Premium Clean BND120/mo, Elite Detail BND150/mo
 
 ## User Preferences
 

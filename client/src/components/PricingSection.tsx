@@ -4,8 +4,8 @@ import { PricingContainer } from "@/components/ui/pricing-container";
 const pricingPlans = [
   {
     name: "Basic Wash",
-    monthlyPrice: 15,
-    yearlyPrice: 144, // 20% discount
+    monthlyPrice: 100,
+    yearlyPrice: 960, // 20% discount
     features: [
       "Exterior Wash",
       "Rinse & Dry",
@@ -16,8 +16,8 @@ const pricingPlans = [
   },
   {
     name: "Premium Clean",
-    monthlyPrice: 35,
-    yearlyPrice: 336, // 20% discount
+    monthlyPrice: 120,
+    yearlyPrice: 1152, // 20% discount
     features: [
       "Full Exterior Detail",
       "Deep Interior Clean",
@@ -32,8 +32,8 @@ const pricingPlans = [
   },
   {
     name: "Elite Detail",
-    monthlyPrice: 65,
-    yearlyPrice: 624, // 20% discount
+    monthlyPrice: 150,
+    yearlyPrice: 1440, // 20% discount
     features: [
       "Premium Detailing",
       "Paint Protection",
