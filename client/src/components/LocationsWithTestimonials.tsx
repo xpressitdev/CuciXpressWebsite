@@ -113,31 +113,31 @@ export default function LocationsWithTestimonials() {
       placeId: "" // Use default place ID (from environment variable)
     },
     {
-      name: "Cuci Xpress Salar Link",
+      name: "Cuci Xpress Salar",
       address: "Spg 12-15, Jln Salar Link, Sengkurong BG2313, Brunei",
       hours: "Daily: 8:00 AM - 8:00 PM",
       bgColor: "bg-gradient-to-br from-orange-50 to-orange-100",
       iconBg: "bg-cuci-secondary",
       coordinates: { lat: 4.8728321, lng: 114.8434285 },
-      placeId: "salar-branch" // Temporary placeholder for development
+      placeId: "salar-branch"
     },
     {
-      name: "Cuci Xpress Bengkurong Link",
+      name: "Cuci Xpress Bengkurong",
       address: "Spg 8-11, Jln Bengkurong Link, Brunei-Muara BH1725, Brunei",
       hours: "Daily: 8:00 AM - 8:00 PM",
       bgColor: "bg-gradient-to-br from-green-50 to-green-100",
       iconBg: "bg-green-500",
       coordinates: { lat: 4.8500000, lng: 114.7500000 },
-      placeId: "bengkurong-branch" // Temporary placeholder for development
+      placeId: "bengkurong-branch"
     },
     {
-      name: "Cuci Xpress Tutong Link",
+      name: "Cuci Xpress Tutong",
       address: "Spg 5-7, Jln Tutong Link, Tutong TA2441, Brunei",
       hours: "Daily: 8:00 AM - 8:00 PM",
       bgColor: "bg-gradient-to-br from-blue-50 to-blue-100",
       iconBg: "bg-blue-500",
       coordinates: { lat: 4.8007081, lng: 114.6520481 },
-      placeId: "tutong-branch" // Temporary placeholder for development
+      placeId: "tutong-branch"
     }
   ];
 
@@ -198,18 +198,18 @@ export default function LocationsWithTestimonials() {
             </div>
             
             <AnimatePresence mode="wait">
-              <div key={selectedLocationIndex} className="space-y-6">
+              <div key={selectedLocationIndex} className="grid gap-6 md:grid-cols-2">
                 {isLoading ? (
-                  <div className="flex items-center justify-center py-8">
+                  <div className="md:col-span-2 flex items-center justify-center py-8">
                     <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-cuci-primary"></div>
                     <span className="ml-3 text-gray-600">Loading reviews...</span>
                   </div>
                 ) : testimonials && testimonials.length > 0 ? (
-                  testimonials.slice(0, 2).map((testimonial: any, index: number) => (
+                  testimonials.slice(0, 4).map((testimonial: any, index: number) => (
                     <TestimonialCard key={index} {...testimonial} />
                   ))
                 ) : (
-                  <div className="text-center py-8">
+                  <div className="md:col-span-2 text-center py-8">
                     <Star className="w-8 h-8 text-gray-300 mx-auto mb-2" />
                     <p className="text-gray-500">Loading authentic reviews for this location...</p>
                   </div>
