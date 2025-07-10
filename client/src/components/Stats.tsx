@@ -173,9 +173,7 @@ export default function Stats() {
           className="text-center mb-16"
         >
           <h2 className="text-4xl font-bold text-gray-900 mb-4">Our Success Story</h2>
-          <p className="text-xl text-gray-600 max-w-3xl mx-auto">
-            From humble beginnings to becoming the premier car wash service, our numbers speak for themselves.
-          </p>
+          <p className="text-xl text-gray-600 max-w-3xl mx-auto">From humble beginnings to becoming the most trusted Xpress drive-thru car wash service, our numbers speak for themselves.</p>
         </motion.div>
 
         <div className="grid md:grid-cols-2 lg:grid-cols-4 gap-8">
