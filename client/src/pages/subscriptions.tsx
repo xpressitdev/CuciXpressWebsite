@@ -20,7 +20,7 @@ const pricingPlans = [
       "Priority booking",
       "Mobile app access"
     ],
-    accent: "bg-gradient-to-br from-purple-500 to-purple-600",
+    accent: "#6C5CE7",
     rotation: -2,
   },
   {
@@ -35,7 +35,7 @@ const pricingPlans = [
       "Free pickup/delivery"
     ],
     isPopular: true,
-    accent: "bg-gradient-to-br from-orange-500 to-red-500",
+    accent: "#FFA500",
     rotation: 1,
   },
   {
@@ -49,7 +49,7 @@ const pricingPlans = [
       "Ceramic coating",
       "24/7 concierge service"
     ],
-    accent: "bg-gradient-to-br from-green-500 to-emerald-600",
+    accent: "#22C55E",
     rotation: -1,
   },
 ];

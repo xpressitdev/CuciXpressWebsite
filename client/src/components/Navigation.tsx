@@ -18,14 +18,17 @@ export default function Navigation() {
   }, []);
 
   const handleNavigation = (item: { id: string; path: string }) => {
-    if (item.id === "home") {
+    if (item.path !== "/") {
+      // For non-home pages, navigate directly
+      window.location.href = item.path;
+    } else if (item.id === "home") {
       // Navigate to home and scroll to top
       if (location !== "/") {
         window.location.href = "/";
       } else {
         window.scrollTo({ top: 0, behavior: "smooth" });
       }
-    } else if (item.path === "/") {
+    } else {
       // For home page sections, ensure we're on home page first
       if (location !== "/") {
         window.location.href = `/#${item.id}`;
