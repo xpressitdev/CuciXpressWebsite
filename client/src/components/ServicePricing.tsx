@@ -12,6 +12,7 @@ interface ServiceOption {
   features: string[];
   icon: React.ReactNode;
   popular?: boolean;
+  isSubscription?: boolean;
 }
 
 const serviceOptions: ServiceOption[] = [
@@ -30,34 +31,35 @@ const serviceOptions: ServiceOption[] = [
     ]
   },
   {
-    name: "Premium Clean",
+    name: "Full Package",
     price: "BND 12",
     duration: "12 minutes", 
     description: "Complete wash with extra care",
     icon: <Sparkles className="w-6 h-6" />,
     popular: true,
     features: [
-      "Premium foam wash",
-      "Undercarriage cleaning",
-      "Spot-free rinse",
-      "Complete drying",
-      "Wheel cleaning",
-      "Interior vacuum available"
+      "Exterior foam wash",
+      "High-pressure rinse",
+      "Basic drying",
+      "Quick service", 
+      "Drive-thru convenience",
+      "Spray wax",
+      "Wheel cleaning"
     ]
   },
   {
-    name: "Elite Detail",
-    price: "BND 18",
-    duration: "18 minutes",
-    description: "Professional detailing service",
+    name: "Coming Soon",
+    price: "Subscriptions",
+    duration: "Monthly plans",
+    description: "Unlimited washes with monthly subscription",
     icon: <Shield className="w-6 h-6" />,
     features: [
-      "Premium wash process",
-      "Paint protection application",
-      "Interior deep clean",
-      "Dashboard treatment",
-      "Tire shine",
-      "Quality guarantee"
+      "Unlimited exterior washes",
+      "Rain re-wash guarantee",
+      "All locations included",
+      "Family & corporate plans",
+      "Starting from BND 60/month",
+      "Sign up for early access!"
     ]
   }
 ];
@@ -128,17 +130,59 @@ export default function ServicePricing() {
                   <Button 
                     className={`w-full ${service.popular 
                       ? 'bg-cuci-primary hover:bg-cuci-primary/90 text-white' 
+                      : service.name === "Coming Soon"
+                      ? 'bg-cuci-secondary hover:bg-cuci-secondary/90 text-white'
                       : 'bg-gray-100 hover:bg-gray-200 text-gray-900'
                     }`}
-                    onClick={() => window.open('https://cuci-xpress.com', '_blank')}
+                    onClick={() => {
+                      if (service.name === "Coming Soon") {
+                        window.location.href = '/subscriptions';
+                      } else {
+                        window.open('https://cuci-xpress.com', '_blank');
+                      }
+                    }}
                   >
-                    Book Now
+                    {service.name === "Coming Soon" ? "Learn More" : "Queue Now"}
                   </Button>
                 </CardContent>
               </Card>
             </motion.div>
           ))}
         </div>
+
+        {/* Payment Methods */}
+        <motion.div
+          initial={{ opacity: 0, y: 20 }}
+          whileInView={{ opacity: 1, y: 0 }}
+          transition={{ duration: 0.6, delay: 0.2 }}
+          viewport={{ once: true }}
+          className="text-center bg-gradient-to-br from-purple-50 to-orange-50 rounded-2xl p-8 mb-8"
+        >
+          <h3 className="text-2xl font-bold text-gray-900 mb-4">We Accept</h3>
+          <p className="text-gray-600 mb-6">Multiple convenient payment options available</p>
+          
+          <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-4">
+            {[
+              "Cash Payment",
+              "BIBD Bank Transfer", 
+              "Baiduri Bank Transfer",
+              "Progresif Ding!",
+              "MyDST Wallet",
+              "Tarus App"
+            ].map((payment, index) => (
+              <motion.div
+                key={payment}
+                initial={{ opacity: 0, scale: 0.8 }}
+                whileInView={{ opacity: 1, scale: 1 }}
+                transition={{ duration: 0.4, delay: index * 0.1 }}
+                viewport={{ once: true }}
+                className="bg-white rounded-lg p-3 shadow-sm border border-gray-200"
+              >
+                <span className="text-sm font-medium text-gray-700">{payment}</span>
+              </motion.div>
+            ))}
+          </div>
+        </motion.div>
 
         {/* Contact and Location Info */}
         <motion.div
