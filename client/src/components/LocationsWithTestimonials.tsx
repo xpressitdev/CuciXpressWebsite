@@ -114,7 +114,7 @@ export default function LocationsWithTestimonials() {
     },
     {
       name: "Cuci Xpress Salar",
-      address: "Spg 12-15, Jln Salar Link, Sengkurong BG2313, Brunei",
+      address: "Block B, Salar Light Industrial, Unit 23 Jalan Muara, BU1429",
       hours: "Daily: 8:00 AM - 8:00 PM",
       bgColor: "bg-gradient-to-br from-orange-50 to-orange-100",
       iconBg: "bg-cuci-secondary",
@@ -123,7 +123,7 @@ export default function LocationsWithTestimonials() {
     },
     {
       name: "Cuci Xpress Bengkurong",
-      address: "Spg 8-11, Jln Bengkurong Link, Brunei-Muara BH1725, Brunei",
+      address: "Unit 12, Ground Floor, Spg. 122, Jalan Bengkurong Masin, Jalan Kampung Bengkurong, Bandar Seri Begawan BF1920",
       hours: "Daily: 8:00 AM - 8:00 PM",
       bgColor: "bg-gradient-to-br from-green-50 to-green-100",
       iconBg: "bg-green-500",
