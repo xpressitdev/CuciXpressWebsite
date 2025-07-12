@@ -2,7 +2,7 @@ import React, { useState, useEffect } from "react";
 import { motion } from "framer-motion";
 import { useIntersectionObserver } from "@/hooks/useIntersectionObserver";
 import { useQuery } from "@tanstack/react-query";
-import { Calendar, DollarSign, MapPin, Star } from "lucide-react";
+import { Calendar, Users, MapPin, Star } from "lucide-react";
 
 interface StatCardProps {
   icon: React.ReactNode;
@@ -137,10 +137,9 @@ export default function Stats() {
       bgColor: "bg-gradient-to-br from-cuci-primary/5 to-cuci-primary/10",
     },
     {
-      icon: <DollarSign className="w-8 h-8" />,
-      value: 1000000,
-      label: "Revenue Generated",
-      prefix: "BND ",
+      icon: <Users className="w-8 h-8" />,
+      value: 22,
+      label: "Local Staff Employed and counting",
       color: "text-cuci-secondary",
       bgColor: "bg-gradient-to-br from-cuci-secondary/5 to-cuci-secondary/10",
     },
