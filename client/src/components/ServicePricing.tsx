@@ -2,7 +2,7 @@ import { motion } from "framer-motion";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
-import { Car, Sparkles, Shield, Clock, Phone, MapPin } from "lucide-react";
+import { Car, Sparkles, Shield, Clock, Phone, MapPin, Banknote } from "lucide-react";
 
 interface ServiceOption {
   name: string;
@@ -163,22 +163,29 @@ export default function ServicePricing() {
           
           <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-4">
             {[
-              "Cash Payment",
-              "BIBD Bank Transfer", 
-              "Baiduri Bank Transfer",
-              "Progresif Ding!",
-              "MyDST Wallet",
-              "Tarus App"
+              { name: "Cash Payment", icon: <Banknote className="w-5 h-5 text-green-600" /> },
+              { name: "BIBD Bank Transfer", icon: null }, 
+              { name: "Baiduri Bank Transfer", icon: null },
+              { name: "Progresif Ding!", icon: null },
+              { name: "MyDST Wallet", icon: null },
+              { name: "Tarus App", icon: null }
             ].map((payment, index) => (
               <motion.div
-                key={payment}
+                key={payment.name}
                 initial={{ opacity: 0, scale: 0.8 }}
                 whileInView={{ opacity: 1, scale: 1 }}
                 transition={{ duration: 0.4, delay: index * 0.1 }}
                 viewport={{ once: true }}
-                className="bg-white rounded-lg p-3 shadow-sm border border-gray-200"
+                className="bg-white rounded-lg p-3 shadow-sm border border-gray-200 flex flex-col items-center gap-2"
               >
-                <span className="text-sm font-medium text-gray-700">{payment}</span>
+                {payment.icon && (
+                  <div className="flex items-center justify-center">
+                    {payment.icon}
+                  </div>
+                )}
+                <span className="text-sm font-medium text-gray-700 text-center">
+                  {payment.icon ? "Cash" : payment.name}
+                </span>
               </motion.div>
             ))}
           </div>
