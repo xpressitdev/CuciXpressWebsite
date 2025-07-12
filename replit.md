@@ -136,6 +136,7 @@ Cuci Xpress is a full-stack web application built for a car wash business that h
 - July 12, 2025. Implemented collaboration form database storage and admin dashboard: Created PostgreSQL schema for submissions, email notifications via ImprovMX forwarding to cucixpress.bn@gmail.com, and professional admin interface at /admin route for viewing and managing submissions
 - July 12, 2025. Moved subscription section to dedicated /subscriptions page: Created comprehensive subscription page with email signup functionality, planned package previews, and benefits overview. Updated navigation to include "Subscriptions" link and simplified home page by replacing subscription section with redirect button
 - July 12, 2025. Updated subscription packages per business recommendations: Implemented realistic exterior-wash-only subscription tiers - Unlimited Xpress Wash (BND60/month), Multi-Car Family Plan (BND150/month), and Corporate Plan (custom pricing). Fixed navigation routing to properly direct to /subscriptions page and restored colorful pricing theme with purple, orange, and green accents
+- July 12, 2025. Refined subscription features and added visual indicators: Removed "Fast Lane Access" feature as it's not offered, replaced with "Wash history tracking". Added animated red "COMING SOON!" overlay on all GET STARTED buttons to clearly indicate subscription service is still in development
 
 ## User Preferences
 

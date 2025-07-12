@@ -18,8 +18,8 @@ const pricingPlans = [
       "1 registered vehicle",
       "Limit: 1 wash per day",
       "Rain Re-Wash Guarantee",
-      "Fast Lane Access",
-      "All locations included"
+      "All locations included",
+      "Wash history tracking"
     ],
     accent: "#6C5CE7",
     rotation: -2,

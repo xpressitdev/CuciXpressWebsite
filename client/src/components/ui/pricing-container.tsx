@@ -254,24 +254,44 @@ const PricingCard = ({
             </div>
 
             {/* CTA Button */}
-            <motion.button
-                className="w-full py-2 rounded-lg text-white font-black text-sm
-                    border-2 border-black shadow-[4px_4px_0px_0px_rgba(0,0,0,0.9)]
-                    hover:shadow-[6px_6px_0px_0px_rgba(0,0,0,0.9)]
-                    active:shadow-[2px_2px_0px_0px_rgba(0,0,0,0.9)]
-                    transition-all duration-200"
-                style={{ backgroundColor: plan.accent }}
-                whileHover={{
-                    scale: 1.02,
-                    transition: { duration: 0.2 }
-                }}
-                whileTap={{
-                    scale: 0.95,
-                    rotate: [-1, 1, 0],
-                }}
-            >
-                GET STARTED →
-            </motion.button>
+            <div className="relative">
+                <motion.button
+                    className="w-full py-2 rounded-lg text-white font-black text-sm
+                        border-2 border-black shadow-[4px_4px_0px_0px_rgba(0,0,0,0.9)]
+                        hover:shadow-[6px_6px_0px_0px_rgba(0,0,0,0.9)]
+                        active:shadow-[2px_2px_0px_0px_rgba(0,0,0,0.9)]
+                        transition-all duration-200"
+                    style={{ backgroundColor: plan.accent }}
+                    whileHover={{
+                        scale: 1.02,
+                        transition: { duration: 0.2 }
+                    }}
+                    whileTap={{
+                        scale: 0.95,
+                        rotate: [-1, 1, 0],
+                    }}
+                >
+                    GET STARTED →
+                </motion.button>
+                
+                {/* Coming Soon Overlay */}
+                <motion.div
+                    className="absolute inset-0 bg-red-500 text-white font-black text-xs
+                        rounded-lg border-2 border-black flex items-center justify-center
+                        shadow-[4px_4px_0px_0px_rgba(0,0,0,0.9)]"
+                    animate={{
+                        scale: [1, 1.05, 1],
+                        rotate: [-1, 1, 0]
+                    }}
+                    transition={{
+                        duration: 2,
+                        repeat: Infinity,
+                        ease: "easeInOut"
+                    }}
+                >
+                    COMING SOON!
+                </motion.div>
+            </div>
         </motion.div>
     );
 };
