@@ -1,4 +1,6 @@
+import { useState } from "react";
 import { motion } from "framer-motion";
+import { ChevronDown, ChevronUp } from "lucide-react";
 import { PricingContainer } from "@/components/ui/pricing-container";
 
 const pricingPlans = [
@@ -48,6 +50,7 @@ const pricingPlans = [
 ];
 
 export default function PricingSection() {
+  const [showPlannedPackages, setShowPlannedPackages] = useState(false);
   return (
     <section id="pricing" className="py-20 bg-white">
       <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
@@ -64,7 +67,7 @@ export default function PricingSection() {
             <p className="text-gray-600 mb-4">
               We're working on launching our subscription service. Sign up below to be notified when it's available!
             </p>
-            <div className="flex flex-col sm:flex-row gap-3 justify-center items-center max-w-md mx-auto">
+            <div className="flex flex-col sm:flex-row gap-3 justify-center items-center max-w-md mx-auto mb-4">
               <input 
                 type="email" 
                 placeholder="Enter your email address"
@@ -74,21 +77,36 @@ export default function PricingSection() {
                 Notify Me
               </button>
             </div>
+            
+            <button
+              onClick={() => setShowPlannedPackages(!showPlannedPackages)}
+              className="flex items-center gap-2 text-cuci-primary hover:text-cuci-primary-dark font-medium transition-colors mx-auto"
+            >
+              {showPlannedPackages ? "Hide" : "Preview"} Planned Packages
+              {showPlannedPackages ? (
+                <ChevronUp className="w-4 h-4" />
+              ) : (
+                <ChevronDown className="w-4 h-4" />
+              )}
+            </button>
           </div>
         </motion.div>
 
-        <motion.div
-          initial={{ opacity: 0, y: 50 }}
-          whileInView={{ opacity: 1, y: 0 }}
-          transition={{ duration: 0.8, delay: 0.2 }}
-          viewport={{ once: true }}
-        >
-          <PricingContainer
-            title="Planned Subscription Packages"
-            plans={pricingPlans}
-            className="max-w-6xl mx-auto opacity-75"
-          />
-        </motion.div>
+        {showPlannedPackages && (
+          <motion.div
+            initial={{ opacity: 0, height: 0 }}
+            animate={{ opacity: 1, height: "auto" }}
+            exit={{ opacity: 0, height: 0 }}
+            transition={{ duration: 0.5 }}
+            className="overflow-hidden"
+          >
+            <PricingContainer
+              title="Planned Subscription Packages"
+              plans={pricingPlans}
+              className="max-w-6xl mx-auto opacity-75"
+            />
+          </motion.div>
+        )}
 
         <motion.div
           initial={{ opacity: 0, y: 30 }}
