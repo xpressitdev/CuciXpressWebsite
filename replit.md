@@ -130,6 +130,7 @@ Cuci Xpress is a full-stack web application built for a car wash business that h
 - June 29, 2025. Deployed website and helped troubleshoot domain connection - identified TXT record conflict preventing proper domain routing to Replit deployment
 - June 29, 2025. Successfully resolved DNS configuration issues by moving domain from Squarespace to GoDaddy and fixing TXT record conflicts - website now live at cucixpress.com
 - July 1, 2025. Added custom Cuci Xpress logo as favicon for better brand recognition in browser tabs and bookmarks
+- July 1, 2025. Updated all branch addresses with authentic Google Maps locations and fixed Get Directions functionality to use business names for accurate navigation
 
 ## User Preferences
 

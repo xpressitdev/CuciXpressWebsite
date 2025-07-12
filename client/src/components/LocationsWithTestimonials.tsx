@@ -105,7 +105,7 @@ export default function LocationsWithTestimonials() {
   const locations: LocationProps[] = [
     {
       name: "Cuci Xpress Tungku Link",
-      address: "Simpang 32-35, Jalan Tungku Link, Gadong BE3519, Brunei",
+      address: "A6, Ground Floor, Block A, Eng Ho Complex, Spg. 217-5-54 Jalan, Lebuhraya Tungku, BE3119",
       hours: "Daily: 8:00 AM - 8:00 PM",
       bgColor: "bg-gradient-to-br from-purple-50 to-purple-100",
       iconBg: "bg-cuci-primary",
@@ -132,7 +132,7 @@ export default function LocationsWithTestimonials() {
     },
     {
       name: "Cuci Xpress Tutong",
-      address: "Simpang 5-7, Jalan Tutong Link, Tutong TA2441, Brunei",
+      address: "Unit 5, Ground Floor, Block A, Fatimah Ahmad Complex, Tutong TA2341",
       hours: "Daily: 8:00 AM - 8:00 PM",
       bgColor: "bg-gradient-to-br from-blue-50 to-blue-100",
       iconBg: "bg-blue-500",
