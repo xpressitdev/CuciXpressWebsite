@@ -2,14 +2,16 @@ import { useState } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import Navigation from "@/components/Navigation";
 import Footer from "@/components/Footer";
+import AdminLogin from "@/components/AdminLogin";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Separator } from "@/components/ui/separator";
-import { ArrowLeft, Eye, Mail, Phone, Building, MessageSquare, Calendar } from "lucide-react";
+import { ArrowLeft, Eye, Mail, Phone, Building, MessageSquare, Calendar, LogOut } from "lucide-react";
 import { Link } from "wouter";
 import { motion } from "framer-motion";
 import { apiRequest } from "@/lib/queryClient";
+import { useAuth } from "@/hooks/useAuth";
 import type { CollaborationSubmission } from "@shared/schema";
 
 interface CollaborationsResponse {
@@ -17,8 +19,22 @@ interface CollaborationsResponse {
 }
 
 export default function Admin() {
+  const { isAuthenticated, isLoading: authLoading, login, logout } = useAuth();
   const queryClient = useQueryClient();
   const [selectedSubmission, setSelectedSubmission] = useState<CollaborationSubmission | null>(null);
+
+  // Show login form if not authenticated
+  if (authLoading) {
+    return (
+      <div className="min-h-screen bg-gray-50 flex items-center justify-center">
+        <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-cuci-primary"></div>
+      </div>
+    );
+  }
+
+  if (!isAuthenticated) {
+    return <AdminLogin onLogin={login} />;
+  }
 
   const { data, isLoading, error } = useQuery<CollaborationsResponse>({
     queryKey: ['/api/admin/collaborations'],
@@ -120,6 +136,14 @@ export default function Admin() {
                   )}
                 </p>
               </div>
+              <Button
+                variant="outline"
+                onClick={logout}
+                className="flex items-center gap-2"
+              >
+                <LogOut className="w-4 h-4" />
+                Logout
+              </Button>
             </div>
           </div>
 
