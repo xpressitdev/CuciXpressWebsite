@@ -1,168 +1,34 @@
-import { useState } from "react";
 import { motion } from "framer-motion";
-import { ChevronDown, ChevronUp } from "lucide-react";
-import { useMutation } from "@tanstack/react-query";
-import { apiRequest } from "@/lib/queryClient";
-import { useToast } from "@/hooks/use-toast";
-import { PricingContainer } from "@/components/ui/pricing-container";
-
-const pricingPlans = [
-  {
-    name: "Basic Wash",
-    monthlyPrice: 100,
-    yearlyPrice: 960, // 20% discount
-    features: [
-      "Exterior Wash",
-      "Rinse & Dry",
-      "Basic Interior Vacuum",
-      "Tire Cleaning"
-    ],
-    accent: "#6C5CE7",
-  },
-  {
-    name: "Premium Clean",
-    monthlyPrice: 120,
-    yearlyPrice: 1152, // 20% discount
-    features: [
-      "Full Exterior Detail",
-      "Deep Interior Clean",
-      "Wax Protection",
-      "Dashboard Polish",
-      "Window Cleaning",
-      "Priority Queue"
-    ],
-    isPopular: true,
-    accent: "#FFA500",
-    rotation: -2,
-  },
-  {
-    name: "Elite Detail",
-    monthlyPrice: 150,
-    yearlyPrice: 1440, // 20% discount
-    features: [
-      "Premium Detailing",
-      "Paint Protection",
-      "Leather Treatment",
-      "Engine Bay Clean",
-      "Unlimited Visits",
-      "VIP Service"
-    ],
-    accent: "#22C55E",
-    rotation: 2,
-  },
-];
 
 export default function PricingSection() {
-  const [showPlannedPackages, setShowPlannedPackages] = useState(false);
-  const [email, setEmail] = useState("");
-  const { toast } = useToast();
-
-  const subscriptionMutation = useMutation({
-    mutationFn: (email: string) => apiRequest('POST', '/api/subscription-signup', { email }),
-    onSuccess: () => {
-      toast({
-        title: "Success!",
-        description: "We'll notify you when our subscription service launches.",
-      });
-      setEmail("");
-    },
-    onError: (error: any) => {
-      toast({
-        title: "Error",
-        description: error.message || "Something went wrong. Please try again.",
-        variant: "destructive",
-      });
-    },
-  });
-
-  const handleSubscriptionSubmit = (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!email.trim()) {
-      toast({
-        title: "Error",
-        description: "Please enter a valid email address.",
-        variant: "destructive",
-      });
-      return;
-    }
-    subscriptionMutation.mutate(email);
-  };
   return (
     <section id="pricing" className="py-20 bg-white">
       <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
-        {/* Not Yet Live Banner */}
-        <motion.div
-          initial={{ opacity: 0, y: 20 }}
-          whileInView={{ opacity: 1, y: 0 }}
-          transition={{ duration: 0.6 }}
-          viewport={{ once: true }}
-          className="text-center mb-8"
-        >
-          <div className="bg-gradient-to-r from-cuci-primary/10 to-cuci-secondary/10 rounded-2xl p-6 border-2 border-dashed border-cuci-primary/30">
-            <h3 className="text-2xl font-bold text-cuci-primary mb-2">Subscription Service: Coming Soon!</h3>
-            <p className="text-gray-600 mb-4">
-              We're working on launching our subscription service. Sign up below to be notified when it's available!
-            </p>
-            <form onSubmit={handleSubscriptionSubmit} className="flex flex-col sm:flex-row gap-3 justify-center items-center max-w-md mx-auto mb-4">
-              <input 
-                type="email" 
-                value={email}
-                onChange={(e) => setEmail(e.target.value)}
-                placeholder="Enter your email address"
-                required
-                disabled={subscriptionMutation.isPending}
-                className="flex-1 px-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-cuci-primary focus:border-transparent disabled:opacity-50"
-              />
-              <button 
-                type="submit"
-                disabled={subscriptionMutation.isPending}
-                className="bg-cuci-primary hover:bg-cuci-primary/90 text-white px-6 py-2 rounded-lg font-medium transition-colors whitespace-nowrap disabled:opacity-50"
-              >
-                {subscriptionMutation.isPending ? 'Signing Up...' : 'Notify Me'}
-              </button>
-            </form>
-            
-            <button
-              onClick={() => setShowPlannedPackages(!showPlannedPackages)}
-              className="flex items-center gap-2 text-cuci-primary hover:text-cuci-primary-dark font-medium transition-colors mx-auto"
-            >
-              {showPlannedPackages ? "Hide" : "Preview"} Planned Packages
-              {showPlannedPackages ? (
-                <ChevronUp className="w-4 h-4" />
-              ) : (
-                <ChevronDown className="w-4 h-4" />
-              )}
-            </button>
-          </div>
-        </motion.div>
-
-        {showPlannedPackages && (
-          <motion.div
-            initial={{ opacity: 0, height: 0 }}
-            animate={{ opacity: 1, height: "auto" }}
-            exit={{ opacity: 0, height: 0 }}
-            transition={{ duration: 0.5 }}
-            className="overflow-hidden"
-          >
-            <PricingContainer
-              title="Planned Subscription Packages"
-              plans={pricingPlans}
-              className="max-w-6xl mx-auto opacity-75"
-            />
-          </motion.div>
-        )}
-
         <motion.div
           initial={{ opacity: 0, y: 30 }}
           whileInView={{ opacity: 1, y: 0 }}
           transition={{ duration: 0.6, delay: 0.4 }}
           viewport={{ once: true }}
-          className="text-center mt-12"
+          className="text-center"
         >
-          <p className="text-gray-600 mb-6">
-            All plans include our satisfaction guarantee and flexible cancellation policy.
+          <h2 className="text-3xl md:text-4xl font-bold text-gray-900 mb-4">
+            Looking for <span className="text-cuci-primary">Subscription Services</span>?
+          </h2>
+          <p className="text-xl text-gray-600 mb-8 max-w-3xl mx-auto">
+            We're working on launching subscription packages for regular car care. 
+            Check out our dedicated subscriptions page for more details!
           </p>
           <div className="flex flex-col sm:flex-row gap-4 justify-center">
+            <motion.button
+              whileHover={{ scale: 1.05 }}
+              whileTap={{ scale: 0.95 }}
+              onClick={() => {
+                window.location.href = '/subscriptions';
+              }}
+              className="bg-cuci-primary hover:bg-cuci-primary-dark text-white px-8 py-3 rounded-full font-semibold transition-all shadow-lg"
+            >
+              View Subscription Plans
+            </motion.button>
             <motion.button
               whileHover={{ scale: 1.05 }}
               whileTap={{ scale: 0.95 }}
@@ -172,22 +38,9 @@ export default function PricingSection() {
                   element.scrollIntoView({ behavior: 'smooth' });
                 }
               }}
-              className="bg-cuci-primary hover:bg-cuci-primary-dark text-white px-8 py-3 rounded-full font-semibold transition-all shadow-lg"
-            >
-              Find Nearest Location
-            </motion.button>
-            <motion.button
-              whileHover={{ scale: 1.05 }}
-              whileTap={{ scale: 0.95 }}
-              onClick={() => {
-                const element = document.getElementById('invest');
-                if (element) {
-                  element.scrollIntoView({ behavior: 'smooth' });
-                }
-              }}
               className="border-2 border-cuci-secondary text-cuci-secondary hover:bg-cuci-secondary hover:text-white px-8 py-3 rounded-full font-semibold transition-all"
             >
-              Get in Touch
+              Find Nearest Location
             </motion.button>
           </div>
         </motion.div>

@@ -46,7 +46,7 @@ export default function Navigation() {
     { id: "locations", label: "Locations", path: "/" },
     { id: "gallery", label: "Gallery", path: "/" },
     { id: "service-pricing", label: "Pricing", path: "/" },
-    { id: "pricing", label: "Subscriptions", path: "/" },
+    { id: "subscriptions", label: "Subscriptions", path: "/subscriptions" },
   ];
 
   return (
