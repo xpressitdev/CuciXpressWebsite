@@ -77,11 +77,21 @@ export default function Hero() {
             transition={{ duration: 0.8, delay: 0.2 }}
             className="relative"
           >
-            <img
-              src="https://pixabay.com/get/g5fe9704d3b25c3377cad960908aae2391e9a0384ffb9661f49aa74ad08d24781c379668a5ee40323f34bbd987e0c5288333178edc8e9a676259adeac340430f0_1280.jpg"
-              alt="Modern car wash facility"
-              className="rounded-2xl shadow-2xl w-full h-auto"
-            />
+            {/* Video Container - Ready for video embed */}
+            <div className="relative w-full h-0 pb-[56.25%] rounded-2xl overflow-hidden shadow-2xl bg-gray-100">
+              {/* Placeholder for video - replace this div with video element when ready */}
+              <div className="absolute inset-0 flex items-center justify-center bg-gradient-to-br from-cuci-primary/20 to-cuci-secondary/20">
+                <div className="text-center">
+                  <div className="w-16 h-16 mx-auto mb-4 bg-white/20 rounded-full flex items-center justify-center">
+                    <svg className="w-8 h-8 text-white" fill="currentColor" viewBox="0 0 24 24">
+                      <path d="M8 5v14l11-7z"/>
+                    </svg>
+                  </div>
+                  <p className="text-white font-semibold">Video Coming Soon</p>
+                </div>
+              </div>
+            </div>
+            
             <motion.div
               initial={{ opacity: 0, y: 50 }}
               animate={{ opacity: 1, y: 0 }}
