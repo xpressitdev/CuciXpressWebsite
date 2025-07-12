@@ -136,7 +136,7 @@ export default function Footer() {
               </li>
               <li className="text-gray-300">
                 <strong>Phone:</strong><br />
-                +673 234 5678
+                +673 838 7000
               </li>
               <li className="text-gray-300">
                 <strong>Email:</strong><br />
