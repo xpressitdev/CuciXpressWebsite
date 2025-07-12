@@ -1,6 +1,10 @@
 import type { Express } from "express";
 import { createServer, type Server } from "http";
 import { z } from "zod";
+import { db } from "./db";
+import { collaborationSubmissions, insertCollaborationSubmissionSchema } from "@shared/schema";
+import { sendCollaborationNotification } from "./email";
+import { eq, desc } from "drizzle-orm";
 
 const investorInterestSchema = z.object({
   name: z.string().min(1, "Name is required"),
@@ -206,22 +210,28 @@ export async function registerRoutes(app: Express): Promise<Server> {
   // Collaboration interest form submission
   app.post("/api/collaboration-interest", async (req, res) => {
     try {
-      const data = collaborationInterestSchema.parse(req.body);
+      const data = insertCollaborationSubmissionSchema.parse(req.body);
       
-      // Log the submission (in production, this would save to database)
-      console.log("New collaboration interest submission:", {
+      // Save to database
+      const [submission] = await db.insert(collaborationSubmissions).values(data).returning();
+      
+      // Send email notification via ImprovMX forwarding
+      const emailSent = await sendCollaborationNotification({
         ...data,
-        timestamp: new Date().toISOString(),
+        submittedAt: new Date().toISOString(),
       });
       
-      // In a real application, you would:
-      // 1. Save to database
-      // 2. Send email notifications
-      // 3. Add to CRM system
+      console.log("New collaboration submission saved:", {
+        id: submission.id,
+        name: data.name,
+        email: data.email,
+        emailSent,
+        timestamp: submission.createdAt,
+      });
       
       res.json({ 
         success: true, 
-        message: "Thank you for your collaboration interest! We will contact you soon." 
+        message: "Thank you for your collaboration interest! We will contact you within 48 hours." 
       });
     } catch (error) {
       console.error("Error processing collaboration interest:", error);
@@ -238,6 +248,42 @@ export async function registerRoutes(app: Express): Promise<Server> {
           message: "Internal server error" 
         });
       }
+    }
+  });
+
+  // Admin endpoint to get collaboration submissions
+  app.get("/api/admin/collaborations", async (req, res) => {
+    try {
+      const submissions = await db
+        .select()
+        .from(collaborationSubmissions)
+        .orderBy(desc(collaborationSubmissions.createdAt));
+      
+      res.json({ submissions });
+    } catch (error) {
+      console.error("Error fetching collaboration submissions:", error);
+      res.status(500).json({ 
+        error: "Failed to fetch submissions" 
+      });
+    }
+  });
+
+  // Admin endpoint to mark submission as read
+  app.patch("/api/admin/collaborations/:id/read", async (req, res) => {
+    try {
+      const id = parseInt(req.params.id);
+      
+      await db
+        .update(collaborationSubmissions)
+        .set({ isRead: true })
+        .where(eq(collaborationSubmissions.id, id));
+      
+      res.json({ success: true });
+    } catch (error) {
+      console.error("Error updating submission:", error);
+      res.status(500).json({ 
+        error: "Failed to update submission" 
+      });
     }
   });
 
