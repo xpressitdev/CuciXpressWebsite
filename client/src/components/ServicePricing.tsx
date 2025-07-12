@@ -3,7 +3,11 @@ import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Car, Sparkles, Shield, Clock, Phone, MapPin, Banknote } from "lucide-react";
-import dingLogo from "@/assets/ding-logo.webp";
+import progresifDing from "@/assets/progresif-ding.webp";
+import mydstWallet from "@/assets/mydst-wallet.png";
+import tarusApp from "@/assets/tarus-app.png";
+import baiduriBankLogo from "@/assets/baiduri-bank.webp";
+import bibdBankLogo from "@/assets/bibd-bank.jpg";
 
 interface ServiceOption {
   name: string;
@@ -159,17 +163,47 @@ export default function ServicePricing() {
           viewport={{ once: true }}
           className="text-center bg-gradient-to-br from-purple-50 to-orange-50 rounded-2xl p-8 mb-8"
         >
-          <h3 className="text-2xl font-bold text-gray-900 mb-4">We Accept</h3>
-          <p className="text-gray-600 mb-6">Multiple convenient payment options available</p>
+          <h3 className="text-2xl font-bold text-gray-900 mb-4">Payment Methods</h3>
+          <p className="text-gray-600 mb-8">We accept multiple convenient payment options</p>
           
-          <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-4">
+          <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-6">
             {[
-              { name: "Cash Payment", icon: <Banknote className="w-5 h-5 text-green-600" />, showText: false },
-              { name: "BIBD Bank Transfer", icon: null, showText: true }, 
-              { name: "Baiduri Bank Transfer", icon: null, showText: true },
-              { name: "Progresif Ding!", icon: <img src={dingLogo} alt="Ding" className="w-8 h-8 object-contain" />, showText: false },
-              { name: "MyDST Wallet", icon: null, showText: true },
-              { name: "Tarus App", icon: null, showText: true }
+              { 
+                name: "Cash Payment", 
+                logo: null, 
+                icon: <Banknote className="w-8 h-8 text-green-600" />,
+                caption: "Cash"
+              },
+              { 
+                name: "BIBD Transfer", 
+                logo: bibdBankLogo, 
+                icon: null,
+                caption: "BIBD Transfer"
+              },
+              { 
+                name: "Baiduri Bank Transfer", 
+                logo: baiduriBankLogo, 
+                icon: null,
+                caption: "Baiduri Transfer"
+              },
+              { 
+                name: "Progresif Ding!", 
+                logo: progresifDing, 
+                icon: null,
+                caption: "Progresif Ding!"
+              },
+              { 
+                name: "MyDST Wallet", 
+                logo: mydstWallet, 
+                icon: null,
+                caption: "MyDST Wallet"
+              },
+              { 
+                name: "Tarus App", 
+                logo: tarusApp, 
+                icon: null,
+                caption: "Tarus App"
+              }
             ].map((payment, index) => (
               <motion.div
                 key={payment.name}
@@ -177,23 +211,27 @@ export default function ServicePricing() {
                 whileInView={{ opacity: 1, scale: 1 }}
                 transition={{ duration: 0.4, delay: index * 0.1 }}
                 viewport={{ once: true }}
-                className="bg-white rounded-lg p-3 shadow-sm border border-gray-200 flex flex-col items-center gap-2"
+                className="bg-white rounded-lg p-4 shadow-md border border-gray-200 hover:shadow-lg transition-shadow duration-300"
               >
-                {payment.icon && (
-                  <div className="flex items-center justify-center">
-                    {payment.icon}
+                <div className="flex flex-col items-center gap-3">
+                  {/* Logo or Icon */}
+                  <div className="h-12 flex items-center justify-center">
+                    {payment.logo ? (
+                      <img 
+                        src={payment.logo} 
+                        alt={payment.name}
+                        className="max-h-10 max-w-full object-contain"
+                      />
+                    ) : (
+                      payment.icon
+                    )}
                   </div>
-                )}
-                {payment.showText && (
-                  <span className="text-sm font-medium text-gray-700 text-center">
-                    {payment.name}
+                  
+                  {/* Caption */}
+                  <span className="text-xs font-medium text-gray-600 text-center leading-tight">
+                    {payment.caption}
                   </span>
-                )}
-                {!payment.showText && payment.name === "Cash Payment" && (
-                  <span className="text-sm font-medium text-gray-700 text-center">
-                    Cash
-                  </span>
-                )}
+                </div>
               </motion.div>
             ))}
           </div>
