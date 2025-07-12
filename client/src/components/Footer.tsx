@@ -147,19 +147,21 @@ export default function Footer() {
             </p>
             <div className="flex flex-col sm:flex-row items-center space-y-4 sm:space-y-0 sm:space-x-6 mt-4 md:mt-0">
               <div className="flex space-x-6">
-                <a href="#" className="text-gray-400 hover:text-cuci-primary text-sm transition-colors">
+                <a href="/privacy-policy" className="text-gray-400 hover:text-cuci-primary text-sm transition-colors">
                   Privacy Policy
                 </a>
-                <a href="#" className="text-gray-400 hover:text-cuci-primary text-sm transition-colors">
+                <a href="/terms-of-service" className="text-gray-400 hover:text-cuci-primary text-sm transition-colors">
                   Terms of Service
                 </a>
               </div>
-              <button
-                onClick={() => handleNavigation('collaborate')}
+              <a
+                href="https://wa.me/6738387000"
+                target="_blank"
+                rel="noopener noreferrer"
                 className="bg-cuci-primary hover:bg-cuci-primary-dark text-white px-4 py-2 rounded-full text-sm font-medium transition-colors"
               >
                 Get in Touch
-              </button>
+              </a>
             </div>
           </div>
         </div>
