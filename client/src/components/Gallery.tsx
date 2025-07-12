@@ -52,7 +52,7 @@ export default function Gallery() {
         >
           <h2 className="text-4xl font-bold text-gray-900 mb-4">See Our Work</h2>
           <p className="text-xl text-gray-600 max-w-3xl mx-auto">
-            From state-of-the-art facilities to satisfied customers, witness the Cuci Xpress difference.
+            Experience our drive-thru car wash technology and see the quality results we deliver across all locations.
           </p>
         </motion.div>
 
