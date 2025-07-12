@@ -31,7 +31,7 @@ export default function Footer() {
     { id: "testimonials", label: "Reviews" },
     { id: "locations", label: "Locations" },
     { id: "gallery", label: "Gallery" },
-    { id: "pricing", label: "Pricing" },
+    { id: "service-pricing", label: "Pricing" },
   ];
 
   const socialLinks = [

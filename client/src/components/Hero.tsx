@@ -64,10 +64,10 @@ export default function Hero() {
                   scale: 0.95,
                   boxShadow: "2px 2px 0px 0px rgba(0,0,0,0.9)"
                 }}
-                onClick={() => handleNavigation("pricing")}
+                onClick={() => handleNavigation("service-pricing")}
                 className="bg-cuci-secondary text-white px-8 py-4 rounded-lg text-lg font-black border-2 border-black shadow-[4px_4px_0px_0px_rgba(0,0,0,0.9)] transition-all duration-200"
               >
-                View Subscriptions →
+                View Pricing →
               </motion.button>
             </div>
           </motion.div>

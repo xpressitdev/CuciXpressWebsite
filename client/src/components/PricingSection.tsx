@@ -51,6 +51,32 @@ export default function PricingSection() {
   return (
     <section id="pricing" className="py-20 bg-white">
       <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
+        {/* Not Yet Live Banner */}
+        <motion.div
+          initial={{ opacity: 0, y: 20 }}
+          whileInView={{ opacity: 1, y: 0 }}
+          transition={{ duration: 0.6 }}
+          viewport={{ once: true }}
+          className="text-center mb-8"
+        >
+          <div className="bg-gradient-to-r from-cuci-primary/10 to-cuci-secondary/10 rounded-2xl p-6 border-2 border-dashed border-cuci-primary/30">
+            <h3 className="text-2xl font-bold text-cuci-primary mb-2">Subscription Service: Coming Soon!</h3>
+            <p className="text-gray-600 mb-4">
+              We're working on launching our subscription service. Sign up below to be notified when it's available!
+            </p>
+            <div className="flex flex-col sm:flex-row gap-3 justify-center items-center max-w-md mx-auto">
+              <input 
+                type="email" 
+                placeholder="Enter your email address"
+                className="flex-1 px-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-cuci-primary focus:border-transparent"
+              />
+              <button className="bg-cuci-primary hover:bg-cuci-primary/90 text-white px-6 py-2 rounded-lg font-medium transition-colors whitespace-nowrap">
+                Notify Me
+              </button>
+            </div>
+          </div>
+        </motion.div>
+
         <motion.div
           initial={{ opacity: 0, y: 50 }}
           whileInView={{ opacity: 1, y: 0 }}
@@ -58,9 +84,9 @@ export default function PricingSection() {
           viewport={{ once: true }}
         >
           <PricingContainer
-            title="Car Wash Subscriptions"
+            title="Planned Subscription Packages"
             plans={pricingPlans}
-            className="max-w-6xl mx-auto"
+            className="max-w-6xl mx-auto opacity-75"
           />
         </motion.div>
 
