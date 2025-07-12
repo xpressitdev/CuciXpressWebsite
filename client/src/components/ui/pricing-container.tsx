@@ -187,10 +187,16 @@ const PricingCard = ({
                 }}
             >
                 <div className="text-center text-white">
-                    <div className="text-lg font-black">BND
-                        <Counter from={previousPrice} to={currentPrice} />
-                    </div>
-                    <div className="text-[10px] font-bold">/{isYearly ? 'yr' : 'mo'}</div>
+                    {(plan as any).isCustom ? (
+                        <div className="text-xs font-black">CUSTOM</div>
+                    ) : (
+                        <>
+                            <div className="text-lg font-black">BND
+                                <Counter from={previousPrice} to={currentPrice} />
+                            </div>
+                            <div className="text-[10px] font-bold">/{isYearly ? 'yr' : 'mo'}</div>
+                        </>
+                    )}
                 </div>
             </motion.div>
 

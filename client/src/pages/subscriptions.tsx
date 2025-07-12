@@ -10,47 +10,51 @@ import { useToast } from "@/hooks/use-toast";
 
 const pricingPlans = [
   {
-    name: "Basic Wash",
-    monthlyPrice: 100,
-    yearlyPrice: 1080,
+    name: "Unlimited Xpress Wash",
+    monthlyPrice: 60,
+    yearlyPrice: 648,
     features: [
-      "Weekly exterior wash",
-      "Basic interior vacuum", 
-      "Tire cleaning",
-      "Priority booking",
-      "Mobile app access"
+      "Unlimited exterior washes",
+      "1 registered vehicle",
+      "Limit: 1 wash per day",
+      "Rain Re-Wash Guarantee",
+      "Fast Lane Access",
+      "All locations included"
     ],
     accent: "#6C5CE7",
     rotation: -2,
   },
   {
-    name: "Premium Clean", 
-    monthlyPrice: 120,
-    yearlyPrice: 1296,
+    name: "Multi-Car Family Plan", 
+    monthlyPrice: 150,
+    yearlyPrice: 1620,
     features: [
-      "Bi-weekly full service",
-      "Interior detailing",
-      "Wax protection",
-      "Engine bay cleaning",
-      "Free pickup/delivery"
+      "Up to 3 vehicles covered",
+      "1 wash per day per vehicle",
+      "Unlimited monthly washes",
+      "Rain Re-Wash Guarantee",
+      "Shared plan management",
+      "Easy multi-plate registration"
     ],
     isPopular: true,
     accent: "#FFA500",
     rotation: 1,
   },
   {
-    name: "Elite Detail",
-    monthlyPrice: 150, 
-    yearlyPrice: 1620,
+    name: "Corporate Plan",
+    monthlyPrice: 0, 
+    yearlyPrice: 0,
     features: [
-      "Weekly premium service",
-      "Paint protection",
-      "Leather conditioning", 
-      "Ceramic coating",
-      "24/7 concierge service"
+      "Custom pricing (5+ vehicles)",
+      "Monthly or prepaid billing",
+      "Priority fleet access",
+      "Detailed usage reports",
+      "Custom onboarding support",
+      "Rain Re-Wash included"
     ],
     accent: "#22C55E",
     rotation: -1,
+    isCustom: true,
   },
 ];
 
@@ -107,8 +111,8 @@ export default function Subscriptions() {
                 Car Wash <span className="text-cuci-primary">Subscriptions</span>
               </h1>
               <p className="text-xl text-gray-600 mb-8 max-w-3xl mx-auto">
-                Get ready for hassle-free car care with our upcoming subscription service. 
-                Never worry about a dirty car again!
+                Perfect for everyday drivers, families, and businesses! Choose from our exterior wash subscription plans 
+                designed to keep your vehicles clean and presentable all month long.
               </p>
             </motion.div>
           </div>
@@ -128,8 +132,8 @@ export default function Subscriptions() {
               <div className="bg-gradient-to-r from-cuci-primary/10 to-cuci-secondary/10 rounded-2xl p-8 border-2 border-dashed border-cuci-primary/30">
                 <h3 className="text-3xl font-bold text-cuci-primary mb-4">Subscription Service: Coming Soon!</h3>
                 <p className="text-lg text-gray-600 mb-6 max-w-2xl mx-auto">
-                  We're working on launching our subscription service that will revolutionize how you keep your car clean. 
-                  Sign up below to be the first to know when it's available!
+                  We're finalizing our exterior wash subscription plans designed specifically for Brunei's climate. 
+                  Sign up below to be the first to know when these packages launch!
                 </p>
                 <form onSubmit={handleSubscriptionSubmit} className="flex flex-col sm:flex-row gap-4 justify-center items-center max-w-lg mx-auto mb-6">
                   <input 
@@ -154,7 +158,7 @@ export default function Subscriptions() {
                   onClick={() => setShowPlannedPackages(!showPlannedPackages)}
                   className="flex items-center gap-2 text-cuci-primary hover:text-cuci-primary-dark font-semibold transition-colors mx-auto text-lg"
                 >
-                  {showPlannedPackages ? "Hide" : "Preview"} Planned Packages
+                  {showPlannedPackages ? "Hide" : "Preview"} Packages
                   {showPlannedPackages ? (
                     <ChevronUp className="w-5 h-5" />
                   ) : (
@@ -173,9 +177,9 @@ export default function Subscriptions() {
                 className="overflow-hidden"
               >
                 <PricingContainer
-                  title="Planned Subscription Packages"
+                  title="Subscription Packages"
                   plans={pricingPlans}
-                  className="max-w-6xl mx-auto opacity-75"
+                  className="max-w-6xl mx-auto"
                 />
               </motion.div>
             )}
