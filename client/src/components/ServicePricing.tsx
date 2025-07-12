@@ -274,10 +274,10 @@ export default function ServicePricing() {
             <Button 
               variant="outline" 
               className="border-gray-300 text-gray-600 hover:bg-gray-100 px-8"
-              onClick={() => window.open('tel:8887000', '_blank')}
+              onClick={() => window.open('tel:+6738387000', '_blank')}
             >
               <Phone className="w-4 h-4 mr-2" />
-              Call: 888 7000
+              Call: +673 838 7000
             </Button>
           </div>
           
