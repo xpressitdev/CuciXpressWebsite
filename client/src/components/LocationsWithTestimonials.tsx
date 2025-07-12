@@ -48,7 +48,7 @@ function LocationCard({ name, address, hours, bgColor, iconBg, coordinates, plac
             <button
               onClick={(e) => {
                 e.stopPropagation();
-                window.open(`https://www.google.com/maps/dir/?api=1&destination=${encodeURIComponent(address)}`, '_blank');
+                window.open(`https://www.google.com/maps/dir/?api=1&destination=${encodeURIComponent(name)}`, '_blank');
               }}
               className="inline-flex items-center space-x-2 text-sm font-medium text-cuci-primary hover:text-cuci-secondary transition-colors"
             >
