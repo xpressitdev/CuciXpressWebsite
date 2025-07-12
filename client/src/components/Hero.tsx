@@ -1,6 +1,7 @@
 import { motion } from "framer-motion";
 import { CheckCircle } from "lucide-react";
 import { Link, useLocation } from "wouter";
+import heroVideo from "../assets/hero-video.mp4";
 
 export default function Hero() {
   const [location] = useLocation();
@@ -77,19 +78,18 @@ export default function Hero() {
             transition={{ duration: 0.8, delay: 0.2 }}
             className="relative"
           >
-            {/* Video Container - Ready for video embed */}
-            <div className="relative w-full h-0 pb-[56.25%] rounded-2xl overflow-hidden shadow-2xl bg-gray-100">
-              {/* Placeholder for video - replace this div with video element when ready */}
-              <div className="absolute inset-0 flex items-center justify-center bg-gradient-to-br from-cuci-primary/20 to-cuci-secondary/20">
-                <div className="text-center">
-                  <div className="w-16 h-16 mx-auto mb-4 bg-white/20 rounded-full flex items-center justify-center">
-                    <svg className="w-8 h-8 text-white" fill="currentColor" viewBox="0 0 24 24">
-                      <path d="M8 5v14l11-7z"/>
-                    </svg>
-                  </div>
-                  <p className="text-white font-semibold">Video Coming Soon</p>
-                </div>
-              </div>
+            {/* Video Container */}
+            <div className="relative w-full h-0 pb-[56.25%] rounded-2xl overflow-hidden shadow-2xl bg-black">
+              <video
+                className="absolute inset-0 w-full h-full object-cover"
+                autoPlay
+                muted
+                loop
+                playsInline
+              >
+                <source src={heroVideo} type="video/mp4" />
+                Your browser does not support the video tag.
+              </video>
             </div>
             
             <motion.div
