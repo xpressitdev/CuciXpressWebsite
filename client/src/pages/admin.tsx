@@ -23,6 +23,18 @@ export default function Admin() {
   const queryClient = useQueryClient();
   const [selectedSubmission, setSelectedSubmission] = useState<CollaborationSubmission | null>(null);
 
+  const { data, isLoading, error } = useQuery<CollaborationsResponse>({
+    queryKey: ['/api/admin/collaborations'],
+    enabled: isAuthenticated, // Only run query when authenticated
+  });
+
+  const markAsReadMutation = useMutation({
+    mutationFn: (id: number) => apiRequest('PATCH', `/api/admin/collaborations/${id}/read`, {}),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['/api/admin/collaborations'] });
+    },
+  });
+
   // Show login form if not authenticated
   if (authLoading) {
     return (
@@ -35,17 +47,6 @@ export default function Admin() {
   if (!isAuthenticated) {
     return <AdminLogin onLogin={login} />;
   }
-
-  const { data, isLoading, error } = useQuery<CollaborationsResponse>({
-    queryKey: ['/api/admin/collaborations'],
-  });
-
-  const markAsReadMutation = useMutation({
-    mutationFn: (id: number) => apiRequest('PATCH', `/api/admin/collaborations/${id}/read`, {}),
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ['/api/admin/collaborations'] });
-    },
-  });
 
   const handleMarkAsRead = async (id: number) => {
     try {
