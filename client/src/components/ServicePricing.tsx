@@ -82,7 +82,7 @@ export default function ServicePricing() {
         >
           <h2 className="text-4xl font-bold text-gray-900 mb-4">Service Pricing</h2>
           <p className="text-xl text-gray-600 max-w-3xl mx-auto">
-            Quick and convenient drive-thru car wash with transparent pricing. Same great rates for all car sizes.
+            Quick and convenient drive-thru car wash with transparent pricing. Same great rates for all car sizes. All major payment methods accepted for your convenience.
           </p>
         </motion.div>
 
