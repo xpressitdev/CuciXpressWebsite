@@ -83,6 +83,8 @@ export default function Footer() {
                 <motion.a
                   key={index}
                   href={link.href}
+                  target="_blank"
+                  rel="noopener noreferrer"
                   whileHover={{ scale: 1.1 }}
                   whileTap={{ scale: 0.9 }}
                   className="bg-gray-800 hover:bg-cuci-primary p-3 rounded-full transition-colors"
