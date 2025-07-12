@@ -44,7 +44,7 @@ This notification was sent from the Cuci Xpress website collaboration form.
     `.trim();
 
     await mailService.send({
-      to: 'info@cucixpress.com', // This will forward to your personal email via ImprovMX
+      to: 'cucixpress.bn@gmail.com',
       from: 'noreply@cucixpress.com', // Must be verified sender domain
       subject: `New Collaboration Request from ${data.name}`,
       text: emailContent,

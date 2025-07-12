@@ -134,7 +134,9 @@ export default function Footer() {
               </li>
               <li className="text-gray-300">
                 <strong>Email:</strong><br />
-                info@cucixpress.com
+                <a href="mailto:cucixpress.bn@gmail.com" className="text-cuci-primary hover:text-cuci-primary-dark transition-colors">
+                  cucixpress.bn@gmail.com
+                </a>
               </li>
             </ul>
           </motion.div>

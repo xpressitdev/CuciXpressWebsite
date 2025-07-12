@@ -68,7 +68,7 @@ export default function PrivacyPolicy() {
               </p>
               <ul className="list-none text-gray-700 space-y-2">
                 <li><strong>Phone:</strong> +673 838 7000</li>
-                <li><strong>Email:</strong> info@cucixpress.com</li>
+                <li><strong>Email:</strong> cucixpress.bn@gmail.com</li>
                 <li><strong>Address:</strong> Cuci Xpress Tungku Link, A6, Ground Floor, Block A, Eng Ho Complex, Spg. 217-5-54 Jalan, Lebuhraya Tungku, BE3119</li>
               </ul>
             </div>
