@@ -132,7 +132,7 @@ export default function Footer() {
             <ul className="space-y-3">
               <li className="text-gray-300">
                 <strong>Main Branch:</strong><br />
-                Jalan Tutong, BSB BA1511
+                Cuci Xpress Tungku Link, A6, Ground Floor, Block A, Eng Ho Complex, Spg. 217-5-54 Jalan, Lebuhraya Tungku, BE3119
               </li>
               <li className="text-gray-300">
                 <strong>Phone:</strong><br />
