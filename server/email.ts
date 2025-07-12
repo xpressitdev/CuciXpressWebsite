@@ -18,6 +18,11 @@ interface CollaborationEmailData {
   submittedAt: string;
 }
 
+interface SubscriptionEmailData {
+  email: string;
+  submittedAt: string;
+}
+
 export async function sendCollaborationNotification(data: CollaborationEmailData): Promise<boolean> {
   if (!process.env.SENDGRID_API_KEY) {
     console.log("Email notification skipped - no SENDGRID_API_KEY configured");
@@ -77,6 +82,53 @@ This notification was sent from the Cuci Xpress website collaboration form.
     return true;
   } catch (error) {
     console.error('Failed to send collaboration notification email:', error);
+    return false;
+  }
+}
+
+export async function sendSubscriptionNotification(data: SubscriptionEmailData): Promise<boolean> {
+  if (!process.env.SENDGRID_API_KEY) {
+    console.log("Subscription notification skipped - no SENDGRID_API_KEY configured");
+    return false;
+  }
+
+  try {
+    const emailContent = `
+New Subscription Signup
+
+Email: ${data.email}
+Signed up at: ${data.submittedAt}
+
+---
+This notification was sent from the Cuci Xpress subscription signup form.
+    `.trim();
+
+    await mailService.send({
+      to: 'cucixpress.bn@gmail.com',
+      from: 'noreply@cucixpress.com',
+      subject: `New Subscription Signup: ${data.email}`,
+      text: emailContent,
+      html: `
+        <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto;">
+          <h2 style="color: #6C5CE7;">New Subscription Signup</h2>
+          
+          <div style="background: #f8f9fa; padding: 20px; border-radius: 8px; margin: 20px 0;">
+            <h3 style="color: #333; margin-top: 0;">Customer Details:</h3>
+            <p><strong>Email:</strong> <a href="mailto:${data.email}">${data.email}</a></p>
+            <p><strong>Signed up at:</strong> ${data.submittedAt}</p>
+          </div>
+          
+          <p style="color: #6c757d; font-size: 12px; margin-top: 30px;">
+            This notification was sent from the Cuci Xpress subscription signup form.
+          </p>
+        </div>
+      `,
+    });
+
+    console.log("Subscription notification email sent successfully");
+    return true;
+  } catch (error) {
+    console.error('Failed to send subscription notification email:', error);
     return false;
   }
 }

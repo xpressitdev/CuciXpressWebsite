@@ -1,6 +1,9 @@
 import { useState } from "react";
 import { motion } from "framer-motion";
 import { ChevronDown, ChevronUp } from "lucide-react";
+import { useMutation } from "@tanstack/react-query";
+import { apiRequest } from "@/lib/queryClient";
+import { useToast } from "@/hooks/use-toast";
 import { PricingContainer } from "@/components/ui/pricing-container";
 
 const pricingPlans = [
@@ -51,6 +54,39 @@ const pricingPlans = [
 
 export default function PricingSection() {
   const [showPlannedPackages, setShowPlannedPackages] = useState(false);
+  const [email, setEmail] = useState("");
+  const { toast } = useToast();
+
+  const subscriptionMutation = useMutation({
+    mutationFn: (email: string) => apiRequest('POST', '/api/subscription-signup', { email }),
+    onSuccess: () => {
+      toast({
+        title: "Success!",
+        description: "We'll notify you when our subscription service launches.",
+      });
+      setEmail("");
+    },
+    onError: (error: any) => {
+      toast({
+        title: "Error",
+        description: error.message || "Something went wrong. Please try again.",
+        variant: "destructive",
+      });
+    },
+  });
+
+  const handleSubscriptionSubmit = (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!email.trim()) {
+      toast({
+        title: "Error",
+        description: "Please enter a valid email address.",
+        variant: "destructive",
+      });
+      return;
+    }
+    subscriptionMutation.mutate(email);
+  };
   return (
     <section id="pricing" className="py-20 bg-white">
       <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
@@ -67,16 +103,24 @@ export default function PricingSection() {
             <p className="text-gray-600 mb-4">
               We're working on launching our subscription service. Sign up below to be notified when it's available!
             </p>
-            <div className="flex flex-col sm:flex-row gap-3 justify-center items-center max-w-md mx-auto mb-4">
+            <form onSubmit={handleSubscriptionSubmit} className="flex flex-col sm:flex-row gap-3 justify-center items-center max-w-md mx-auto mb-4">
               <input 
                 type="email" 
+                value={email}
+                onChange={(e) => setEmail(e.target.value)}
                 placeholder="Enter your email address"
-                className="flex-1 px-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-cuci-primary focus:border-transparent"
+                required
+                disabled={subscriptionMutation.isPending}
+                className="flex-1 px-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-cuci-primary focus:border-transparent disabled:opacity-50"
               />
-              <button className="bg-cuci-primary hover:bg-cuci-primary/90 text-white px-6 py-2 rounded-lg font-medium transition-colors whitespace-nowrap">
-                Notify Me
+              <button 
+                type="submit"
+                disabled={subscriptionMutation.isPending}
+                className="bg-cuci-primary hover:bg-cuci-primary/90 text-white px-6 py-2 rounded-lg font-medium transition-colors whitespace-nowrap disabled:opacity-50"
+              >
+                {subscriptionMutation.isPending ? 'Signing Up...' : 'Notify Me'}
               </button>
-            </div>
+            </form>
             
             <button
               onClick={() => setShowPlannedPackages(!showPlannedPackages)}

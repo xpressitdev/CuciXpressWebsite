@@ -2,8 +2,8 @@ import type { Express } from "express";
 import { createServer, type Server } from "http";
 import { z } from "zod";
 import { db } from "./db";
-import { collaborationSubmissions, insertCollaborationSubmissionSchema } from "@shared/schema";
-import { sendCollaborationNotification } from "./email";
+import { collaborationSubmissions, insertCollaborationSubmissionSchema, subscriptionSignups, insertSubscriptionSignupSchema } from "@shared/schema";
+import { sendCollaborationNotification, sendSubscriptionNotification } from "./email";
 import { eq, desc } from "drizzle-orm";
 
 const investorInterestSchema = z.object({
@@ -283,6 +283,80 @@ export async function registerRoutes(app: Express): Promise<Server> {
       console.error("Error updating submission:", error);
       res.status(500).json({ 
         error: "Failed to update submission" 
+      });
+    }
+  });
+
+  // Subscription signup endpoint
+  app.post("/api/subscription-signup", async (req, res) => {
+    try {
+      const data = insertSubscriptionSignupSchema.parse(req.body);
+      
+      // Check if email already exists
+      const existingSignup = await db
+        .select()
+        .from(subscriptionSignups)
+        .where(eq(subscriptionSignups.email, data.email))
+        .limit(1);
+      
+      if (existingSignup.length > 0) {
+        return res.status(400).json({ 
+          success: false, 
+          message: "This email is already registered for updates." 
+        });
+      }
+      
+      // Save to database
+      const [signup] = await db.insert(subscriptionSignups).values(data).returning();
+      
+      // Send email notification
+      const emailSent = await sendSubscriptionNotification({
+        email: data.email,
+        submittedAt: new Date().toISOString(),
+      });
+      
+      console.log("New subscription signup saved:", {
+        id: signup.id,
+        email: data.email,
+        emailSent,
+        timestamp: signup.createdAt,
+      });
+      
+      res.json({ 
+        success: true, 
+        message: "Thank you! We'll notify you when our subscription service launches." 
+      });
+    } catch (error) {
+      console.error("Error processing subscription signup:", error);
+      
+      if (error instanceof z.ZodError) {
+        res.status(400).json({ 
+          success: false, 
+          message: "Invalid email address", 
+          errors: error.errors 
+        });
+      } else {
+        res.status(500).json({ 
+          success: false, 
+          message: "Internal server error" 
+        });
+      }
+    }
+  });
+
+  // Admin endpoint to get subscription signups
+  app.get("/api/admin/subscriptions", async (req, res) => {
+    try {
+      const signups = await db
+        .select()
+        .from(subscriptionSignups)
+        .orderBy(desc(subscriptionSignups.createdAt));
+      
+      res.json({ signups });
+    } catch (error) {
+      console.error("Error fetching subscription signups:", error);
+      res.status(500).json({ 
+        error: "Failed to fetch signups" 
       });
     }
   });
