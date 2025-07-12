@@ -6,6 +6,7 @@ import nightView from "@assets/20241007_182239_1751160790928.jpg";
 import dingPayment from "@assets/ding pgh_1751161276778.png";
 import dualWash from "@assets/IMG-20220108-WA0042_1751160949648.jpg";
 import luxuryCars from "../assets/gallery-7.jpg";
+import brandBanner from "../assets/gallery-8.jpg";
 
 export default function Gallery() {
   const galleryImages = [
@@ -42,6 +43,11 @@ export default function Gallery() {
     {
       src: luxuryCars,
       alt: "Professional detail cleaning of luxury vehicles including Jeep and Ford Ranger with Cuci Xpress staff providing meticulous care",
+      span: "col-span-1 row-span-1",
+    },
+    {
+      src: brandBanner,
+      alt: "Cuci Xpress purple branded drive-thru car wash promotional banner with red sports car design",
       span: "col-span-1 row-span-1",
     },
   ];
