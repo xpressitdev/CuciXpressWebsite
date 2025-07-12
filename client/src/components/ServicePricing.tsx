@@ -3,6 +3,7 @@ import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Car, Sparkles, Shield, Clock, Phone, MapPin, Banknote } from "lucide-react";
+import dingLogo from "@/assets/ding-logo.webp";
 
 interface ServiceOption {
   name: string;
@@ -163,12 +164,12 @@ export default function ServicePricing() {
           
           <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-4">
             {[
-              { name: "Cash Payment", icon: <Banknote className="w-5 h-5 text-green-600" /> },
-              { name: "BIBD Bank Transfer", icon: null }, 
-              { name: "Baiduri Bank Transfer", icon: null },
-              { name: "Progresif Ding!", icon: null },
-              { name: "MyDST Wallet", icon: null },
-              { name: "Tarus App", icon: null }
+              { name: "Cash Payment", icon: <Banknote className="w-5 h-5 text-green-600" />, showText: false },
+              { name: "BIBD Bank Transfer", icon: null, showText: true }, 
+              { name: "Baiduri Bank Transfer", icon: null, showText: true },
+              { name: "Progresif Ding!", icon: <img src={dingLogo} alt="Ding" className="w-8 h-8 object-contain" />, showText: false },
+              { name: "MyDST Wallet", icon: null, showText: true },
+              { name: "Tarus App", icon: null, showText: true }
             ].map((payment, index) => (
               <motion.div
                 key={payment.name}
@@ -183,9 +184,16 @@ export default function ServicePricing() {
                     {payment.icon}
                   </div>
                 )}
-                <span className="text-sm font-medium text-gray-700 text-center">
-                  {payment.icon ? "Cash" : payment.name}
-                </span>
+                {payment.showText && (
+                  <span className="text-sm font-medium text-gray-700 text-center">
+                    {payment.name}
+                  </span>
+                )}
+                {!payment.showText && payment.name === "Cash Payment" && (
+                  <span className="text-sm font-medium text-gray-700 text-center">
+                    Cash
+                  </span>
+                )}
               </motion.div>
             ))}
           </div>
