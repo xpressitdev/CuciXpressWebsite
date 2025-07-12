@@ -106,7 +106,7 @@ export default function LocationsWithTestimonials() {
     {
       name: "Cuci Xpress Tungku Link",
       address: "A6, Ground Floor, Block A, Eng Ho Complex, Spg. 217-5-54 Jalan, Lebuhraya Tungku, BE3119",
-      hours: "Daily: 8:00 AM - 8:00 PM",
+      hours: "Daily: 8:00 AM - 7:00 PM",
       bgColor: "bg-gradient-to-br from-purple-50 to-purple-100",
       iconBg: "bg-cuci-primary",
       coordinates: { lat: 4.9112738, lng: 114.9239572 },
