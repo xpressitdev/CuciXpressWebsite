@@ -115,7 +115,7 @@ export default function LocationsWithTestimonials() {
     {
       name: "Cuci Xpress Salar",
       address: "Block B, Salar Light Industrial, Unit 23 Jalan Muara, BU1429",
-      hours: "Daily: 8:00 AM - 8:00 PM",
+      hours: "Daily: 8:00 AM - 7:00 PM",
       bgColor: "bg-gradient-to-br from-orange-50 to-orange-100",
       iconBg: "bg-cuci-secondary",
       coordinates: { lat: 5.00443, lng: 114.99290 },
@@ -124,7 +124,7 @@ export default function LocationsWithTestimonials() {
     {
       name: "Cuci Xpress Bengkurong",
       address: "Unit 12, Ground Floor, Spg. 122, Jalan Bengkurong Masin, Jalan Kampung Bengkurong, Bandar Seri Begawan BF1920",
-      hours: "Daily: 8:00 AM - 8:00 PM",
+      hours: "Daily: 8:00 AM - 7:00 PM",
       bgColor: "bg-gradient-to-br from-green-50 to-green-100",
       iconBg: "bg-green-500",
       coordinates: { lat: 4.89035, lng: 114.94006 },
@@ -133,7 +133,7 @@ export default function LocationsWithTestimonials() {
     {
       name: "Cuci Xpress Tutong",
       address: "Unit 5, Ground Floor, Block A, Fatimah Ahmad Complex, Tutong TA2341",
-      hours: "Daily: 8:00 AM - 8:00 PM",
+      hours: "Daily: 8:00 AM - 7:00 PM",
       bgColor: "bg-gradient-to-br from-blue-50 to-blue-100",
       iconBg: "bg-blue-500",
       coordinates: { lat: 4.8007081, lng: 114.6520481 },
