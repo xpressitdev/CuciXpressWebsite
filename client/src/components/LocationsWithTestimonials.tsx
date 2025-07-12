@@ -166,9 +166,7 @@ export default function LocationsWithTestimonials() {
           className="text-center mb-16"
         >
           <h2 className="text-4xl font-bold text-gray-900 mb-4">Find Us Near You</h2>
-          <p className="text-xl text-gray-600 max-w-3xl mx-auto">
-            With 4 strategic locations across the region, premium car care is always within reach.
-          </p>
+          <p className="text-xl text-gray-600 max-w-3xl mx-auto">With 4 locations across the region, regular Xpress car wash is always within reach.</p>
         </motion.div>
 
         <div className="grid lg:grid-cols-2 gap-12 items-start">
