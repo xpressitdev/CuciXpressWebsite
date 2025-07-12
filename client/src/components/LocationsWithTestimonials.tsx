@@ -48,7 +48,7 @@ function LocationCard({ name, address, hours, bgColor, iconBg, coordinates, plac
             <button
               onClick={(e) => {
                 e.stopPropagation();
-                window.open(`https://www.google.com/maps/dir/?api=1&destination=${coordinates.lat},${coordinates.lng}&destination_place_id=${encodeURIComponent(name)}`, '_blank');
+                window.open(`https://www.google.com/maps/dir/?api=1&destination=${encodeURIComponent(address)}`, '_blank');
               }}
               className="inline-flex items-center space-x-2 text-sm font-medium text-cuci-primary hover:text-cuci-secondary transition-colors"
             >
@@ -118,7 +118,7 @@ export default function LocationsWithTestimonials() {
       hours: "Daily: 8:00 AM - 8:00 PM",
       bgColor: "bg-gradient-to-br from-orange-50 to-orange-100",
       iconBg: "bg-cuci-secondary",
-      coordinates: { lat: 4.8728321, lng: 114.8434285 },
+      coordinates: { lat: 5.00443, lng: 114.99290 },
       placeId: "salar-branch"
     },
     {
@@ -127,7 +127,7 @@ export default function LocationsWithTestimonials() {
       hours: "Daily: 8:00 AM - 8:00 PM",
       bgColor: "bg-gradient-to-br from-green-50 to-green-100",
       iconBg: "bg-green-500",
-      coordinates: { lat: 4.8500000, lng: 114.7500000 },
+      coordinates: { lat: 4.89035, lng: 114.94006 },
       placeId: "bengkurong-branch"
     },
     {
