@@ -134,7 +134,7 @@ export async function processPocketPayPayment(paymentData: PaymentRequest): Prom
     const orderId = orderResult.new_id; // According to documentation, it returns "new_id" not "order_id"
 
     // Step 2: Generate Hash Data (following exact documentation format) 
-    const devDomain = `https://${process.env.REPL_SLUG}.${process.env.REPL_OWNER}.repl.co`; // Development domain for testing
+    const liveDomain = 'https://cucixpress.com'; // Live domain for production redirects
     
     const hashRequest = {
       api_key: POCKET_PAY_CONFIG.API_KEY,
@@ -152,8 +152,8 @@ export async function processPocketPayPayment(paymentData: PaymentRequest): Prom
       order_id: orderId,
       order_info: `This is the order info ${orderId}.`,
       order_desc: `${paymentData.serviceName} - ${paymentData.selectedBranch} branch`,
-      return_url: `${devDomain}/payment-success`,
-      callback_url: `${devDomain}/api/payment-callback`,
+      return_url: `${liveDomain}/payment-success`,
+      callback_url: `${liveDomain}/api/payment-callback`,
       discount: 0
     };
 
@@ -197,8 +197,8 @@ export async function processPocketPayPayment(paymentData: PaymentRequest): Prom
       order_id: orderId,
       order_info: `This is the order info ${orderId}.`,
       order_desc: `${paymentData.serviceName} - ${paymentData.selectedBranch} branch`,
-      return_url: `${devDomain}/payment-success`,
-      callback_url: `${devDomain}/api/payment-callback`,
+      return_url: `${liveDomain}/payment-success`,
+      callback_url: `${liveDomain}/api/payment-callback`,
       discount: 0
     };
 
