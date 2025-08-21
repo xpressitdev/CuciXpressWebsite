@@ -1,12 +1,15 @@
+// Pocket Pay API Integration for Cuci Xpress
+// Documentation: https://app.swaggerhub.com/apis/ThreeGMedia/Pocket_Pay_API/
 
 import crypto from 'crypto';
 
-// Pocket Pay Test Configuration
+// Pocket Pay Configuration (using correct endpoints from documentation)
 const POCKET_PAY_CONFIG = {
-  TEST_API_URL: 'https://test-api.pocketpay.com.bn',
-  TEST_MERCHANT_ID: 'TEST_MERCHANT', // Replace with actual test merchant ID from documentation
-  TEST_SECRET_KEY: 'TEST_SECRET_KEY', // Replace with actual test secret key from documentation
-  TEST_SALT: 'TEST_SALT' // Replace with actual test salt from documentation
+  TEST_API_URL: 'http://pay.threeg.asia', // Test environment
+  PROD_API_URL: 'https://pocket-pay.threeg.asia', // Production environment
+  TEST_MERCHANT_ID: 'TEST_MERCHANT', // Use test credentials from documentation
+  TEST_SECRET_KEY: 'TEST_SECRET_KEY', // Use test credentials from documentation
+  TEST_SALT: 'TEST_SALT' // Use test credentials from documentation
 };
 
 interface PaymentRequest {
@@ -22,23 +25,40 @@ interface PaymentRequest {
   selectedBranch: string;
 }
 
-interface PocketPayTransaction {
+interface PocketPayOrderRequest {
   merchant_id: string;
-  transaction_id: string;
-  amount: number;
+  amount: string;
   currency: string;
+  description: string;
+}
+
+interface PocketPayHashRequest {
+  merchant_id: string;
+  order_id: string;
+  amount: string;
+  currency: string;
+  description: string;
   customer_name: string;
   customer_email: string;
   customer_phone: string;
-  card_number: string;
-  expiry_month: string;
-  expiry_year: string;
-  cvv: string;
-  description: string;
   return_url: string;
   cancel_url: string;
   callback_url: string;
-  timestamp: string;
+  salt: string;
+}
+
+interface PocketPayCreateRequest {
+  merchant_id: string;
+  order_id: string;
+  amount: string;
+  currency: string;
+  description: string;
+  customer_name: string;
+  customer_email: string;
+  customer_phone: string;
+  return_url: string;
+  cancel_url: string;
+  callback_url: string;
   hash: string;
 }
 
@@ -49,56 +69,25 @@ function generateTransactionId(): string {
   return `CX_${timestamp}_${random}`.toUpperCase();
 }
 
-// Generate hash for Pocket Pay API
-function generateHash(data: any, salt: string, secretKey: string): string {
-  // Create hash string in the format required by Pocket Pay
-  const hashString = `${data.merchant_id}|${data.transaction_id}|${data.amount}|${data.currency}|${data.customer_email}|${salt}`;
+// Generate hash for Pocket Pay API (following documentation format)
+function generatePocketPayHash(hashData: PocketPayHashRequest): string {
+  // Create hash string according to Pocket Pay documentation format
+  const hashString = `${hashData.merchant_id}|${hashData.order_id}|${hashData.amount}|${hashData.currency}|${hashData.customer_email}|${hashData.salt}`;
   
-  // Generate HMAC SHA256 hash
+  // Generate MD5 hash (as typically used by payment gateways)
   const hash = crypto
-    .createHmac('sha256', secretKey)
+    .createHash('md5')
     .update(hashString)
     .digest('hex');
     
-  return hash;
+  return hash.toUpperCase();
 }
 
-// Process payment through Pocket Pay
+// Process payment through Pocket Pay using correct API flow
 export async function processPocketPayPayment(paymentData: PaymentRequest): Promise<any> {
   try {
     const transactionId = generateTransactionId();
-    const timestamp = new Date().toISOString();
     
-    // Prepare transaction data
-    const transactionData = {
-      merchant_id: POCKET_PAY_CONFIG.TEST_MERCHANT_ID,
-      transaction_id: transactionId,
-      amount: paymentData.amount,
-      currency: 'BND',
-      customer_name: paymentData.customerName,
-      customer_email: paymentData.customerEmail,
-      customer_phone: paymentData.customerPhone,
-      card_number: paymentData.cardNumber,
-      expiry_month: paymentData.expiryMonth,
-      expiry_year: paymentData.expiryYear,
-      cvv: paymentData.cvv,
-      description: `Cuci Xpress - ${paymentData.serviceName} at ${paymentData.selectedBranch} branch`,
-      return_url: 'https://your-repl-url.repl.co/payment-success',
-      cancel_url: 'https://your-repl-url.repl.co/payment-cancel',
-      callback_url: 'https://your-repl-url.repl.co/api/payment-callback',
-      timestamp: timestamp
-    };
-
-    // Generate hash
-    const hash = generateHash(transactionData, POCKET_PAY_CONFIG.TEST_SALT, POCKET_PAY_CONFIG.TEST_SECRET_KEY);
-    
-    // Add hash to transaction data
-    const finalTransactionData: PocketPayTransaction = {
-      ...transactionData,
-      hash: hash
-    };
-
-    // Log transaction attempt
     console.log('Processing Pocket Pay transaction:', {
       transaction_id: transactionId,
       amount: paymentData.amount,
@@ -107,52 +96,108 @@ export async function processPocketPayPayment(paymentData: PaymentRequest): Prom
       branch: paymentData.selectedBranch
     });
 
-    // Make API request to Pocket Pay
-    const response = await fetch(`${POCKET_PAY_CONFIG.TEST_API_URL}/api/v1/payment/process`, {
+    // Step 1: Generate Order ID
+    const orderRequest: PocketPayOrderRequest = {
+      merchant_id: POCKET_PAY_CONFIG.TEST_MERCHANT_ID,
+      amount: paymentData.amount.toString(),
+      currency: 'BND',
+      description: `${paymentData.serviceName} - ${paymentData.selectedBranch} branch`
+    };
+
+    const orderResponse = await fetch(`${POCKET_PAY_CONFIG.TEST_API_URL}/payments/getNewOrderId`, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
         'Accept': 'application/json'
       },
-      body: JSON.stringify(finalTransactionData)
+      body: JSON.stringify(orderRequest)
     });
 
-    if (!response.ok) {
-      throw new Error(`Pocket Pay API error: ${response.status} ${response.statusText}`);
+    if (!orderResponse.ok) {
+      throw new Error(`Order ID generation failed: ${orderResponse.status}`);
     }
 
-    const result = await response.json();
+    const orderResult = await orderResponse.json();
+    const orderId = orderResult.order_id;
 
-    // Handle different response statuses
-    if (result.status === 'success' || result.status === 'approved') {
-      console.log('Payment successful:', result);
-      return {
-        success: true,
-        transaction_id: transactionId,
-        payment_id: result.payment_id || result.reference_number,
-        message: 'Payment processed successfully',
-        data: result
-      };
-    } else if (result.status === 'pending') {
-      console.log('Payment pending:', result);
-      return {
-        success: false,
-        pending: true,
-        transaction_id: transactionId,
-        message: 'Payment is being processed',
-        data: result
-      };
-    } else {
-      console.log('Payment failed:', result);
-      return {
-        success: false,
-        transaction_id: transactionId,
-        message: result.message || 'Payment failed',
-        error: result.error || 'Unknown error',
-        data: result
-      };
+    // Step 2: Generate Hash
+    const hashRequest: PocketPayHashRequest = {
+      merchant_id: POCKET_PAY_CONFIG.TEST_MERCHANT_ID,
+      order_id: orderId,
+      amount: paymentData.amount.toString(),
+      currency: 'BND',
+      description: `${paymentData.serviceName} - ${paymentData.selectedBranch} branch`,
+      customer_name: paymentData.customerName,
+      customer_email: paymentData.customerEmail,
+      customer_phone: paymentData.customerPhone,
+      return_url: `${process.env.REPLIT_DOMAINS || 'http://localhost:5000'}/payment-success`,
+      cancel_url: `${process.env.REPLIT_DOMAINS || 'http://localhost:5000'}/payment-cancel`,
+      callback_url: `${process.env.REPLIT_DOMAINS || 'http://localhost:5000'}/api/payment-callback`,
+      salt: POCKET_PAY_CONFIG.TEST_SALT
+    };
+
+    const hashResponse = await fetch(`${POCKET_PAY_CONFIG.TEST_API_URL}/payments/hash`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'Accept': 'application/json'
+      },
+      body: JSON.stringify(hashRequest)
+    });
+
+    if (!hashResponse.ok) {
+      throw new Error(`Hash generation failed: ${hashResponse.status}`);
     }
 
+    const hashResult = await hashResponse.json();
+    const hash = hashResult.hash;
+
+    // Step 3: Create Payment Link
+    const createRequest: PocketPayCreateRequest = {
+      merchant_id: POCKET_PAY_CONFIG.TEST_MERCHANT_ID,
+      order_id: orderId,
+      amount: paymentData.amount.toString(),
+      currency: 'BND',
+      description: `${paymentData.serviceName} - ${paymentData.selectedBranch} branch`,
+      customer_name: paymentData.customerName,
+      customer_email: paymentData.customerEmail,
+      customer_phone: paymentData.customerPhone,
+      return_url: `${process.env.REPLIT_DOMAINS || 'http://localhost:5000'}/payment-success`,
+      cancel_url: `${process.env.REPLIT_DOMAINS || 'http://localhost:5000'}/payment-cancel`,
+      callback_url: `${process.env.REPLIT_DOMAINS || 'http://localhost:5000'}/api/payment-callback`,
+      hash: hash
+    };
+
+    const createResponse = await fetch(`${POCKET_PAY_CONFIG.TEST_API_URL}/payments/create`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'Accept': 'application/json'
+      },
+      body: JSON.stringify(createRequest)
+    });
+
+    if (!createResponse.ok) {
+      throw new Error(`Payment creation failed: ${createResponse.status}`);
+    }
+
+    const createResult = await createResponse.json();
+
+    console.log('Payment link created successfully:', {
+      order_id: orderId,
+      payment_url: createResult.payment_url,
+      transaction_id: transactionId
+    });
+
+    return {
+      success: true,
+      transaction_id: transactionId,
+      order_id: orderId,
+      payment_url: createResult.payment_url,
+      qr_code: createResult.qr_code,
+      message: 'Payment link created successfully'
+    };
+    
   } catch (error) {
     console.error('Pocket Pay payment processing error:', error);
     
@@ -164,52 +209,119 @@ export async function processPocketPayPayment(paymentData: PaymentRequest): Prom
   }
 }
 
-// Verify callback hash from Pocket Pay
-export function verifyCallbackHash(callbackData: any): boolean {
+// Handle payment callback from Pocket Pay
+export function handlePaymentCallback(callbackData: any): any {
   try {
-    const receivedHash = callbackData.hash;
-    const expectedHash = generateHash(callbackData, POCKET_PAY_CONFIG.TEST_SALT, POCKET_PAY_CONFIG.TEST_SECRET_KEY);
+    console.log('Payment callback received:', callbackData);
+
+    // Verify callback authenticity (implement hash verification here)
+    const expectedHash = generateCallbackHash(callbackData);
     
-    return receivedHash === expectedHash;
+    if (callbackData.hash !== expectedHash) {
+      console.warn('Invalid callback hash detected');
+      return {
+        success: false,
+        message: 'Invalid callback authentication'
+      };
+    }
+
+    // Process callback based on status
+    if (callbackData.status === 'success' || callbackData.status === 'completed') {
+      console.log('Payment completed successfully:', callbackData);
+      
+      // Here you can update your database, send confirmation emails, etc.
+      
+      return {
+        success: true,
+        status: 'completed',
+        transaction_id: callbackData.transaction_id,
+        order_id: callbackData.order_id,
+        message: 'Payment completed successfully'
+      };
+    } else if (callbackData.status === 'failed' || callbackData.status === 'cancelled') {
+      console.log('Payment failed or cancelled:', callbackData);
+      
+      return {
+        success: false,
+        status: callbackData.status,
+        transaction_id: callbackData.transaction_id,
+        order_id: callbackData.order_id,
+        message: `Payment ${callbackData.status}`
+      };
+    } else {
+      console.log('Payment status unknown:', callbackData);
+      
+      return {
+        success: false,
+        status: 'unknown',
+        message: 'Unknown payment status'
+      };
+    }
+    
   } catch (error) {
-    console.error('Hash verification error:', error);
-    return false;
+    console.error('Payment callback processing error:', error);
+    
+    return {
+      success: false,
+      message: 'Callback processing failed'
+    };
   }
 }
 
-// Handle payment status updates from Pocket Pay
-export function handlePaymentCallback(callbackData: any) {
-  // Verify the callback is legitimate
-  if (!verifyCallbackHash(callbackData)) {
-    console.error('Invalid callback hash');
-    return { success: false, message: 'Invalid callback' };
-  }
+// Generate callback hash for verification
+function generateCallbackHash(callbackData: any): string {
+  // Implement hash generation for callback verification
+  // This should match the format expected by Pocket Pay
+  const hashString = `${callbackData.merchant_id}|${callbackData.order_id}|${callbackData.status}|${callbackData.amount}|${POCKET_PAY_CONFIG.TEST_SALT}`;
+  
+  return crypto
+    .createHash('md5')
+    .update(hashString)
+    .digest('hex')
+    .toUpperCase();
+}
 
-  // Log the callback
-  console.log('Payment callback received:', {
-    transaction_id: callbackData.transaction_id,
-    status: callbackData.status,
-    amount: callbackData.amount
-  });
+// Query transaction status
+export async function queryTransactionStatus(orderId: string): Promise<any> {
+  try {
+    const statusRequest = {
+      merchant_id: POCKET_PAY_CONFIG.TEST_MERCHANT_ID,
+      order_id: orderId,
+      hash: generateStatusHash(orderId)
+    };
 
-  // Process the callback based on status
-  switch (callbackData.status) {
-    case 'success':
-    case 'approved':
-      // Payment successful - update database, send confirmation email, etc.
-      return { success: true, status: 'completed' };
-      
-    case 'failed':
-    case 'declined':
-      // Payment failed - update database, notify customer, etc.
-      return { success: false, status: 'failed' };
-      
-    case 'pending':
-      // Payment pending - update database status
-      return { success: true, status: 'pending' };
-      
-    default:
-      console.error('Unknown payment status:', callbackData.status);
-      return { success: false, status: 'unknown' };
+    const response = await fetch(`${POCKET_PAY_CONFIG.TEST_API_URL}/payments/status`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'Accept': 'application/json'
+      },
+      body: JSON.stringify(statusRequest)
+    });
+
+    if (!response.ok) {
+      throw new Error(`Status query failed: ${response.status}`);
+    }
+
+    const result = await response.json();
+    return result;
+    
+  } catch (error) {
+    console.error('Transaction status query error:', error);
+    return {
+      success: false,
+      message: 'Status query failed'
+    };
   }
+}
+
+// Generate hash for status query
+function generateStatusHash(orderId: string): string {
+  const hashString = `${POCKET_PAY_CONFIG.TEST_MERCHANT_ID}|${orderId}|${POCKET_PAY_CONFIG.TEST_SALT}`;
+  
+  return crypto
+    .createHash('md5')
+    .update(hashString)
+    .digest('hex')
+    .toUpperCase();
 }

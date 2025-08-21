@@ -4,7 +4,7 @@ import { z } from "zod";
 import { db } from "./db";
 import { collaborationSubmissions, insertCollaborationSubmissionSchema, subscriptionSignups, insertSubscriptionSignupSchema } from "@shared/schema";
 import { sendCollaborationNotification, sendSubscriptionNotification } from "./email";
-import { processPocketPayPayment, handlePaymentCallback } from "./payment";
+import { processPocketPayPayment, handlePaymentCallback, queryTransactionStatus } from "./payment";
 import { eq, desc } from "drizzle-orm";
 
 const investorInterestSchema = z.object({
@@ -692,9 +692,10 @@ export async function registerRoutes(app: Express): Promise<Server> {
       const result = await processPocketPayPayment(paymentData);
       
       if (result.success) {
-        // Log successful payment
-        console.log('Payment processed successfully:', {
+        // Log successful payment link creation
+        console.log('Payment link created successfully:', {
           transaction_id: result.transaction_id,
+          order_id: result.order_id,
           customer: paymentData.customerEmail,
           amount: paymentData.amount,
           service: paymentData.serviceName
@@ -702,13 +703,15 @@ export async function registerRoutes(app: Express): Promise<Server> {
         
         res.json({
           success: true,
-          message: 'Payment processed successfully',
+          message: 'Payment link created successfully',
           transaction_id: result.transaction_id,
-          payment_id: result.payment_id
+          order_id: result.order_id,
+          payment_url: result.payment_url,
+          qr_code: result.qr_code
         });
       } else {
         // Log failed payment
-        console.log('Payment failed:', {
+        console.log('Payment processing failed:', {
           customer: paymentData.customerEmail,
           amount: paymentData.amount,
           error: result.message
@@ -716,8 +719,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
         
         res.status(400).json({
           success: false,
-          message: result.message || 'Payment processing failed',
-          transaction_id: result.transaction_id
+          message: result.message || 'Payment processing failed'
         });
       }
       
@@ -749,6 +751,92 @@ export async function registerRoutes(app: Express): Promise<Server> {
       console.error('Payment callback error:', error);
       res.status(500).json({ status: 'ERROR', message: 'Internal server error' });
     }
+  });
+
+  // Payment status query endpoint
+  app.post("/api/payment-status", async (req, res) => {
+    try {
+      const { order_id } = req.body;
+      
+      if (!order_id) {
+        return res.status(400).json({
+          success: false,
+          message: 'Order ID is required'
+        });
+      }
+
+      const result = await queryTransactionStatus(order_id);
+      res.json(result);
+      
+    } catch (error) {
+      console.error('Payment status query error:', error);
+      res.status(500).json({
+        success: false,
+        message: 'Internal server error'
+      });
+    }
+  });
+
+  // Payment success page route
+  app.get("/payment-success", (req, res) => {
+    res.send(`
+      <!DOCTYPE html>
+      <html>
+        <head>
+          <title>Payment Successful - Cuci Xpress</title>
+          <meta name="viewport" content="width=device-width, initial-scale=1.0">
+          <style>
+            body { font-family: Arial, sans-serif; text-align: center; padding: 50px; background: #f8f9fa; }
+            .container { max-width: 500px; margin: 0 auto; background: white; padding: 40px; border-radius: 10px; box-shadow: 0 4px 6px rgba(0,0,0,0.1); }
+            .success { color: #28a745; font-size: 48px; margin-bottom: 20px; }
+            h1 { color: #6C5CE7; margin-bottom: 20px; }
+            p { color: #666; line-height: 1.6; margin-bottom: 30px; }
+            .btn { background: #6C5CE7; color: white; padding: 12px 30px; text-decoration: none; border-radius: 5px; display: inline-block; }
+          </style>
+        </head>
+        <body>
+          <div class="container">
+            <div class="success">✓</div>
+            <h1>Payment Successful!</h1>
+            <p>Thank you for your payment. Your car wash service has been confirmed.</p>
+            <p>You will receive a confirmation email shortly.</p>
+            <a href="/" class="btn">Return to Home</a>
+          </div>
+        </body>
+      </html>
+    `);
+  });
+
+  // Payment cancel page route
+  app.get("/payment-cancel", (req, res) => {
+    res.send(`
+      <!DOCTYPE html>
+      <html>
+        <head>
+          <title>Payment Cancelled - Cuci Xpress</title>
+          <meta name="viewport" content="width=device-width, initial-scale=1.0">
+          <style>
+            body { font-family: Arial, sans-serif; text-align: center; padding: 50px; background: #f8f9fa; }
+            .container { max-width: 500px; margin: 0 auto; background: white; padding: 40px; border-radius: 10px; box-shadow: 0 4px 6px rgba(0,0,0,0.1); }
+            .cancel { color: #dc3545; font-size: 48px; margin-bottom: 20px; }
+            h1 { color: #dc3545; margin-bottom: 20px; }
+            p { color: #666; line-height: 1.6; margin-bottom: 30px; }
+            .btn { background: #6C5CE7; color: white; padding: 12px 30px; text-decoration: none; border-radius: 5px; display: inline-block; margin-right: 10px; }
+            .btn-secondary { background: #6c757d; }
+          </style>
+        </head>
+        <body>
+          <div class="container">
+            <div class="cancel">✗</div>
+            <h1>Payment Cancelled</h1>
+            <p>Your payment was cancelled. No charges were made to your account.</p>
+            <p>If you'd like to try again, please return to our service page.</p>
+            <a href="/" class="btn">Return to Home</a>
+            <a href="/#service-pricing" class="btn btn-secondary">Try Again</a>
+          </div>
+        </body>
+      </html>
+    `);
   });
 
   // Serve diagnostic page for API testing
