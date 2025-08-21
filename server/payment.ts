@@ -4,20 +4,23 @@
 import crypto from 'crypto';
 import { sendPaymentConfirmation } from './email';
 
-// Pocket Pay Configuration (using your actual API credentials)
+// Pocket Pay Configuration (using production credentials from admin portal)
 const POCKET_PAY_CONFIG = {
   TEST_API_URL: 'http://pay.threeg.asia', // Test environment URL
-  PROD_API_URL: 'https://pocket-pay.threeg.asia', // Production environment URL (corrected)
-  API_KEY: process.env.POCKET_PAY_API_KEY!, // Your actual API key
-  SALT: process.env.POCKET_PAY_SALT! // Your actual salt
+  PROD_API_URL: 'https://pocket-pay.threeg.asia', // Production environment URL
+  API_KEY: '9LGHGgu9WHdjGASNkuXgY3cFYZrxm86GZ', // Production API key from admin portal
+  SALT: 'ICDkzqxAC3WpOGGWNrmvIVmB4A7QhcvobLYY4EqdTGPKuCMLr4zGl4CTBLHnZZ', // Production salt from admin portal
+  MERCHANT_ID: '680499048' // Merchant ID from admin portal
 };
 
-// Debug environment variables (remove in production)
-console.log('Pocket Pay Config Debug:', {
-  api_key_length: POCKET_PAY_CONFIG.API_KEY?.length || 0,
-  salt_length: POCKET_PAY_CONFIG.SALT?.length || 0,
-  api_key_preview: POCKET_PAY_CONFIG.API_KEY?.substring(0, 8) + '...',
-  salt_preview: POCKET_PAY_CONFIG.SALT?.substring(0, 8) + '...'
+// Debug production credentials
+console.log('Pocket Pay Production Config:', {
+  api_key_length: POCKET_PAY_CONFIG.API_KEY.length,
+  salt_length: POCKET_PAY_CONFIG.SALT.length,
+  merchant_id: POCKET_PAY_CONFIG.MERCHANT_ID,
+  api_key_preview: POCKET_PAY_CONFIG.API_KEY.substring(0, 8) + '...',
+  salt_preview: POCKET_PAY_CONFIG.SALT.substring(0, 8) + '...',
+  environment: 'PRODUCTION'
 });
 
 interface PaymentRequest {
