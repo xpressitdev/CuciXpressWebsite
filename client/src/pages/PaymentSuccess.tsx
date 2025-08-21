@@ -94,7 +94,7 @@ export default function PaymentSuccess() {
               Payment Successful!
             </CardTitle>
             <p className="text-gray-600">
-              Thank you for being Xpress! Your {orderDetails?.service || 'car wash service'} booking has been confirmed.
+              Thank you for being Xpress! Your {orderDetails?.service || 'car wash service'} has been confirmed.
             </p>
           </CardHeader>
 
