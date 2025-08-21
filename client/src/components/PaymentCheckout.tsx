@@ -195,17 +195,12 @@ export default function PaymentCheckout({ selectedService, onBack }: PaymentChec
                   </div>
                 )}
 
-                {/* Test Environment Notice */}
-                <div className="mt-6 p-4 bg-blue-50 border border-blue-200 rounded-lg">
-                  <h4 className="font-medium text-blue-900 mb-2">Test Environment</h4>
-                  <p className="text-sm text-blue-700 mb-2">
-                    This is a test payment gateway. Use the following test card details:
+                {/* Security Notice */}
+                <div className="mt-6 p-4 bg-green-50 border border-green-200 rounded-lg">
+                  <h4 className="font-medium text-green-900 mb-2">🔒 Secure Payment</h4>
+                  <p className="text-sm text-green-700">
+                    Your payment is processed securely through Pocket Pay. We use industry-standard encryption to protect your card details.
                   </p>
-                  <div className="text-sm text-blue-700 space-y-1">
-                    <p><strong>Card Number:</strong> 4444 5555 6666 7777</p>
-                    <p><strong>Expiry:</strong> Any future date</p>
-                    <p><strong>CVV:</strong> Any 3-digit number</p>
-                  </div>
                 </div>
               </CardContent>
             </Card>

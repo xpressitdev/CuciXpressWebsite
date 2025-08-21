@@ -7,7 +7,7 @@ import { sendPaymentConfirmation } from './email';
 // Pocket Pay Configuration (using your actual API credentials)
 const POCKET_PAY_CONFIG = {
   TEST_API_URL: 'http://pay.threeg.asia', // Test environment URL - corrected domain
-  PROD_API_URL: 'https://pocket-pay.threeg.asia', // Production environment
+  PROD_API_URL: 'https://pay.threeg.asia', // Production environment - updated to correct domain
   API_KEY: process.env.POCKET_PAY_API_KEY!, // Your actual API key
   SALT: process.env.POCKET_PAY_SALT! // Your actual salt
 };
@@ -108,10 +108,10 @@ export async function processPocketPayPayment(paymentData: PaymentRequest): Prom
       salt: POCKET_PAY_CONFIG.SALT
     };
 
-    console.log('Sending order request to:', `${POCKET_PAY_CONFIG.TEST_API_URL}/payments/getNewOrderId`);
+    console.log('Sending order request to:', `${POCKET_PAY_CONFIG.PROD_API_URL}/payments/getNewOrderId`);
     console.log('Order request data:', JSON.stringify(orderRequest, null, 2));
     
-    const orderResponse = await fetch(`${POCKET_PAY_CONFIG.TEST_API_URL}/payments/getNewOrderId`, {
+    const orderResponse = await fetch(`${POCKET_PAY_CONFIG.PROD_API_URL}/payments/getNewOrderId`, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
@@ -130,8 +130,8 @@ export async function processPocketPayPayment(paymentData: PaymentRequest): Prom
     console.log('Order ID response:', orderResult);
     const orderId = orderResult.new_id; // According to documentation, it returns "new_id" not "order_id"
 
-    // Step 2: Generate Hash Data (following exact documentation format)
-    const devDomain = process.env.REPLIT_DEV_DOMAIN ? `https://${process.env.REPLIT_DEV_DOMAIN}` : 'http://localhost:5000';
+    // Step 2: Generate Hash Data (following exact documentation format) 
+    const productionDomain = 'https://cucixpress.com'; // Production domain for live payments
     
     const hashRequest = {
       api_key: POCKET_PAY_CONFIG.API_KEY,
@@ -149,15 +149,15 @@ export async function processPocketPayPayment(paymentData: PaymentRequest): Prom
       order_id: orderId,
       order_info: `This is the order info ${orderId}.`,
       order_desc: `${paymentData.serviceName} - ${paymentData.selectedBranch} branch`,
-      return_url: `${devDomain}/payment-success`,
-      callback_url: `${devDomain}/api/payment-callback`,
+      return_url: `${productionDomain}/payment-success`,
+      callback_url: `${productionDomain}/api/payment-callback`,
       discount: 0
     };
 
-    console.log('Sending hash request to:', `${POCKET_PAY_CONFIG.TEST_API_URL}/payments/hash`);
+    console.log('Sending hash request to:', `${POCKET_PAY_CONFIG.PROD_API_URL}/payments/hash`);
     console.log('Hash request data:', JSON.stringify(hashRequest, null, 2));
     
-    const hashResponse = await fetch(`${POCKET_PAY_CONFIG.TEST_API_URL}/payments/hash`, {
+    const hashResponse = await fetch(`${POCKET_PAY_CONFIG.PROD_API_URL}/payments/hash`, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
@@ -194,15 +194,15 @@ export async function processPocketPayPayment(paymentData: PaymentRequest): Prom
       order_id: orderId,
       order_info: `This is the order info ${orderId}.`,
       order_desc: `${paymentData.serviceName} - ${paymentData.selectedBranch} branch`,
-      return_url: `${devDomain}/payment-success`,
-      callback_url: `${devDomain}/api/payment-callback`,
+      return_url: `${productionDomain}/payment-success`,
+      callback_url: `${productionDomain}/api/payment-callback`,
       discount: 0
     };
 
-    console.log('Sending payment creation request to:', `${POCKET_PAY_CONFIG.TEST_API_URL}/payments/create`);
+    console.log('Sending payment creation request to:', `${POCKET_PAY_CONFIG.PROD_API_URL}/payments/create`);
     console.log('Payment creation data:', JSON.stringify(createRequest, null, 2));
     
-    const createResponse = await fetch(`${POCKET_PAY_CONFIG.TEST_API_URL}/payments/create`, {
+    const createResponse = await fetch(`${POCKET_PAY_CONFIG.PROD_API_URL}/payments/create`, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
