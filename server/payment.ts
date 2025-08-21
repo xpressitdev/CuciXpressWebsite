@@ -6,8 +6,8 @@ import { sendPaymentConfirmation } from './email';
 
 // Pocket Pay Configuration (using your actual API credentials)
 const POCKET_PAY_CONFIG = {
-  TEST_API_URL: 'http://pay.threeg.asia', // Test environment URL - corrected domain
-  PROD_API_URL: 'https://pay.threeg.asia', // Production environment - updated to correct domain
+  TEST_API_URL: 'http://pay.threeg.asia', // Test environment URL
+  PROD_API_URL: 'https://pocket-pay.threeg.asia', // Production environment URL (corrected)
   API_KEY: process.env.POCKET_PAY_API_KEY!, // Your actual API key
   SALT: process.env.POCKET_PAY_SALT! // Your actual salt
 };
