@@ -109,11 +109,14 @@ export async function processPocketPayPayment(paymentData: PaymentRequest): Prom
     });
 
     if (!orderResponse.ok) {
-      throw new Error(`Order ID generation failed: ${orderResponse.status}`);
+      const errorText = await orderResponse.text();
+      console.error('Order ID API Error:', orderResponse.status, errorText);
+      throw new Error(`Order ID generation failed: ${orderResponse.status} - ${errorText}`);
     }
 
     const orderResult = await orderResponse.json();
-    const orderId = orderResult.order_id;
+    console.log('Order ID response:', orderResult);
+    const orderId = orderResult.new_id; // According to documentation, it returns "new_id" not "order_id"
 
     // Step 2: Generate Hash
     const hashRequest: PocketPayHashRequest = {
@@ -125,9 +128,9 @@ export async function processPocketPayPayment(paymentData: PaymentRequest): Prom
       customer_name: paymentData.customerName,
       customer_email: paymentData.customerEmail,
       customer_phone: paymentData.customerPhone,
-      return_url: `${process.env.REPLIT_DOMAINS || 'http://localhost:5000'}/payment-success`,
-      cancel_url: `${process.env.REPLIT_DOMAINS || 'http://localhost:5000'}/payment-cancel`,
-      callback_url: `${process.env.REPLIT_DOMAINS || 'http://localhost:5000'}/api/payment-callback`,
+      return_url: `https://cucixpress.com/payment-success`,
+      cancel_url: `https://cucixpress.com/payment-cancel`,
+      callback_url: `https://cucixpress.com/api/payment-callback`,
       salt: POCKET_PAY_CONFIG.TEST_SALT
     };
 
@@ -141,10 +144,13 @@ export async function processPocketPayPayment(paymentData: PaymentRequest): Prom
     });
 
     if (!hashResponse.ok) {
-      throw new Error(`Hash generation failed: ${hashResponse.status}`);
+      const errorText = await hashResponse.text();
+      console.error('Hash API Error:', hashResponse.status, errorText);
+      throw new Error(`Hash generation failed: ${hashResponse.status} - ${errorText}`);
     }
 
     const hashResult = await hashResponse.json();
+    console.log('Hash generation response:', hashResult);
     const hash = hashResult.hash;
 
     // Step 3: Create Payment Link
@@ -157,9 +163,9 @@ export async function processPocketPayPayment(paymentData: PaymentRequest): Prom
       customer_name: paymentData.customerName,
       customer_email: paymentData.customerEmail,
       customer_phone: paymentData.customerPhone,
-      return_url: `${process.env.REPLIT_DOMAINS || 'http://localhost:5000'}/payment-success`,
-      cancel_url: `${process.env.REPLIT_DOMAINS || 'http://localhost:5000'}/payment-cancel`,
-      callback_url: `${process.env.REPLIT_DOMAINS || 'http://localhost:5000'}/api/payment-callback`,
+      return_url: `https://cucixpress.com/payment-success`,
+      cancel_url: `https://cucixpress.com/payment-cancel`,
+      callback_url: `https://cucixpress.com/api/payment-callback`,
       hash: hash
     };
 
@@ -173,14 +179,17 @@ export async function processPocketPayPayment(paymentData: PaymentRequest): Prom
     });
 
     if (!createResponse.ok) {
-      throw new Error(`Payment creation failed: ${createResponse.status}`);
+      const errorText = await createResponse.text();
+      console.error('Payment creation API Error:', createResponse.status, errorText);
+      throw new Error(`Payment creation failed: ${createResponse.status} - ${errorText}`);
     }
 
     const createResult = await createResponse.json();
+    console.log('Payment creation response:', createResult);
 
     console.log('Payment link created successfully:', {
       order_id: orderId,
-      payment_url: createResult.payment_url,
+      payment_url: createResult.payment_url || createResult.url,
       transaction_id: transactionId
     });
 
