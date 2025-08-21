@@ -4,12 +4,12 @@
 import crypto from 'crypto';
 import { sendPaymentConfirmation } from './email';
 
-// Pocket Pay Configuration - Testing with original credentials first
+// Pocket Pay Configuration - Using test environment with working credentials
 const POCKET_PAY_CONFIG = {
-  TEST_API_URL: 'http://pay.threeg.asia', // Test environment URL
-  TEST_API_URL: 'https://pocket-pay.threeg.asia', // Production environment URL
-  API_KEY: process.env.POCKET_PAY_API_KEY!, // Using original credentials for now
-  SALT: process.env.POCKET_PAY_SALT!, // Using original credentials for now
+  TEST_API_URL: 'http://pay.threeg.asia', // Test environment URL - CORRECTED
+  PROD_API_URL: 'https://pocket-pay.threeg.asia', // Production environment URL
+  API_KEY: process.env.POCKET_PAY_API_KEY!, // Using original test credentials
+  SALT: process.env.POCKET_PAY_SALT!, // Using original test credentials
   MERCHANT_ID: '680499048' // Merchant ID from admin portal
 };
 
