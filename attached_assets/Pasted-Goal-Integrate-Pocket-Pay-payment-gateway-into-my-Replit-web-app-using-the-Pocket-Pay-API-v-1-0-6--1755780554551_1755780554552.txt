@@ -1,0 +1,154 @@
+Goal: Integrate Pocket Pay payment gateway into my Replit web app using the Pocket Pay API (v 1.0.6). The flow should generate an order ID, compute the hash, create the payment link/QR, redirect the user to Pocket Pay for payment, and verify the transaction status.
+
+1. Configuration
+
+Environment variables:
+
+POCKET_API_KEY – my Pocket Pay API key.
+
+POCKET_SALT – the corresponding salt value.
+
+POCKET_BASE_URL – use http://pay-threeg.asia/ for testing, https://pocket-pay.threeg.asia/ for production.
+
+Create a configuration file (e.g., config/pocketPay.js) that exports these values.
+
+2. Dependencies
+
+Install axios (or similar) for HTTP requests:
+
+npm install axios
+
+3. Endpoints and Request Bodies
+
+Implement these helper functions in the backend (Node.js/Express assumed). Use async/await and proper error handling.
+
+(a) Generate New Order ID
+
+Call POST /payments/getNewOrderId with JSON body:
+
+{
+  "api_key": process.env.POCKET_API_KEY,
+  "salt": process.env.POCKET_SALT
+}
+
+
+The response will contain a new_id (not shown in the example but inferred). Store this value as order_id.
+
+(b) Generate Hash Data
+
+Call POST /payments/hash with JSON body similar to:
+
+{
+  "api_key": process.env.POCKET_API_KEY,
+  "salt": process.env.POCKET_SALT,
+  "subamount_1": <total_amount>,        // e.g. 100
+  "subamount_1_label": "Order Total",
+  "subamount_2": 0,
+  "subamount_2_label": "string",
+  "subamount_3": 0,
+  "subamount_3_label": "string",
+  "subamount_4": 0,
+  "subamount_4_label": "string",
+  "subamount_5": 0,
+  "subamount_5_label": "string",
+  "order_id": <order_id>,               // the ID returned from getNewOrderId
+  "order_info": "This is the order info <order_id>.",
+  "order_desc": "Description of the order",
+  "return_url": "https://<yourdomain>/pocketpay-return",
+  "callback_url": "https://<yourdomain>/pocketpay-callback",
+  "discount": 0
+}
+
+
+The response will contain a hashed_data field. Store this value.
+
+(c) Create Payment Link & QR
+
+Call POST /payments/create with JSON body:
+
+{
+  "api_key": process.env.POCKET_API_KEY,
+  "salt": process.env.POCKET_SALT,
+  "hashed_data": <hashed_data>,         // from the previous step
+  "subamount_1": <total_amount>,
+  "subamount_1_label": "Order Total",
+  "subamount_2": 0,
+  "subamount_2_label": "string",
+  "subamount_3": 0,
+  "subamount_3_label": "string",
+  "subamount_4": 0,
+  "subamount_4_label": "string",
+  "subamount_5": 0,
+  "subamount_5_label": "string",
+  "order_id": <order_id>,
+  "order_info": "This is the order info <order_id>.",
+  "order_desc": "Description of the order",
+  "return_url": "https://<yourdomain>/pocketpay-return",
+  "callback_url": "https://<yourdomain>/pocketpay-callback",
+  "discount": 0
+}
+
+
+The success response (HTTP 200) returns:
+
+{
+  "payment_url": "https://pocket-pay.threeg.asia/?tx_id=9086714 900001640a0c9581d72",
+  "success_indicator": "7MtZHFzyvugx0K56j0ET",
+  "order_ref": "64757",
+  "qr": "<base64-encoded QR code string>"
+}
+
+
+payment_url – URL to which the user should be redirected to complete payment.
+
+qr – base64-encoded QR code image that can be displayed instead of redirecting.
+
+Save order_ref and success_indicator for status checking.
+
+(d) Query Transaction Status (Optional)
+
+If you need to verify payments manually or handle asynchronous callbacks, call POST /payments/status. The body likely includes api_key, salt, and either order_id or order_ref. Use the returned status to update your order state.
+
+(e) Void Transaction (Optional)
+
+To cancel/void a transaction before settlement, call POST /payments/voidV3 with the required fields (usually api_key, salt, and order_ref).
+
+4. Frontend and Callback Handling
+
+Redirect or Display QR: When your server receives the payment_url and qr, send them to the client. The client can either auto-redirect the user to payment_url or display the QR code (decoded from base64) for scanning.
+
+Return URL: The user will be redirected to your return_url after completing or aborting the payment. This URL should show a user-friendly message (e.g., success, pending, or failure) and optionally trigger a status check.
+
+Callback URL: Pocket Pay will send a server-to-server POST to your callback_url with transaction details. Handle this callback by verifying the order_ref/success_indicator and updating your order status in the database.
+
+5. Testing and Deployment
+
+During development, set POCKET_BASE_URL to the test server (http://pay-threeg.asia/) and use the test card credentials provided:
+
+Card number: 4444 5555 6666 7777
+
+CVV: 555
+
+Expiry: 01/35
+
+When ready to go live, switch to the production URL and update your credentials.
+
+6. Error Handling
+
+For each API request, handle non-200 status codes. Common error codes include:
+
+210 – Insufficient information posted.
+
+211 – Total chargeable is zero.
+
+212 – No Order ID submitted.
+
+213 – No Order Info submitted.
+
+214 – No Subamount 1 Label submitted.
+
+215 – Invalid return URL.
+
+216 – Incorrect hashed data.
+
+Log these errors and return a meaningful response to the client.

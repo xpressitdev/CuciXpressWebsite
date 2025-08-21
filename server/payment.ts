@@ -5,7 +5,7 @@ import crypto from 'crypto';
 
 // Pocket Pay Configuration (using your actual API credentials)
 const POCKET_PAY_CONFIG = {
-  TEST_API_URL: 'http://pay.threeg.asia', // Test environment
+  TEST_API_URL: 'http://pay-threeg.asia', // Test environment URL from documentation
   PROD_API_URL: 'https://pocket-pay.threeg.asia', // Production environment
   API_KEY: process.env.POCKET_PAY_API_KEY!, // Your actual API key
   SALT: process.env.POCKET_PAY_SALT! // Your actual salt
@@ -99,10 +99,10 @@ export async function processPocketPayPayment(paymentData: PaymentRequest): Prom
       salt: POCKET_PAY_CONFIG.SALT
     };
 
-    console.log('Sending order request to:', `${POCKET_PAY_CONFIG.PROD_API_URL}/payments/getNewOrderId`);
+    console.log('Sending order request to:', `${POCKET_PAY_CONFIG.TEST_API_URL}/payments/getNewOrderId`);
     console.log('Order request data:', JSON.stringify(orderRequest, null, 2));
     
-    const orderResponse = await fetch(`${POCKET_PAY_CONFIG.PROD_API_URL}/payments/getNewOrderId`, {
+    const orderResponse = await fetch(`${POCKET_PAY_CONFIG.TEST_API_URL}/payments/getNewOrderId`, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
@@ -121,91 +121,77 @@ export async function processPocketPayPayment(paymentData: PaymentRequest): Prom
     console.log('Order ID response:', orderResult);
     const orderId = orderResult.new_id; // According to documentation, it returns "new_id" not "order_id"
 
-    // Step 2: Generate Hash - Use same format as order ID generation
+    // Step 2: Generate Hash Data (following exact documentation format)
     const hashRequest = {
       api_key: POCKET_PAY_CONFIG.API_KEY,
       salt: POCKET_PAY_CONFIG.SALT,
+      subamount_1: paymentData.amount,
+      subamount_1_label: "Order Total",
+      subamount_2: 0,
+      subamount_2_label: "string",
+      subamount_3: 0,
+      subamount_3_label: "string",
+      subamount_4: 0,
+      subamount_4_label: "string",
+      subamount_5: 0,
+      subamount_5_label: "string",
       order_id: orderId,
-      amount: paymentData.amount.toString(),
-      currency: 'BND',
-      description: `${paymentData.serviceName} - ${paymentData.selectedBranch} branch`,
-      customer_name: paymentData.customerName,
-      customer_email: paymentData.customerEmail,
-      customer_phone: paymentData.customerPhone,
+      order_info: `This is the order info ${orderId}.`,
+      order_desc: `${paymentData.serviceName} - ${paymentData.selectedBranch} branch`,
       return_url: `https://cucixpress.com/payment-success`,
-      cancel_url: `https://cucixpress.com/payment-cancel`,
-      callback_url: `https://cucixpress.com/api/payment-callback`
+      callback_url: `https://cucixpress.com/api/payment-callback`,
+      discount: 0
     };
 
-    // Try simplified hash request first - some APIs only need api_key and salt for hash generation
-    const simpleHashRequest = {
-      api_key: POCKET_PAY_CONFIG.API_KEY,
-      salt: POCKET_PAY_CONFIG.SALT
-    };
-
-    console.log('Sending hash request to:', `${POCKET_PAY_CONFIG.PROD_API_URL}/payments/hash`);
-    console.log('Simple hash request data:', JSON.stringify(simpleHashRequest, null, 2));
+    console.log('Sending hash request to:', `${POCKET_PAY_CONFIG.TEST_API_URL}/payments/hash`);
+    console.log('Hash request data:', JSON.stringify(hashRequest, null, 2));
     
-    const hashResponse = await fetch(`${POCKET_PAY_CONFIG.PROD_API_URL}/payments/hash`, {
+    const hashResponse = await fetch(`${POCKET_PAY_CONFIG.TEST_API_URL}/payments/hash`, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
         'Accept': 'application/json'
       },
-      body: JSON.stringify(simpleHashRequest)
+      body: JSON.stringify(hashRequest)
     });
 
-    let hash = '';
     if (!hashResponse.ok) {
       const errorText = await hashResponse.text();
-      console.error('Hash API Error with simple request:', hashResponse.status, errorText);
-      
-      // If simple request fails, try with full data
-      console.log('Trying hash generation with full data...');
-      const fullHashResponse = await fetch(`${POCKET_PAY_CONFIG.PROD_API_URL}/payments/hash`, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'Accept': 'application/json'
-        },
-        body: JSON.stringify(hashRequest)
-      });
-
-      if (!fullHashResponse.ok) {
-        const fullErrorText = await fullHashResponse.text();
-        console.error('Hash API Error with full request:', fullHashResponse.status, fullErrorText);
-        throw new Error(`Hash generation failed: ${fullHashResponse.status} - ${fullErrorText}`);
-      }
-
-      const fullHashResult = await fullHashResponse.json();
-      console.log('Hash generation response (full):', fullHashResult);
-      hash = fullHashResult.hash;
-    } else {
-      const hashResult = await hashResponse.json();
-      console.log('Hash generation response (simple):', hashResult);
-      hash = hashResult.hash;
+      console.error('Hash API Error:', hashResponse.status, errorText);
+      throw new Error(`Hash generation failed: ${hashResponse.status} - ${errorText}`);
     }
 
-    // Step 3: Create Payment Link
-    const createRequest: PocketPayCreateRequest = {
+    const hashResult = await hashResponse.json();
+    console.log('Hash generation response:', hashResult);
+    const hashedData = hashResult.hashed_data;
+
+    // Step 3: Create Payment Link & QR (following exact documentation format)
+    const createRequest = {
       api_key: POCKET_PAY_CONFIG.API_KEY,
+      salt: POCKET_PAY_CONFIG.SALT,
+      hashed_data: hashedData,
+      subamount_1: paymentData.amount,
+      subamount_1_label: "Order Total",
+      subamount_2: 0,
+      subamount_2_label: "string",
+      subamount_3: 0,
+      subamount_3_label: "string",
+      subamount_4: 0,
+      subamount_4_label: "string",
+      subamount_5: 0,
+      subamount_5_label: "string",
       order_id: orderId,
-      amount: paymentData.amount.toString(),
-      currency: 'BND',
-      description: `${paymentData.serviceName} - ${paymentData.selectedBranch} branch`,
-      customer_name: paymentData.customerName,
-      customer_email: paymentData.customerEmail,
-      customer_phone: paymentData.customerPhone,
+      order_info: `This is the order info ${orderId}.`,
+      order_desc: `${paymentData.serviceName} - ${paymentData.selectedBranch} branch`,
       return_url: `https://cucixpress.com/payment-success`,
-      cancel_url: `https://cucixpress.com/payment-cancel`,
       callback_url: `https://cucixpress.com/api/payment-callback`,
-      hash: hash
+      discount: 0
     };
 
-    console.log('Sending payment creation request to:', `${POCKET_PAY_CONFIG.PROD_API_URL}/payments/create`);
+    console.log('Sending payment creation request to:', `${POCKET_PAY_CONFIG.TEST_API_URL}/payments/create`);
     console.log('Payment creation data:', JSON.stringify(createRequest, null, 2));
     
-    const createResponse = await fetch(`${POCKET_PAY_CONFIG.PROD_API_URL}/payments/create`, {
+    const createResponse = await fetch(`${POCKET_PAY_CONFIG.TEST_API_URL}/payments/create`, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
@@ -225,7 +211,10 @@ export async function processPocketPayPayment(paymentData: PaymentRequest): Prom
 
     console.log('Payment link created successfully:', {
       order_id: orderId,
-      payment_url: createResult.payment_url || createResult.url,
+      order_ref: createResult.order_ref,
+      payment_url: createResult.payment_url,
+      success_indicator: createResult.success_indicator,
+      qr: createResult.qr ? 'QR code generated' : 'No QR code',
       transaction_id: transactionId
     });
 
