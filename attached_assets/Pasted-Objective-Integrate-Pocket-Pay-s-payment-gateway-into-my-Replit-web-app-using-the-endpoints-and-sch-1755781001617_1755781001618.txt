@@ -1,0 +1,217 @@
+Objective: Integrate Pocket Pay’s payment gateway into my Replit web app using the endpoints and schemas defined in the Pocket Pay API v 1.0.6. The workflow should:
+
+Generate a unique order ID.
+
+Create SHA‑256 hash data for the order.
+
+Generate a payment link and dynamic QR code.
+
+Redirect users or display the QR for payment.
+
+Query transaction status and optionally void transactions.
+
+1. Configuration
+
+Environment variables (set these in Replit’s secrets):
+
+POCKET_API_KEY – your API key (api_key).
+
+POCKET_SALT – the corresponding salt value (salt).
+
+POCKET_BASE_URL – the API base URL:
+
+Use http://pay.threeg.asia/ for testing.
+
+Use https://pocket-pay.threeg.asia/ for production.
+
+Create a configuration helper (e.g., config/pocketPay.js) that exports these values.
+
+2. Install Dependencies
+
+For a Node.js/Express backend, install axios:
+
+npm install axios
+
+
+Use TypeScript or JSDoc comments if you want to annotate request/response shapes according to the provided schemas.
+
+3. Implement API Calls
+
+All endpoints are POST requests and accept JSON bodies.
+
+(a) Generate a New Order ID
+
+Endpoint: POST /payments/getNewOrderId
+
+Request body (schema: NewOrderID):
+
+{
+  "api_key": process.env.POCKET_API_KEY,
+  "salt": process.env.POCKET_SALT
+}
+
+
+Success response (NewOrderIDResponse):
+
+{
+  "new_id": 1234567898   // integer to use as order_id
+}
+
+
+Store new_id as order_id. Handle error codes 210, 300, 401, 412, or 428 by returning an appropriate message.
+
+(b) Generate Hash Data
+
+Endpoint: POST /payments/hash
+
+Request body (schema: HashedData):
+
+{
+  "api_key": process.env.POCKET_API_KEY,
+  "salt": process.env.POCKET_SALT,
+  "subamount_1": <amount_in_cents>,      // required
+  "subamount_1_label": "Order Total",    // required
+  "subamount_2": 0,
+  "subamount_3": 0,
+  "subamount_4": 0,
+  "subamount_5": 0,
+  "order_id": <order_id>,                // from step (a)
+  "order_info": "Description of this order",   // required
+  "order_desc": "Description label",     // required
+  "return_url": "https://<your-app>/pocketpay-return",  // required
+  "callback_url": "https://<your-app>/pocketpay-callback", // required
+  "discount": 0                          // required; deduction in cents
+}
+
+
+Success response (HashedDataResponse):
+
+{
+  "hashed_data": "…SHA256 value…"
+}
+
+
+Store the returned hashed_data for the next step.
+
+(c) Create Payment Link & Dynamic QR
+
+Endpoint: POST /payments/create
+
+Request body (schema: Create):
+
+{
+  "api_key": process.env.POCKET_API_KEY,
+  "salt": process.env.POCKET_SALT,
+  "hashed_data": <hashed_data>,          // required; from step (b)
+  "subamount_1": <amount_in_cents>,
+  "subamount_2": 0,
+  "subamount_3": 0,
+  "subamount_4": 0,
+  "subamount_5": 0,
+  "subamount_1_label": "Order Total",
+  "subamount_2_label": "string",         // optional labels
+  "subamount_3_label": "string",
+  "subamount_4_label": "string",
+  "subamount_5_label": "string",
+  "order_id": <order_id>,                // required
+  "order_info": "Description of this order",
+  "order_desc": "Description label",
+  "return_url": "https://<your-app>/pocketpay-return",
+  "callback_url": "https://<your-app>/pocketpay-callback",
+  "discount": 0,
+  "promo": "<label for discount>",       // optional
+  "promo_code": "<optional promo code>"  // optional
+}
+
+
+Success response (CreateResponse):
+
+{
+  "payment_url": "https://pocket-pay.threeg.asia/?tx_id=…",
+  "success_indicator": "string",      // used to verify success in callback
+  "order_ref": "64757",               // reference for status/void calls
+  "qr": "base64-encoded QR string"
+}
+
+
+Return payment_url and qr to the frontend. The user can either be redirected to payment_url or shown the QR code (decode the base64 string to display).
+
+(d) Query Transaction Status
+
+Endpoint: POST /payments/status
+
+Request body (schema: Status):
+
+{
+  "api_key": process.env.POCKET_API_KEY,
+  "salt": process.env.POCKET_SALT,
+  "order_id": <order_id>  // use the original order_id, not order_ref
+}
+
+
+Success response (StatusResponse):
+
+{
+  "method": "Pocket QR" | "Card" | "Biller",
+  "status_id": "Not Paid" | "Paid",
+  "final_amount": "1.00",
+  "order_ref": "64757"
+}
+
+
+Use this endpoint in your callback handler or a periodic cron job to confirm that a payment is completed (status_id = “Paid”).
+
+(e) Void (Cancel) Transaction
+
+Endpoint: POST /payments/voidV3 (recommended; /payments/voidV2 is deprecated)
+
+Request body (schema: VoidV3):
+
+One of order_ref or cref is required, plus logging info:
+
+{
+  "api_key": process.env.POCKET_API_KEY,
+  "salt": process.env.POCKET_SALT,
+  "order_ref": "<order_ref from create response>",
+  // OR "cref": "<customer receipt ref>",
+  "admin_name": "Your Admin Name",
+  "reason": "Reason for voiding"
+}
+
+
+Success response (VoidV3Response):
+
+{
+  "message": "Order marked as voided."
+}
+
+
+Use this only if the payment was made on the same day and must be cancelled.
+
+4. Callback Handling and Security
+
+Callback URL (GET request): The Pocket Pay server will call your callback_url with query parameters such as successIndicator, Message, and OrderId. Verify that successIndicator matches the success_indicator you received in the create response, then query /payments/status for confirmation.
+
+Return URL: After payment, the user will be redirected to your return_url. It should display a success or failure message and optionally trigger a status check.
+
+5. Testing vs Production
+
+Use the test server http://pay.threeg.asia/ along with the test card (Card Number 4444 5555 6666 7777, CVV 555, Expiry 01/35) to simulate transactions.
+
+Once confirmed, switch POCKET_BASE_URL to the production server https://pocket-pay.threeg.asia/ and use your live API key/salt.
+
+6. Error Codes to Handle
+
+200: Success responses (see schemas above).
+
+210–221: Various validation errors for /create (e.g., insufficient information, total chargeable is zero, missing order ID, invalid return URL).
+
+300: Correct API key (informational).
+
+401: No API key submitted.
+
+412: Invalid API key.
+
+428: Insufficient information POSTed.
+
+411/412/413/414 for voiding endpoints: refer to the specification for details.

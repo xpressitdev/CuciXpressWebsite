@@ -5,11 +5,19 @@ import crypto from 'crypto';
 
 // Pocket Pay Configuration (using your actual API credentials)
 const POCKET_PAY_CONFIG = {
-  TEST_API_URL: 'http://pay-threeg.asia', // Test environment URL from documentation
+  TEST_API_URL: 'http://pay.threeg.asia', // Test environment URL - corrected domain
   PROD_API_URL: 'https://pocket-pay.threeg.asia', // Production environment
   API_KEY: process.env.POCKET_PAY_API_KEY!, // Your actual API key
   SALT: process.env.POCKET_PAY_SALT! // Your actual salt
 };
+
+// Debug environment variables (remove in production)
+console.log('Pocket Pay Config Debug:', {
+  api_key_length: POCKET_PAY_CONFIG.API_KEY?.length || 0,
+  salt_length: POCKET_PAY_CONFIG.SALT?.length || 0,
+  api_key_preview: POCKET_PAY_CONFIG.API_KEY?.substring(0, 8) + '...',
+  salt_preview: POCKET_PAY_CONFIG.SALT?.substring(0, 8) + '...'
+});
 
 interface PaymentRequest {
   serviceName: string;
