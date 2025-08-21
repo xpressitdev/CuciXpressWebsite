@@ -99,7 +99,10 @@ export async function processPocketPayPayment(paymentData: PaymentRequest): Prom
       salt: POCKET_PAY_CONFIG.SALT
     };
 
-    const orderResponse = await fetch(`${POCKET_PAY_CONFIG.TEST_API_URL}/payments/getNewOrderId`, {
+    console.log('Sending order request to:', `${POCKET_PAY_CONFIG.PROD_API_URL}/payments/getNewOrderId`);
+    console.log('Order request data:', JSON.stringify(orderRequest, null, 2));
+    
+    const orderResponse = await fetch(`${POCKET_PAY_CONFIG.PROD_API_URL}/payments/getNewOrderId`, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
@@ -140,7 +143,10 @@ export async function processPocketPayPayment(paymentData: PaymentRequest): Prom
       salt: POCKET_PAY_CONFIG.SALT
     };
 
-    const hashResponse = await fetch(`${POCKET_PAY_CONFIG.TEST_API_URL}/payments/hash`, {
+    console.log('Sending hash request to:', `${POCKET_PAY_CONFIG.PROD_API_URL}/payments/hash`);
+    console.log('Simple hash request data:', JSON.stringify(simpleHashRequest, null, 2));
+    
+    const hashResponse = await fetch(`${POCKET_PAY_CONFIG.PROD_API_URL}/payments/hash`, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
@@ -156,7 +162,7 @@ export async function processPocketPayPayment(paymentData: PaymentRequest): Prom
       
       // If simple request fails, try with full data
       console.log('Trying hash generation with full data...');
-      const fullHashResponse = await fetch(`${POCKET_PAY_CONFIG.TEST_API_URL}/payments/hash`, {
+      const fullHashResponse = await fetch(`${POCKET_PAY_CONFIG.PROD_API_URL}/payments/hash`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
@@ -196,7 +202,10 @@ export async function processPocketPayPayment(paymentData: PaymentRequest): Prom
       hash: hash
     };
 
-    const createResponse = await fetch(`${POCKET_PAY_CONFIG.TEST_API_URL}/payments/create`, {
+    console.log('Sending payment creation request to:', `${POCKET_PAY_CONFIG.PROD_API_URL}/payments/create`);
+    console.log('Payment creation data:', JSON.stringify(createRequest, null, 2));
+    
+    const createResponse = await fetch(`${POCKET_PAY_CONFIG.PROD_API_URL}/payments/create`, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
@@ -321,7 +330,7 @@ export async function queryTransactionStatus(orderId: string): Promise<any> {
       hash: generateStatusHash(orderId)
     };
 
-    const response = await fetch(`${POCKET_PAY_CONFIG.TEST_API_URL}/payments/status`, {
+    const response = await fetch(`${POCKET_PAY_CONFIG.PROD_API_URL}/payments/status`, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
