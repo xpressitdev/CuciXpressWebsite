@@ -4,6 +4,7 @@ import { z } from "zod";
 import { db } from "./db";
 import { collaborationSubmissions, insertCollaborationSubmissionSchema, subscriptionSignups, insertSubscriptionSignupSchema } from "@shared/schema";
 import { sendCollaborationNotification, sendSubscriptionNotification } from "./email";
+import { processPocketPayPayment, handlePaymentCallback } from "./payment";
 import { eq, desc } from "drizzle-orm";
 
 const investorInterestSchema = z.object({
@@ -668,6 +669,85 @@ export async function registerRoutes(app: Express): Promise<Server> {
         averageRating: 4.8,
         totalReviews: 150
       });
+    }
+  });
+
+  // Payment processing endpoint
+  app.post("/api/process-payment", async (req, res) => {
+    try {
+      const paymentData = req.body;
+      
+      // Validate required fields
+      const requiredFields = ['serviceName', 'amount', 'customerName', 'customerEmail', 'customerPhone', 'cardNumber', 'expiryMonth', 'expiryYear', 'cvv', 'selectedBranch'];
+      const missingFields = requiredFields.filter(field => !paymentData[field]);
+      
+      if (missingFields.length > 0) {
+        return res.status(400).json({
+          success: false,
+          message: `Missing required fields: ${missingFields.join(', ')}`
+        });
+      }
+
+      // Process payment through Pocket Pay
+      const result = await processPocketPayPayment(paymentData);
+      
+      if (result.success) {
+        // Log successful payment
+        console.log('Payment processed successfully:', {
+          transaction_id: result.transaction_id,
+          customer: paymentData.customerEmail,
+          amount: paymentData.amount,
+          service: paymentData.serviceName
+        });
+        
+        res.json({
+          success: true,
+          message: 'Payment processed successfully',
+          transaction_id: result.transaction_id,
+          payment_id: result.payment_id
+        });
+      } else {
+        // Log failed payment
+        console.log('Payment failed:', {
+          customer: paymentData.customerEmail,
+          amount: paymentData.amount,
+          error: result.message
+        });
+        
+        res.status(400).json({
+          success: false,
+          message: result.message || 'Payment processing failed',
+          transaction_id: result.transaction_id
+        });
+      }
+      
+    } catch (error) {
+      console.error('Payment processing error:', error);
+      res.status(500).json({
+        success: false,
+        message: 'Internal server error during payment processing'
+      });
+    }
+  });
+
+  // Payment callback endpoint for Pocket Pay
+  app.post("/api/payment-callback", async (req, res) => {
+    try {
+      const callbackData = req.body;
+      
+      console.log('Payment callback received:', callbackData);
+      
+      const result = handlePaymentCallback(callbackData);
+      
+      if (result.success) {
+        res.json({ status: 'OK', message: 'Callback processed' });
+      } else {
+        res.status(400).json({ status: 'ERROR', message: result.message || 'Callback processing failed' });
+      }
+      
+    } catch (error) {
+      console.error('Payment callback error:', error);
+      res.status(500).json({ status: 'ERROR', message: 'Internal server error' });
     }
   });
 

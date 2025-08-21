@@ -143,11 +143,13 @@ export default function ServicePricing() {
                       if (service.name === "Coming Soon") {
                         window.location.href = '/subscriptions';
                       } else {
-                        window.open('https://cuci-xpress.com', '_blank');
+                        // Open payment checkout in new tab with service data
+                        const serviceData = encodeURIComponent(JSON.stringify(service));
+                        window.open(`/checkout?service=${serviceData}`, '_blank');
                       }
                     }}
                   >
-                    {service.name === "Coming Soon" ? "Learn More" : "Queue Now"}
+                    {service.name === "Coming Soon" ? "Learn More" : "Book & Pay"}
                   </Button>
                 </CardContent>
               </Card>
