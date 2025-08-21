@@ -3,12 +3,12 @@
 
 import crypto from 'crypto';
 
-// Pocket Pay Configuration (using actual test credentials from documentation)
+// Pocket Pay Configuration (using your actual API credentials)
 const POCKET_PAY_CONFIG = {
   TEST_API_URL: 'http://pay.threeg.asia', // Test environment
   PROD_API_URL: 'https://pocket-pay.threeg.asia', // Production environment
-  TEST_API_KEY: 'XnUgH1PyIZ8p1iF2IbKUiOBzdrLPNnWq', // Actual test API key from documentation
-  TEST_SALT: 'FOLzaoJSdbgaNiVVA73vGiIR7yovZury4OdOalPFoWTdKmDVxfoJCJYTs4nhUFS2' // Actual test salt from documentation
+  API_KEY: process.env.POCKET_PAY_API_KEY!, // Your actual API key
+  SALT: process.env.POCKET_PAY_SALT! // Your actual salt
 };
 
 interface PaymentRequest {
@@ -95,8 +95,8 @@ export async function processPocketPayPayment(paymentData: PaymentRequest): Prom
 
     // Step 1: Generate Order ID
     const orderRequest: PocketPayOrderRequest = {
-      api_key: POCKET_PAY_CONFIG.TEST_API_KEY,
-      salt: POCKET_PAY_CONFIG.TEST_SALT
+      api_key: POCKET_PAY_CONFIG.API_KEY,
+      salt: POCKET_PAY_CONFIG.SALT
     };
 
     const orderResponse = await fetch(`${POCKET_PAY_CONFIG.TEST_API_URL}/payments/getNewOrderId`, {
@@ -120,8 +120,8 @@ export async function processPocketPayPayment(paymentData: PaymentRequest): Prom
 
     // Step 2: Generate Hash - Use same format as order ID generation
     const hashRequest = {
-      api_key: POCKET_PAY_CONFIG.TEST_API_KEY,
-      salt: POCKET_PAY_CONFIG.TEST_SALT,
+      api_key: POCKET_PAY_CONFIG.API_KEY,
+      salt: POCKET_PAY_CONFIG.SALT,
       order_id: orderId,
       amount: paymentData.amount.toString(),
       currency: 'BND',
@@ -136,8 +136,8 @@ export async function processPocketPayPayment(paymentData: PaymentRequest): Prom
 
     // Try simplified hash request first - some APIs only need api_key and salt for hash generation
     const simpleHashRequest = {
-      api_key: POCKET_PAY_CONFIG.TEST_API_KEY,
-      salt: POCKET_PAY_CONFIG.TEST_SALT
+      api_key: POCKET_PAY_CONFIG.API_KEY,
+      salt: POCKET_PAY_CONFIG.SALT
     };
 
     const hashResponse = await fetch(`${POCKET_PAY_CONFIG.TEST_API_URL}/payments/hash`, {
@@ -182,7 +182,7 @@ export async function processPocketPayPayment(paymentData: PaymentRequest): Prom
 
     // Step 3: Create Payment Link
     const createRequest: PocketPayCreateRequest = {
-      api_key: POCKET_PAY_CONFIG.TEST_API_KEY,
+      api_key: POCKET_PAY_CONFIG.API_KEY,
       order_id: orderId,
       amount: paymentData.amount.toString(),
       currency: 'BND',
@@ -303,7 +303,7 @@ export function handlePaymentCallback(callbackData: any): any {
 function generateCallbackHash(callbackData: any): string {
   // Implement hash generation for callback verification
   // This should match the format expected by Pocket Pay
-  const hashString = `${callbackData.api_key}|${callbackData.order_id}|${callbackData.status}|${callbackData.amount}|${POCKET_PAY_CONFIG.TEST_SALT}`;
+  const hashString = `${callbackData.api_key}|${callbackData.order_id}|${callbackData.status}|${callbackData.amount}|${POCKET_PAY_CONFIG.SALT}`;
   
   return crypto
     .createHash('md5')
@@ -316,7 +316,7 @@ function generateCallbackHash(callbackData: any): string {
 export async function queryTransactionStatus(orderId: string): Promise<any> {
   try {
     const statusRequest = {
-      api_key: POCKET_PAY_CONFIG.TEST_API_KEY,
+      api_key: POCKET_PAY_CONFIG.API_KEY,
       order_id: orderId,
       hash: generateStatusHash(orderId)
     };
@@ -348,7 +348,7 @@ export async function queryTransactionStatus(orderId: string): Promise<any> {
 
 // Generate hash for status query
 function generateStatusHash(orderId: string): string {
-  const hashString = `${POCKET_PAY_CONFIG.TEST_API_KEY}|${orderId}|${POCKET_PAY_CONFIG.TEST_SALT}`;
+  const hashString = `${POCKET_PAY_CONFIG.API_KEY}|${orderId}|${POCKET_PAY_CONFIG.SALT}`;
   
   return crypto
     .createHash('md5')
