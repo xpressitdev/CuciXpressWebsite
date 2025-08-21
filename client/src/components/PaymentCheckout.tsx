@@ -202,6 +202,15 @@ export default function PaymentCheckout({ selectedService, onBack }: PaymentChec
                     Your payment is processed securely through Pocket Pay. We use industry-standard encryption to protect your card details.
                   </p>
                 </div>
+
+                {/* Test Mode Notice */}
+                <div className="mt-4 p-4 bg-yellow-50 border border-yellow-200 rounded-lg">
+                  <h4 className="font-medium text-yellow-900 mb-2">⚠️ Test Mode Active</h4>
+                  <p className="text-sm text-yellow-700">
+                    Payment processing is currently in test environment. All transactions are safe and secure but not charged. 
+                    This will be switched to live mode once final payment credentials are activated.
+                  </p>
+                </div>
               </CardContent>
             </Card>
           </motion.div>

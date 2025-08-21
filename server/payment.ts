@@ -4,23 +4,23 @@
 import crypto from 'crypto';
 import { sendPaymentConfirmation } from './email';
 
-// Pocket Pay Configuration - Production environment with admin portal credentials
+// Pocket Pay Configuration - Test environment (production credentials pending activation)
 const POCKET_PAY_CONFIG = {
   TEST_API_URL: 'http://pay.threeg.asia', // Test environment URL
   PROD_API_URL: 'https://pocket-pay.threeg.asia', // Production environment URL
-  API_KEY: '9LGHGgu9WHdjGASNkuXgY3cFYZrxm86GZ', // Production API key from admin portal
-  SALT: 'ICDkzqxAC3WpOGGWNrmvIVmB4A7QhcvobLYY4EqdTGPKuCMLr4zGl4CTBLHnZZ', // Production salt from admin portal
+  API_KEY: process.env.POCKET_PAY_API_KEY!, // Working test credentials
+  SALT: process.env.POCKET_PAY_SALT!, // Working test credentials
   MERCHANT_ID: '680499048' // Merchant ID from admin portal
 };
 
-// Debug production configuration
-console.log('Pocket Pay Production Config:', {
-  api_key_length: POCKET_PAY_CONFIG.API_KEY.length,
-  salt_length: POCKET_PAY_CONFIG.SALT.length,
+// Debug test configuration (production credentials pending activation)
+console.log('Pocket Pay Config Debug:', {
+  api_key_length: POCKET_PAY_CONFIG.API_KEY?.length || 0,
+  salt_length: POCKET_PAY_CONFIG.SALT?.length || 0,
   merchant_id: POCKET_PAY_CONFIG.MERCHANT_ID,
-  api_key_preview: POCKET_PAY_CONFIG.API_KEY.substring(0, 8) + '...',
-  salt_preview: POCKET_PAY_CONFIG.SALT.substring(0, 8) + '...',
-  environment: 'PRODUCTION'
+  api_key_preview: POCKET_PAY_CONFIG.API_KEY?.substring(0, 8) + '...',
+  salt_preview: POCKET_PAY_CONFIG.SALT?.substring(0, 8) + '...',
+  environment: 'TEST (production credentials need Pocket Pay activation)'
 });
 
 interface PaymentRequest {
@@ -111,10 +111,10 @@ export async function processPocketPayPayment(paymentData: PaymentRequest): Prom
       salt: POCKET_PAY_CONFIG.SALT
     };
 
-    console.log('Sending order request to:', `${POCKET_PAY_CONFIG.PROD_API_URL}/payments/getNewOrderId`);
+    console.log('Sending order request to:', `${POCKET_PAY_CONFIG.TEST_API_URL}/payments/getNewOrderId`);
     console.log('Order request data:', JSON.stringify(orderRequest, null, 2));
     
-    const orderResponse = await fetch(`${POCKET_PAY_CONFIG.PROD_API_URL}/payments/getNewOrderId`, {
+    const orderResponse = await fetch(`${POCKET_PAY_CONFIG.TEST_API_URL}/payments/getNewOrderId`, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
@@ -157,10 +157,10 @@ export async function processPocketPayPayment(paymentData: PaymentRequest): Prom
       discount: 0
     };
 
-    console.log('Sending hash request to:', `${POCKET_PAY_CONFIG.PROD_API_URL}/payments/hash`);
+    console.log('Sending hash request to:', `${POCKET_PAY_CONFIG.TEST_API_URL}/payments/hash`);
     console.log('Hash request data:', JSON.stringify(hashRequest, null, 2));
     
-    const hashResponse = await fetch(`${POCKET_PAY_CONFIG.PROD_API_URL}/payments/hash`, {
+    const hashResponse = await fetch(`${POCKET_PAY_CONFIG.TEST_API_URL}/payments/hash`, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
@@ -202,10 +202,10 @@ export async function processPocketPayPayment(paymentData: PaymentRequest): Prom
       discount: 0
     };
 
-    console.log('Sending payment creation request to:', `${POCKET_PAY_CONFIG.PROD_API_URL}/payments/create`);
+    console.log('Sending payment creation request to:', `${POCKET_PAY_CONFIG.TEST_API_URL}/payments/create`);
     console.log('Payment creation data:', JSON.stringify(createRequest, null, 2));
     
-    const createResponse = await fetch(`${POCKET_PAY_CONFIG.PROD_API_URL}/payments/create`, {
+    const createResponse = await fetch(`${POCKET_PAY_CONFIG.TEST_API_URL}/payments/create`, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
