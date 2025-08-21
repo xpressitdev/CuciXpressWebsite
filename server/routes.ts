@@ -867,35 +867,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
-  // Payment success page route
-  app.get("/payment-success", (req, res) => {
-    res.send(`
-      <!DOCTYPE html>
-      <html>
-        <head>
-          <title>Payment Successful - Cuci Xpress</title>
-          <meta name="viewport" content="width=device-width, initial-scale=1.0">
-          <style>
-            body { font-family: Arial, sans-serif; text-align: center; padding: 50px; background: #f8f9fa; }
-            .container { max-width: 500px; margin: 0 auto; background: white; padding: 40px; border-radius: 10px; box-shadow: 0 4px 6px rgba(0,0,0,0.1); }
-            .success { color: #28a745; font-size: 48px; margin-bottom: 20px; }
-            h1 { color: #6C5CE7; margin-bottom: 20px; }
-            p { color: #666; line-height: 1.6; margin-bottom: 30px; }
-            .btn { background: #6C5CE7; color: white; padding: 12px 30px; text-decoration: none; border-radius: 5px; display: inline-block; }
-          </style>
-        </head>
-        <body>
-          <div class="container">
-            <div class="success">✓</div>
-            <h1>Payment Successful!</h1>
-            <p>Thank you for your payment. Your car wash service has been confirmed.</p>
-            <p>You will receive a confirmation email shortly.</p>
-            <a href="/" class="btn">Return to Home</a>
-          </div>
-        </body>
-      </html>
-    `);
-  });
+
 
   // Payment cancel page route
   app.get("/payment-cancel", (req, res) => {
