@@ -118,9 +118,10 @@ export async function processPocketPayPayment(paymentData: PaymentRequest): Prom
     console.log('Order ID response:', orderResult);
     const orderId = orderResult.new_id; // According to documentation, it returns "new_id" not "order_id"
 
-    // Step 2: Generate Hash
-    const hashRequest: PocketPayHashRequest = {
+    // Step 2: Generate Hash - Use same format as order ID generation
+    const hashRequest = {
       api_key: POCKET_PAY_CONFIG.TEST_API_KEY,
+      salt: POCKET_PAY_CONFIG.TEST_SALT,
       order_id: orderId,
       amount: paymentData.amount.toString(),
       currency: 'BND',
@@ -130,7 +131,12 @@ export async function processPocketPayPayment(paymentData: PaymentRequest): Prom
       customer_phone: paymentData.customerPhone,
       return_url: `https://cucixpress.com/payment-success`,
       cancel_url: `https://cucixpress.com/payment-cancel`,
-      callback_url: `https://cucixpress.com/api/payment-callback`,
+      callback_url: `https://cucixpress.com/api/payment-callback`
+    };
+
+    // Try simplified hash request first - some APIs only need api_key and salt for hash generation
+    const simpleHashRequest = {
+      api_key: POCKET_PAY_CONFIG.TEST_API_KEY,
       salt: POCKET_PAY_CONFIG.TEST_SALT
     };
 
@@ -140,18 +146,39 @@ export async function processPocketPayPayment(paymentData: PaymentRequest): Prom
         'Content-Type': 'application/json',
         'Accept': 'application/json'
       },
-      body: JSON.stringify(hashRequest)
+      body: JSON.stringify(simpleHashRequest)
     });
 
+    let hash = '';
     if (!hashResponse.ok) {
       const errorText = await hashResponse.text();
-      console.error('Hash API Error:', hashResponse.status, errorText);
-      throw new Error(`Hash generation failed: ${hashResponse.status} - ${errorText}`);
-    }
+      console.error('Hash API Error with simple request:', hashResponse.status, errorText);
+      
+      // If simple request fails, try with full data
+      console.log('Trying hash generation with full data...');
+      const fullHashResponse = await fetch(`${POCKET_PAY_CONFIG.TEST_API_URL}/payments/hash`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Accept': 'application/json'
+        },
+        body: JSON.stringify(hashRequest)
+      });
 
-    const hashResult = await hashResponse.json();
-    console.log('Hash generation response:', hashResult);
-    const hash = hashResult.hash;
+      if (!fullHashResponse.ok) {
+        const fullErrorText = await fullHashResponse.text();
+        console.error('Hash API Error with full request:', fullHashResponse.status, fullErrorText);
+        throw new Error(`Hash generation failed: ${fullHashResponse.status} - ${fullErrorText}`);
+      }
+
+      const fullHashResult = await fullHashResponse.json();
+      console.log('Hash generation response (full):', fullHashResult);
+      hash = fullHashResult.hash;
+    } else {
+      const hashResult = await hashResponse.json();
+      console.log('Hash generation response (simple):', hashResult);
+      hash = hashResult.hash;
+    }
 
     // Step 3: Create Payment Link
     const createRequest: PocketPayCreateRequest = {
