@@ -135,7 +135,7 @@ export async function sendPaymentConfirmation(data: PaymentConfirmationData): Pr
     await mailService.send({
       to: data.customerEmail,
       from: {
-        email: 'noreply@cucixpress.com',
+        email: 'cucixpress.bn@gmail.com', // Use your verified Gmail address
         name: 'Cuci Xpress'
       },
       subject: `Payment Confirmed - ${data.service} at ${data.branch}`,
