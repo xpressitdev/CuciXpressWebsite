@@ -107,9 +107,14 @@ export default function PaymentCheckout({ selectedService, onBack }: PaymentChec
       const result = await response.json();
 
       if (result.success && result.redirect_url) {
-        // Store order details for success page
+        // Store order details for success page (including customer email for confirmation)
         if (result.order_details) {
-          sessionStorage.setItem('lastPaymentOrder', JSON.stringify(result.order_details));
+          const orderDetailsWithEmail = {
+            ...result.order_details,
+            customer_email: formData.customerEmail,
+            customer_name: formData.customerName
+          };
+          sessionStorage.setItem('lastPaymentOrder', JSON.stringify(orderDetailsWithEmail));
         }
         
         // Redirect to Pocket Pay for payment

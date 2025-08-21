@@ -3,7 +3,7 @@ import { createServer, type Server } from "http";
 import { z } from "zod";
 import { db } from "./db";
 import { collaborationSubmissions, insertCollaborationSubmissionSchema, subscriptionSignups, insertSubscriptionSignupSchema } from "@shared/schema";
-import { sendCollaborationNotification, sendSubscriptionNotification } from "./email";
+import { sendCollaborationEmail, sendPaymentConfirmation } from "./email";
 import { processPocketPayPayment, handlePaymentCallback, queryTransactionStatus } from "./payment";
 import { eq, desc } from "drizzle-orm";
 
@@ -217,7 +217,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
       const [submission] = await db.insert(collaborationSubmissions).values(data).returning();
       
       // Send email notification via ImprovMX forwarding
-      const emailSent = await sendCollaborationNotification({
+      const emailSent = await sendCollaborationEmail({
         ...data,
         submittedAt: new Date().toISOString(),
       });
@@ -736,6 +736,42 @@ export async function registerRoutes(app: Express): Promise<Server> {
       res.status(500).json({
         success: false,
         message: 'Internal server error during payment processing'
+      });
+    }
+  });
+
+  // Send payment confirmation email
+  app.post("/api/send-payment-confirmation", async (req, res) => {
+    try {
+      const { customerEmail, transactionId, orderId, service, amount, branch, customerName } = req.body;
+      
+      if (!customerEmail || !transactionId || !orderId || !service || !amount || !branch) {
+        return res.status(400).json({
+          success: false,
+          message: 'Missing required fields for email confirmation'
+        });
+      }
+      
+      const emailSent = await sendPaymentConfirmation({
+        customerEmail,
+        transactionId,
+        orderId,
+        service,
+        amount,
+        branch,
+        customerName
+      });
+      
+      res.json({
+        success: emailSent,
+        message: emailSent ? 'Confirmation email sent successfully' : 'Failed to send confirmation email'
+      });
+      
+    } catch (error) {
+      console.error('Email confirmation error:', error);
+      res.status(500).json({
+        success: false,
+        message: 'Internal server error while sending confirmation email'
       });
     }
   });

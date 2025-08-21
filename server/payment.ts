@@ -2,6 +2,7 @@
 // Documentation: https://app.swaggerhub.com/apis/ThreeGMedia/Pocket_Pay_API/
 
 import crypto from 'crypto';
+import { sendPaymentConfirmation } from './email';
 
 // Pocket Pay Configuration (using your actual API credentials)
 const POCKET_PAY_CONFIG = {

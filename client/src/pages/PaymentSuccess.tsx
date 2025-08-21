@@ -16,18 +16,61 @@ export default function PaymentSuccess() {
     const storedOrder = sessionStorage.getItem('lastPaymentOrder');
     
     if (storedOrder) {
-      setOrderDetails(JSON.parse(storedOrder));
+      const orderData = JSON.parse(storedOrder);
+      setOrderDetails(orderData);
       sessionStorage.removeItem('lastPaymentOrder'); // Clean up
+      
+      // Send confirmation email
+      sendConfirmationEmail(orderData);
     } else {
       // Fallback order details from URL params
-      setOrderDetails({
+      const fallbackOrder = {
         transaction_id: urlParams.get('OrderId') || 'CX_UNKNOWN',
         service: 'Car Wash Service',
         amount: 12,
-        branch: 'Tungku Link'
-      });
+        branch: 'Tungku Link',
+        customer_email: 'customer@example.com' // This would come from the actual order
+      };
+      setOrderDetails(fallbackOrder);
+      
+      // Send confirmation email for fallback too
+      sendConfirmationEmail(fallbackOrder);
     }
   }, []);
+
+  const sendConfirmationEmail = async (orderData: any) => {
+    try {
+      if (!orderData.customer_email) {
+        console.log('No customer email found - skipping confirmation email');
+        return;
+      }
+
+      const response = await fetch('/api/send-payment-confirmation', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          customerEmail: orderData.customer_email,
+          transactionId: orderData.transaction_id,
+          orderId: orderData.order_id || orderData.transaction_id,
+          service: orderData.service,
+          amount: orderData.amount,
+          branch: orderData.branch,
+          customerName: orderData.customer_name || 'Valued Customer'
+        })
+      });
+
+      const result = await response.json();
+      if (result.success) {
+        console.log('Confirmation email sent successfully');
+      } else {
+        console.error('Failed to send confirmation email:', result.message);
+      }
+    } catch (error) {
+      console.error('Error sending confirmation email:', error);
+    }
+  };
 
   return (
     <div className="min-h-screen bg-gradient-to-br from-green-50 to-emerald-100 flex items-center justify-center p-4">
@@ -51,7 +94,7 @@ export default function PaymentSuccess() {
               Payment Successful!
             </CardTitle>
             <p className="text-gray-600">
-              Your {orderDetails?.service || 'car wash service'} booking has been confirmed.
+              Thank you for being Xpress! Your {orderDetails?.service || 'car wash service'} booking has been confirmed.
             </p>
           </CardHeader>
 
