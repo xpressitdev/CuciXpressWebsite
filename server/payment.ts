@@ -3,13 +3,12 @@
 
 import crypto from 'crypto';
 
-// Pocket Pay Configuration (using correct endpoints from documentation)
+// Pocket Pay Configuration (using actual test credentials from documentation)
 const POCKET_PAY_CONFIG = {
   TEST_API_URL: 'http://pay.threeg.asia', // Test environment
   PROD_API_URL: 'https://pocket-pay.threeg.asia', // Production environment
-  TEST_MERCHANT_ID: 'TEST_MERCHANT', // Use test credentials from documentation
-  TEST_SECRET_KEY: 'TEST_SECRET_KEY', // Use test credentials from documentation
-  TEST_SALT: 'TEST_SALT' // Use test credentials from documentation
+  TEST_API_KEY: 'XnUgH1PyIZ8p1iF2IbKUiOBzdrLPNnWq', // Actual test API key from documentation
+  TEST_SALT: 'FOLzaoJSdbgaNiVVA73vGiIR7yovZury4OdOalPFoWTdKmDVxfoJCJYTs4nhUFS2' // Actual test salt from documentation
 };
 
 interface PaymentRequest {
@@ -26,14 +25,12 @@ interface PaymentRequest {
 }
 
 interface PocketPayOrderRequest {
-  merchant_id: string;
-  amount: string;
-  currency: string;
-  description: string;
+  api_key: string;
+  salt: string;
 }
 
 interface PocketPayHashRequest {
-  merchant_id: string;
+  api_key: string;
   order_id: string;
   amount: string;
   currency: string;
@@ -48,7 +45,7 @@ interface PocketPayHashRequest {
 }
 
 interface PocketPayCreateRequest {
-  merchant_id: string;
+  api_key: string;
   order_id: string;
   amount: string;
   currency: string;
@@ -72,7 +69,7 @@ function generateTransactionId(): string {
 // Generate hash for Pocket Pay API (following documentation format)
 function generatePocketPayHash(hashData: PocketPayHashRequest): string {
   // Create hash string according to Pocket Pay documentation format
-  const hashString = `${hashData.merchant_id}|${hashData.order_id}|${hashData.amount}|${hashData.currency}|${hashData.customer_email}|${hashData.salt}`;
+  const hashString = `${hashData.api_key}|${hashData.order_id}|${hashData.amount}|${hashData.currency}|${hashData.customer_email}|${hashData.salt}`;
   
   // Generate MD5 hash (as typically used by payment gateways)
   const hash = crypto
@@ -98,10 +95,8 @@ export async function processPocketPayPayment(paymentData: PaymentRequest): Prom
 
     // Step 1: Generate Order ID
     const orderRequest: PocketPayOrderRequest = {
-      merchant_id: POCKET_PAY_CONFIG.TEST_MERCHANT_ID,
-      amount: paymentData.amount.toString(),
-      currency: 'BND',
-      description: `${paymentData.serviceName} - ${paymentData.selectedBranch} branch`
+      api_key: POCKET_PAY_CONFIG.TEST_API_KEY,
+      salt: POCKET_PAY_CONFIG.TEST_SALT
     };
 
     const orderResponse = await fetch(`${POCKET_PAY_CONFIG.TEST_API_URL}/payments/getNewOrderId`, {
@@ -122,7 +117,7 @@ export async function processPocketPayPayment(paymentData: PaymentRequest): Prom
 
     // Step 2: Generate Hash
     const hashRequest: PocketPayHashRequest = {
-      merchant_id: POCKET_PAY_CONFIG.TEST_MERCHANT_ID,
+      api_key: POCKET_PAY_CONFIG.TEST_API_KEY,
       order_id: orderId,
       amount: paymentData.amount.toString(),
       currency: 'BND',
@@ -154,7 +149,7 @@ export async function processPocketPayPayment(paymentData: PaymentRequest): Prom
 
     // Step 3: Create Payment Link
     const createRequest: PocketPayCreateRequest = {
-      merchant_id: POCKET_PAY_CONFIG.TEST_MERCHANT_ID,
+      api_key: POCKET_PAY_CONFIG.TEST_API_KEY,
       order_id: orderId,
       amount: paymentData.amount.toString(),
       currency: 'BND',
@@ -272,7 +267,7 @@ export function handlePaymentCallback(callbackData: any): any {
 function generateCallbackHash(callbackData: any): string {
   // Implement hash generation for callback verification
   // This should match the format expected by Pocket Pay
-  const hashString = `${callbackData.merchant_id}|${callbackData.order_id}|${callbackData.status}|${callbackData.amount}|${POCKET_PAY_CONFIG.TEST_SALT}`;
+  const hashString = `${callbackData.api_key}|${callbackData.order_id}|${callbackData.status}|${callbackData.amount}|${POCKET_PAY_CONFIG.TEST_SALT}`;
   
   return crypto
     .createHash('md5')
@@ -285,7 +280,7 @@ function generateCallbackHash(callbackData: any): string {
 export async function queryTransactionStatus(orderId: string): Promise<any> {
   try {
     const statusRequest = {
-      merchant_id: POCKET_PAY_CONFIG.TEST_MERCHANT_ID,
+      api_key: POCKET_PAY_CONFIG.TEST_API_KEY,
       order_id: orderId,
       hash: generateStatusHash(orderId)
     };
@@ -317,7 +312,7 @@ export async function queryTransactionStatus(orderId: string): Promise<any> {
 
 // Generate hash for status query
 function generateStatusHash(orderId: string): string {
-  const hashString = `${POCKET_PAY_CONFIG.TEST_MERCHANT_ID}|${orderId}|${POCKET_PAY_CONFIG.TEST_SALT}`;
+  const hashString = `${POCKET_PAY_CONFIG.TEST_API_KEY}|${orderId}|${POCKET_PAY_CONFIG.TEST_SALT}`;
   
   return crypto
     .createHash('md5')
