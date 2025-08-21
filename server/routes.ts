@@ -704,9 +704,17 @@ export async function registerRoutes(app: Express): Promise<Server> {
         res.json({
           success: true,
           message: 'Payment link created successfully',
-          transaction_id: result.transaction_id,
-          order_id: result.order_id,
-          payment_url: result.payment_url,
+          redirect_url: result.payment_url,
+          order_details: {
+            transaction_id: result.transaction_id,
+            order_id: result.order_id,
+            order_ref: result.order_ref,
+            service: paymentData.serviceName,
+            amount: paymentData.amount,
+            branch: paymentData.selectedBranch,
+            customer: paymentData.customerEmail,
+            success_indicator: result.success_indicator
+          },
           qr_code: result.qr_code
         });
       } else {

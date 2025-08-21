@@ -230,8 +230,10 @@ export async function processPocketPayPayment(paymentData: PaymentRequest): Prom
       success: true,
       transaction_id: transactionId,
       order_id: orderId,
+      order_ref: createResult.order_ref,
       payment_url: createResult.payment_url,
-      qr_code: createResult.qr_code,
+      success_indicator: createResult.success_indicator,
+      qr_code: createResult.qr,
       message: 'Payment link created successfully'
     };
     

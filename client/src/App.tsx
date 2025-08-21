@@ -11,6 +11,8 @@ import Checkout from "@/pages/checkout";
 import PrivacyPolicy from "@/pages/privacy-policy";
 import TermsOfService from "@/pages/terms-of-service";
 import Admin from "@/pages/admin";
+import PaymentSuccess from "@/pages/PaymentSuccess";
+import PaymentCancel from "@/pages/PaymentCancel";
 import NotFound from "@/pages/not-found";
 
 function Router() {
@@ -30,6 +32,8 @@ function Router() {
       <Route path="/privacy-policy" component={PrivacyPolicy} />
       <Route path="/terms-of-service" component={TermsOfService} />
       <Route path="/admin" component={Admin} />
+      <Route path="/payment-success" component={PaymentSuccess} />
+      <Route path="/payment-cancel" component={PaymentCancel} />
       <Route component={NotFound} />
     </Switch>
   );

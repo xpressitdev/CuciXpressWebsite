@@ -106,23 +106,14 @@ export default function PaymentCheckout({ selectedService, onBack }: PaymentChec
 
       const result = await response.json();
 
-      if (result.success) {
-        toast({
-          title: "Payment Successful!",
-          description: `Your ${selectedService?.name} booking has been confirmed.`,
-        });
+      if (result.success && result.redirect_url) {
+        // Store order details for success page
+        if (result.order_details) {
+          sessionStorage.setItem('lastPaymentOrder', JSON.stringify(result.order_details));
+        }
         
-        // Redirect to success page or reset form
-        setFormData({
-          customerName: "",
-          customerEmail: "",
-          customerPhone: "",
-          cardNumber: "",
-          expiryMonth: "",
-          expiryYear: "",
-          cvv: "",
-          selectedBranch: ""
-        });
+        // Redirect to Pocket Pay for payment
+        window.location.href = result.redirect_url;
       } else {
         throw new Error(result.message || 'Payment failed');
       }
