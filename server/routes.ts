@@ -776,6 +776,104 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
+  // QR Code Verification endpoint for staff POS system
+  app.get('/verify/:transactionId', async (req, res) => {
+    const { transactionId } = req.params;
+    
+    try {
+      // In a real implementation, you would verify this against your database
+      // For now, return verification details for valid-looking transaction IDs
+      if (!transactionId || transactionId === 'CX_UNKNOWN') {
+        return res.status(404).json({
+          success: false,
+          message: 'Transaction not found'
+        });
+      }
+
+      // Mock verification data - in production this would come from your payment database
+      const verificationData = {
+        success: true,
+        transaction_id: transactionId,
+        status: 'PAID',
+        service: 'Car Wash Service',
+        amount: 12,
+        branch: 'Tungku Link',
+        customer: 'Valued Customer',
+        timestamp: new Date().toISOString(),
+        verified_at: new Date().toISOString()
+      };
+
+      res.json(verificationData);
+    } catch (error) {
+      console.error('QR verification error:', error);
+      res.status(500).json({
+        success: false,
+        message: 'Verification system error'
+      });
+    }
+  });
+
+  // QR Code Verification API for staff scanning
+  app.post('/api/verify-qr', async (req, res) => {
+    const { qr_data } = req.body;
+    
+    try {
+      // Parse QR code data
+      let paymentData;
+      try {
+        paymentData = JSON.parse(qr_data);
+      } catch (parseError) {
+        return res.status(400).json({
+          success: false,
+          message: 'Invalid QR code format'
+        });
+      }
+
+      // Validate QR code structure
+      if (paymentData.type !== 'CUCI_XPRESS_PAYMENT' || !paymentData.transaction_id) {
+        return res.status(400).json({
+          success: false,
+          message: 'Invalid Cuci Xpress payment QR code'
+        });
+      }
+
+      // Verify payment status (in production, check against payment database)
+      if (paymentData.status !== 'PAID') {
+        return res.status(400).json({
+          success: false,
+          message: 'Payment not confirmed'
+        });
+      }
+
+      // Return verification success with order details for POS system
+      res.json({
+        success: true,
+        message: 'Payment verified successfully',
+        order: {
+          transaction_id: paymentData.transaction_id,
+          service: paymentData.service,
+          amount: paymentData.amount,
+          branch: paymentData.branch,
+          customer: paymentData.customer,
+          customer_email: paymentData.email,
+          payment_timestamp: paymentData.timestamp,
+          verified_at: new Date().toISOString()
+        },
+        pos_instructions: {
+          action: 'ADD_TO_QUEUE',
+          service_code: paymentData.service === 'Full Package' ? 'FP' : 'BW',
+          prepaid: true
+        }
+      });
+    } catch (error) {
+      console.error('QR verification API error:', error);
+      res.status(500).json({
+        success: false,
+        message: 'Verification system error'
+      });
+    }
+  });
+
   // Temporary payment success redirect (until deployment)
   app.get("/payment-success", (req, res) => {
     const { successIndicator, Message, OrderId } = req.query;
