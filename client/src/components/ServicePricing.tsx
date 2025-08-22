@@ -6,8 +6,7 @@ import { Car, Sparkles, Shield, Clock, Phone, MapPin, Banknote } from "lucide-re
 import progresifDing from "@/assets/progresif-ding.webp";
 import mydstWallet from "@/assets/mydst-wallet.png";
 import cardPayment from "@assets/visa master_1755854326970.png";
-import baiduriBankLogo from "@/assets/baiduri-bank.webp";
-import bibdBankLogo from "@/assets/bibd-bank.jpg";
+import bankTransfer from "@assets/image_1755854644968.png";
 
 interface ServiceOption {
   name: string;
@@ -177,16 +176,10 @@ export default function ServicePricing() {
                 caption: "Cash"
               },
               { 
-                name: "BIBD Transfer", 
-                logo: bibdBankLogo, 
+                name: "Bank Transfer", 
+                logo: bankTransfer, 
                 icon: null,
-                caption: "BIBD Transfer"
-              },
-              { 
-                name: "Baiduri Bank Transfer", 
-                logo: baiduriBankLogo, 
-                icon: null,
-                caption: "Baiduri Transfer"
+                caption: "Bank Transfer"
               },
               { 
                 name: "Progresif Ding!", 
