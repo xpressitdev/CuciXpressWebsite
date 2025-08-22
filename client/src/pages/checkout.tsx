@@ -1,11 +1,13 @@
 
 import { useEffect, useState } from "react";
+import { useLocation } from "wouter";
 import PaymentCheckout from "@/components/PaymentCheckout";
 import Navigation from "@/components/Navigation";
 import Footer from "@/components/Footer";
 
 export default function Checkout() {
   const [selectedService, setSelectedService] = useState<any>(null);
+  const [, setLocation] = useLocation();
 
   useEffect(() => {
     // Get service data from URL parameters
@@ -23,7 +25,14 @@ export default function Checkout() {
   }, []);
 
   const handleBack = () => {
-    window.history.back();
+    // Navigate back to home page and scroll to pricing section
+    setLocation('/');
+    setTimeout(() => {
+      const pricingElement = document.getElementById('service-pricing');
+      if (pricingElement) {
+        pricingElement.scrollIntoView({ behavior: 'smooth' });
+      }
+    }, 100);
   };
 
   return (
