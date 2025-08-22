@@ -213,19 +213,21 @@ export default function ServicePricing() {
                 whileInView={{ opacity: 1, scale: 1 }}
                 transition={{ duration: 0.4, delay: index * 0.1 }}
                 viewport={{ once: true }}
-                className="bg-white rounded-lg p-4 shadow-md border border-gray-200 hover:shadow-lg transition-shadow duration-300"
+                className="bg-white rounded-lg p-3 shadow-md border border-gray-200 hover:shadow-lg transition-shadow duration-300"
               >
-                <div className="flex flex-col items-center gap-3">
+                <div className="flex flex-col items-center gap-2">
                   {/* Logo or Icon */}
-                  <div className="h-12 flex items-center justify-center">
+                  <div className="h-16 w-full flex items-center justify-center px-2">
                     {payment.logo ? (
                       <img 
                         src={payment.logo} 
                         alt={payment.name}
-                        className="max-h-10 max-w-full object-contain"
+                        className="max-h-14 max-w-full object-contain"
                       />
                     ) : (
-                      payment.icon
+                      <div className="scale-125">
+                        {payment.icon}
+                      </div>
                     )}
                   </div>
                   
