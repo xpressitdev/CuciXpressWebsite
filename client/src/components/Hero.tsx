@@ -1,7 +1,7 @@
 import { motion } from "framer-motion";
 import { CheckCircle } from "lucide-react";
 import { Link, useLocation } from "wouter";
-import heroVideo from "../assets/hero-video.mp4";
+import heroVideo from "@assets/WhatsApp Video 2025-08-22 at 18.37.54_e3b52b61_1755863204869.mp4";
 
 export default function Hero() {
   const [location] = useLocation();
