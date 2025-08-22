@@ -131,7 +131,7 @@ export default function Stats() {
   const stats = [
     {
       icon: <Calendar className="w-8 h-8" />,
-      value: 100592,
+      value: 103592,
       label: "Cars Cleaned and counting",
       color: "text-cuci-primary",
       bgColor: "bg-gradient-to-br from-cuci-primary/5 to-cuci-primary/10",
