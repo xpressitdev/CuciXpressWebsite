@@ -7,7 +7,7 @@ import progresifDing from "@/assets/progresif-ding.webp";
 import mydstWallet from "@/assets/mydst-wallet.png";
 import cardPayment from "@assets/visa master_1755854326970.png";
 import pocketApp from "@assets/POC-Royal-Skies-Partner-logo-290-x-150-05_1755854913328.png";
-import bibdBankLogo from "@/assets/bibd-bank.jpg";
+import bankTransfer from "@assets/bibd baiduri transfer_1755854973361.jpg";
 
 interface ServiceOption {
   name: string;
@@ -177,10 +177,10 @@ export default function ServicePricing() {
                 caption: "Cash"
               },
               { 
-                name: "BIBD Transfer", 
-                logo: bibdBankLogo, 
+                name: "Bank Transfer", 
+                logo: bankTransfer, 
                 icon: null,
-                caption: "BIBD Transfer"
+                caption: "Bank Transfer"
               },
               { 
                 name: "Pocket App", 
