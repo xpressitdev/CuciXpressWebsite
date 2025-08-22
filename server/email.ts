@@ -217,3 +217,75 @@ export async function sendCollaborationEmail(data: any): Promise<boolean> {
     return false;
   }
 }
+
+interface SubscriptionNotificationData {
+  email: string;
+  submittedAt: string;
+}
+
+export async function sendSubscriptionNotification(data: SubscriptionNotificationData): Promise<boolean> {
+  if (!process.env.SENDGRID_API_KEY) {
+    console.log('SendGrid not configured - skipping email');
+    return false;
+  }
+
+  try {
+    const emailHtml = `
+    <!DOCTYPE html>
+    <html>
+    <head>
+        <style>
+            body { font-family: Arial, sans-serif; line-height: 1.6; color: #333; }
+            .container { max-width: 600px; margin: 0 auto; padding: 20px; }
+            .header { background: linear-gradient(135deg, #6C5CE7, #FFA500); color: white; padding: 30px 20px; text-align: center; border-radius: 10px 10px 0 0; }
+            .content { background: #f8f9fa; padding: 30px 20px; border-radius: 0 0 10px 10px; }
+            .logo { font-size: 24px; font-weight: bold; }
+        </style>
+    </head>
+    <body>
+        <div class="container">
+            <div class="header">
+                <div class="logo">🚗 Cuci Xpress</div>
+                <h1>Welcome to Cuci Xpress!</h1>
+                <p>Thank you for your interest in our subscription service</p>
+            </div>
+            
+            <div class="content">
+                <h2>You're on our early access list!</h2>
+                <p>We'll notify you as soon as our subscription service launches with exclusive benefits and special pricing.</p>
+                
+                <p><strong>What to expect:</strong></p>
+                <ul>
+                    <li>Unlimited car washes</li>
+                    <li>Priority service</li>
+                    <li>Family and corporate plans</li>
+                    <li>Special member pricing</li>
+                </ul>
+                
+                <p>In the meantime, visit any of our 4 locations for immediate service!</p>
+                <p><strong>Call us:</strong> <a href="tel:+6738387000">+673 838 7000</a></p>
+                <p><strong>Website:</strong> <a href="https://cucixpress.com">cucixpress.com</a></p>
+            </div>
+        </div>
+    </body>
+    </html>
+    `;
+
+    await mailService.send({
+      to: data.email,
+      from: {
+        email: 'cucixpress.bn@gmail.com',
+        name: 'Cuci Xpress'
+      },
+      subject: 'Welcome to Cuci Xpress - Subscription Updates',
+      html: emailHtml,
+    });
+
+    console.log(`Subscription notification sent to ${data.email}`);
+    return true;
+    
+  } catch (error) {
+    console.error('SendGrid subscription email error:', error);
+    return false;
+  }
+}

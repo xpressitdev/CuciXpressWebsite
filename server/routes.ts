@@ -3,7 +3,7 @@ import { createServer, type Server } from "http";
 import { z } from "zod";
 import { db } from "./db";
 import { collaborationSubmissions, insertCollaborationSubmissionSchema, subscriptionSignups, insertSubscriptionSignupSchema } from "@shared/schema";
-import { sendCollaborationEmail, sendPaymentConfirmation } from "./email";
+import { sendCollaborationEmail, sendPaymentConfirmation, sendSubscriptionNotification } from "./email";
 import { processPocketPayPayment, handlePaymentCallback, queryTransactionStatus } from "./payment";
 import { eq, desc } from "drizzle-orm";
 
@@ -576,7 +576,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
   });
 
   // API endpoint to get overall average rating across all branches
-  app.get("/api/average-rating", async (req: Request, res: Response) => {
+  app.get("/api/average-rating", async (req, res) => {
     try {
       const apiKey = process.env.GOOGLE_PLACES_API_KEY;
       const defaultPlaceId = process.env.GOOGLE_BUSINESS_PLACE_ID;
