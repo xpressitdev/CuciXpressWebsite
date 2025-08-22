@@ -27,10 +27,6 @@ export default function PaymentCheckout({ selectedService, onBack }: PaymentChec
     customerName: "",
     customerEmail: "",
     customerPhone: "",
-    cardNumber: "",
-    expiryMonth: "",
-    expiryYear: "",
-    cvv: "",
     selectedBranch: ""
   });
 
@@ -41,29 +37,14 @@ export default function PaymentCheckout({ selectedService, onBack }: PaymentChec
     { id: "tutong", name: "Tutong" }
   ];
 
-  const currentYear = new Date().getFullYear();
-  const years = Array.from({ length: 15 }, (_, i) => currentYear + i); // Extended to 15 years to include 2035
-  const months = Array.from({ length: 12 }, (_, i) => (i + 1).toString().padStart(2, '0'));
 
   const handleInputChange = (field: string, value: string) => {
     setFormData(prev => ({ ...prev, [field]: value }));
   };
 
-  const formatCardNumber = (value: string) => {
-    const cleaned = value.replace(/\D/g, '');
-    const formatted = cleaned.replace(/(\d{4})(?=\d)/g, '$1 ');
-    return formatted;
-  };
-
-  const handleCardNumberChange = (value: string) => {
-    const formatted = formatCardNumber(value);
-    if (formatted.replace(/\s/g, '').length <= 16) {
-      handleInputChange('cardNumber', formatted);
-    }
-  };
 
   const validateForm = () => {
-    const required = ['customerName', 'customerEmail', 'customerPhone', 'cardNumber', 'expiryMonth', 'expiryYear', 'cvv', 'selectedBranch'];
+    const required = ['customerName', 'customerEmail', 'customerPhone', 'selectedBranch'];
     return required.every(field => formData[field as keyof typeof formData]);
   };
 
@@ -89,10 +70,6 @@ export default function PaymentCheckout({ selectedService, onBack }: PaymentChec
         customerName: formData.customerName,
         customerEmail: formData.customerEmail,
         customerPhone: formData.customerPhone,
-        cardNumber: formData.cardNumber.replace(/\s/g, ''),
-        expiryMonth: formData.expiryMonth,
-        expiryYear: formData.expiryYear,
-        cvv: formData.cvv,
         selectedBranch: formData.selectedBranch
       };
 
@@ -286,66 +263,14 @@ export default function PaymentCheckout({ selectedService, onBack }: PaymentChec
                   </div>
                 </div>
 
-                {/* Payment Information */}
+                {/* Payment Notice */}
                 <div className="space-y-4">
                   <h3 className="font-semibold">Payment Information</h3>
-                  
-                  <div>
-                    <Label htmlFor="cardNumber">Card Number *</Label>
-                    <Input
-                      id="cardNumber"
-                      value={formData.cardNumber}
-                      onChange={(e) => handleCardNumberChange(e.target.value)}
-                      placeholder="4444 5555 6666 7777"
-                      maxLength={19}
-                      required
-                    />
-                  </div>
-
-                  <div className="grid grid-cols-2 gap-4">
-                    <div>
-                      <Label htmlFor="expiryMonth">Expiry Month *</Label>
-                      <Select value={formData.expiryMonth} onValueChange={(value) => handleInputChange('expiryMonth', value)}>
-                        <SelectTrigger>
-                          <SelectValue placeholder="MM" />
-                        </SelectTrigger>
-                        <SelectContent>
-                          {months.map((month) => (
-                            <SelectItem key={month} value={month}>
-                              {month}
-                            </SelectItem>
-                          ))}
-                        </SelectContent>
-                      </Select>
-                    </div>
-
-                    <div>
-                      <Label htmlFor="expiryYear">Expiry Year *</Label>
-                      <Select value={formData.expiryYear} onValueChange={(value) => handleInputChange('expiryYear', value)}>
-                        <SelectTrigger>
-                          <SelectValue placeholder="YYYY" />
-                        </SelectTrigger>
-                        <SelectContent>
-                          {years.map((year) => (
-                            <SelectItem key={year} value={year.toString()}>
-                              {year}
-                            </SelectItem>
-                          ))}
-                        </SelectContent>
-                      </Select>
-                    </div>
-                  </div>
-
-                  <div>
-                    <Label htmlFor="cvv">CVV *</Label>
-                    <Input
-                      id="cvv"
-                      value={formData.cvv}
-                      onChange={(e) => handleInputChange('cvv', e.target.value.replace(/\D/g, ''))}
-                      placeholder="123"
-                      maxLength={3}
-                      required
-                    />
+                  <div className="p-4 bg-blue-50 border border-blue-200 rounded-lg">
+                    <h4 className="font-medium text-blue-900 mb-2">💳 Secure Payment Processing</h4>
+                    <p className="text-sm text-blue-700">
+                      After clicking "Proceed to Payment", you'll be redirected to our secure Pocket Pay gateway where you can safely enter your card details.
+                    </p>
                   </div>
                 </div>
 
@@ -359,15 +284,15 @@ export default function PaymentCheckout({ selectedService, onBack }: PaymentChec
                   {isProcessing ? (
                     <div className="flex items-center gap-2">
                       <div className="w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin"></div>
-                      Processing Payment...
+                      Creating Payment Link...
                     </div>
                   ) : (
-                    `Pay ${selectedService?.price || 'Now'}`
+                    `Proceed to Payment (${selectedService?.price || 'BND 0'})`
                   )}
                 </Button>
 
                 <p className="text-xs text-gray-500 text-center">
-                  Your payment information is secure and encrypted. We do not store your card details.
+                  You'll enter your card details securely on the next page through Pocket Pay.
                 </p>
               </CardContent>
             </Card>

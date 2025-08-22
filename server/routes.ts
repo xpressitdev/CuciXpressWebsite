@@ -678,7 +678,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
       const paymentData = req.body;
       
       // Validate required fields
-      const requiredFields = ['serviceName', 'amount', 'customerName', 'customerEmail', 'customerPhone', 'cardNumber', 'expiryMonth', 'expiryYear', 'cvv', 'selectedBranch'];
+      const requiredFields = ['serviceName', 'amount', 'customerName', 'customerEmail', 'customerPhone', 'selectedBranch'];
       const missingFields = requiredFields.filter(field => !paymentData[field]);
       
       if (missingFields.length > 0) {
@@ -698,7 +698,8 @@ export async function registerRoutes(app: Express): Promise<Server> {
           order_id: result.order_id,
           customer: paymentData.customerEmail,
           amount: paymentData.amount,
-          service: paymentData.serviceName
+          service: paymentData.serviceName,
+          branch: paymentData.selectedBranch
         });
         
         res.json({
@@ -722,6 +723,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
         console.log('Payment processing failed:', {
           customer: paymentData.customerEmail,
           amount: paymentData.amount,
+          service: paymentData.serviceName,
           error: result.message
         });
         

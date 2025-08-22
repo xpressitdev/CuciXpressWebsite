@@ -29,10 +29,6 @@ interface PaymentRequest {
   customerName: string;
   customerEmail: string;
   customerPhone: string;
-  cardNumber: string;
-  expiryMonth: string;
-  expiryYear: string;
-  cvv: string;
   selectedBranch: string;
 }
 
