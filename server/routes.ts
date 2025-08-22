@@ -5,6 +5,8 @@ import { db } from "./db";
 import { collaborationSubmissions, insertCollaborationSubmissionSchema, subscriptionSignups, insertSubscriptionSignupSchema } from "@shared/schema";
 import { sendCollaborationEmail, sendPaymentConfirmation, sendSubscriptionNotification } from "./email";
 import { processPocketPayPayment, handlePaymentCallback, queryTransactionStatus } from "./payment";
+import { kedaiPOSIntegration } from "./kedaipos-integration";
+import { handleKedaiPOSWebhook, getOrderStatus, updateQueueStatus } from "./kedaipos-webhooks";
 import { storage } from "./storage";
 import { eq, desc } from "drizzle-orm";
 
@@ -703,6 +705,24 @@ export async function registerRoutes(app: Express): Promise<Server> {
           service: paymentData.serviceName,
           branch: paymentData.selectedBranch
         });
+
+        // Create order in KedaiPOS system (async - don't wait)
+        kedaiPOSIntegration.createOrder({
+          transaction_id: result.transaction_id,
+          car_plate: paymentData.carPlate,
+          phone: paymentData.phone,
+          service: paymentData.serviceName,
+          amount: paymentData.amount,
+          branch: paymentData.selectedBranch
+        }).then(kedaiResult => {
+          if (kedaiResult.success) {
+            console.log('Order created in KedaiPOS:', kedaiResult.kedai_order_id);
+          } else {
+            console.log('KedaiPOS integration not configured or failed:', kedaiResult.error);
+          }
+        }).catch(error => {
+          console.log('KedaiPOS integration error (non-blocking):', error);
+        });
         
         res.json({
           success: true,
@@ -1023,6 +1043,87 @@ export async function registerRoutes(app: Express): Promise<Server> {
   // Serve diagnostic page for API testing
   app.get("/diagnostic", (req, res) => {
     res.sendFile(process.cwd() + "/diagnostic.html");
+  });
+
+  // === KedaiPOS Integration Endpoints ===
+  
+  // KedaiPOS webhook endpoint
+  app.post('/api/kedaipos-webhook', handleKedaiPOSWebhook);
+  
+  // Get order status for KedaiPOS
+  app.get('/api/kedaipos/order/:transaction_id/status', getOrderStatus);
+  
+  // Update queue status from KedaiPOS
+  app.patch('/api/kedaipos/queue/:transaction_id', updateQueueStatus);
+  
+  // Manual POS integration endpoint for staff to add customers to queue
+  app.post('/api/add-to-queue', async (req, res) => {
+    try {
+      const { transaction_id, status = 'IN_PROGRESS' } = req.body;
+      
+      if (!transaction_id) {
+        return res.status(400).json({
+          success: false,
+          message: 'Transaction ID is required'
+        });
+      }
+      
+      // Update status in KedaiPOS
+      const success = await kedaiPOSIntegration.updateOrderStatus(transaction_id, status);
+      
+      if (success) {
+        console.log(`Order ${transaction_id} added to queue with status ${status}`);
+        res.json({
+          success: true,
+          message: `Order added to queue`,
+          transaction_id,
+          status,
+          timestamp: new Date().toISOString()
+        });
+      } else {
+        res.status(500).json({
+          success: false,
+          message: 'Failed to update KedaiPOS status'
+        });
+      }
+    } catch (error) {
+      console.error('Add to queue error:', error);
+      res.status(500).json({
+        success: false,
+        message: 'Internal server error'
+      });
+    }
+  });
+
+  // POS Dashboard endpoint - get all pending orders
+  app.get('/api/pos/pending-orders', async (req, res) => {
+    try {
+      // In a real implementation, you'd query your database for pending orders
+      // For now, return mock data structure that KedaiPOS would expect
+      res.json({
+        pending_orders: [
+          {
+            transaction_id: 'CX_20250822_001',
+            car_plate: 'BB1234',
+            phone: '673 7654321',
+            service: 'Full Package',
+            amount: 12,
+            branch: 'Tungku Link',
+            created_at: new Date().toISOString(),
+            status: 'PAID',
+            queue_status: 'WAITING'
+          }
+        ],
+        total_count: 1,
+        last_updated: new Date().toISOString()
+      });
+    } catch (error) {
+      console.error('POS pending orders error:', error);
+      res.status(500).json({
+        success: false,
+        message: 'Failed to fetch pending orders'
+      });
+    }
   });
 
   const httpServer = createServer(app);
