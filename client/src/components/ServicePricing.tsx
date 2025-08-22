@@ -5,7 +5,7 @@ import { Badge } from "@/components/ui/badge";
 import { Car, Sparkles, Shield, Clock, Phone, MapPin, Banknote } from "lucide-react";
 import progresifDing from "@/assets/progresif-ding.webp";
 import mydstWallet from "@/assets/mydst-wallet.png";
-import tarusApp from "@/assets/tarus-app.png";
+import cardPayment from "@assets/visa master_1755854326970.png";
 import baiduriBankLogo from "@/assets/baiduri-bank.webp";
 import bibdBankLogo from "@/assets/bibd-bank.jpg";
 
@@ -201,10 +201,10 @@ export default function ServicePricing() {
                 caption: "MyDST Wallet"
               },
               { 
-                name: "Tarus App", 
-                logo: tarusApp, 
+                name: "Card Payment", 
+                logo: cardPayment, 
                 icon: null,
-                caption: "Tarus App"
+                caption: "Card Payment"
               }
             ].map((payment, index) => (
               <motion.div
