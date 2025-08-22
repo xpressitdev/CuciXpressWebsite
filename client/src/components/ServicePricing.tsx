@@ -149,7 +149,7 @@ export default function ServicePricing() {
                       }
                     }}
                   >
-                    {service.name === "Coming Soon" ? "Learn More" : "Book & Pay"}
+                    {service.name === "Coming Soon" ? "Learn More" : "Pay & Queue Now"}
                   </Button>
                 </CardContent>
               </Card>
