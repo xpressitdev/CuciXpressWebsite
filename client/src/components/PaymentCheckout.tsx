@@ -225,7 +225,7 @@ export default function PaymentCheckout({ selectedService, onBack }: PaymentChec
                       id="carPlate"
                       value={formData.carPlate}
                       onChange={(e) => handleInputChange('carPlate', e.target.value.toUpperCase())}
-                      placeholder="PG1234A"
+                      placeholder="BB1234"
                       required
                     />
                   </div>
@@ -236,7 +236,7 @@ export default function PaymentCheckout({ selectedService, onBack }: PaymentChec
                       id="phone"
                       value={formData.phone}
                       onChange={(e) => handleInputChange('phone', e.target.value)}
-                      placeholder="673-8669378"
+                      placeholder="673 7654321"
                       required
                     />
                   </div>
