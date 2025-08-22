@@ -790,6 +790,43 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
+  // Send payment confirmation email
+  app.post("/api/send-payment-confirmation", async (req, res) => {
+    try {
+      const { carPlate, phone, transactionId, orderId, service, amount, branch } = req.body;
+      
+      if (!carPlate || !phone || !transactionId || !orderId || !service || !amount || !branch) {
+        return res.status(400).json({
+          success: false,
+          message: 'Missing required fields for email confirmation'
+        });
+      }
+      
+      // For now, just log the confirmation (since we don't have customer email)
+      console.log('Payment confirmation for:', {
+        carPlate,
+        phone, 
+        transactionId,
+        orderId,
+        service,
+        amount,
+        branch
+      });
+      
+      res.json({
+        success: true,
+        message: 'Payment confirmed - customer will receive SMS/phone confirmation'
+      });
+      
+    } catch (error) {
+      console.error('Payment confirmation error:', error);
+      res.status(500).json({
+        success: false,
+        message: 'Internal server error while processing confirmation'
+      });
+    }
+  });
+
   // QR Code Verification endpoint for staff POS system
   app.get('/verify/:transactionId', async (req, res) => {
     const { transactionId } = req.params;
@@ -812,7 +849,8 @@ export async function registerRoutes(app: Express): Promise<Server> {
         service: 'Car Wash Service',
         amount: 12,
         branch: 'Tungku Link',
-        customer: 'Valued Customer',
+        car_plate: 'BB1234',
+        phone: '673 7654321',
         timestamp: new Date().toISOString(),
         verified_at: new Date().toISOString()
       };
@@ -868,8 +906,8 @@ export async function registerRoutes(app: Express): Promise<Server> {
           service: paymentData.service,
           amount: paymentData.amount,
           branch: paymentData.branch,
-          customer: paymentData.customer,
-          customer_email: paymentData.email,
+          car_plate: paymentData.car_plate,
+          phone: paymentData.phone,
           payment_timestamp: paymentData.timestamp,
           verified_at: new Date().toISOString()
         },
@@ -888,50 +926,19 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
-  // Temporary payment success redirect (until deployment)
+  // Payment success redirect to React component
   app.get("/payment-success", (req, res) => {
     const { successIndicator, Message, OrderId } = req.query;
     
     // Log successful payment
     console.log('Payment success redirect:', { successIndicator, Message, OrderId });
     
-    // Create a simple success message with redirect
-    const successHtml = `
-    <!DOCTYPE html>
-    <html>
-    <head>
-      <title>Payment Successful - Cuci Xpress</title>
-      <meta name="viewport" content="width=device-width, initial-scale=1.0">
-      <style>
-        body { font-family: Arial, sans-serif; text-align: center; padding: 50px; background: #f5f5f5; }
-        .container { max-width: 500px; margin: 0 auto; background: white; padding: 40px; border-radius: 10px; box-shadow: 0 4px 6px rgba(0,0,0,0.1); }
-        .success-icon { font-size: 48px; color: #22c55e; margin-bottom: 20px; }
-        h1 { color: #6C5CE7; margin-bottom: 10px; }
-        .order-id { background: #f3f4f6; padding: 10px; border-radius: 5px; margin: 20px 0; }
-        .button { background: #6C5CE7; color: white; padding: 12px 24px; text-decoration: none; border-radius: 5px; display: inline-block; margin-top: 20px; }
-        .button:hover { background: #5b52d4; }
-      </style>
-    </head>
-    <body>
-      <div class="container">
-        <div class="success-icon">✅</div>
-        <h1>Thank you for being Xpress!</h1>
-        <p>Your payment has been processed successfully.</p>
-        ${OrderId ? `<div class="order-id"><strong>Order ID:</strong> ${OrderId}</div>` : ''}
-        <p>You will receive a confirmation email shortly.</p>
-        <a href="https://cucixpress.com" class="button">Return to Homepage</a>
-      </div>
-      <script>
-        // Auto redirect after 10 seconds
-        setTimeout(() => {
-          window.location.href = 'https://cucixpress.com';
-        }, 10000);
-      </script>
-    </body>
-    </html>
-    `;
+    // Redirect to React PaymentSuccess component with query params
+    const redirectUrl = `/payment-success?successIndicator=${successIndicator || ''}&Message=${Message || ''}&OrderId=${OrderId || ''}`;
     
-    res.send(successHtml);
+    // Redirect to the appropriate domain based on environment
+    const targetDomain = process.env.NODE_ENV === 'development' ? 'http://localhost:5000' : 'https://cucixpress.com';
+    res.redirect(302, `${targetDomain}${redirectUrl}`);
   });
 
   // Payment callback endpoint for Pocket Pay

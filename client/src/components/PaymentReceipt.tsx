@@ -12,8 +12,8 @@ interface OrderDetails {
   service: string;
   amount: number;
   branch: string;
-  customer_email: string;
-  customer_name?: string;
+  car_plate: string;
+  phone: string;
   timestamp?: string;
 }
 
@@ -39,8 +39,8 @@ export default function PaymentReceipt({ orderDetails }: PaymentReceiptProps) {
         service: orderDetails.service,
         amount: orderDetails.amount,
         branch: orderDetails.branch,
-        customer: orderDetails.customer_name || "Customer",
-        email: orderDetails.customer_email,
+        car_plate: orderDetails.car_plate,
+        phone: orderDetails.phone,
         timestamp: new Date().toISOString(),
         verify_url: `https://cucixpress.com/verify/${orderDetails.transaction_id}`,
         status: "PAID"
@@ -210,10 +210,18 @@ export default function PaymentReceipt({ orderDetails }: PaymentReceiptProps) {
           <div className="space-y-3 border-t pt-4">
             <div className="flex justify-between items-center">
               <div className="flex items-center gap-2">
-                <User className="w-4 h-4 text-cuci-primary" />
-                <span className="text-sm font-medium">Customer</span>
+                <Car className="w-4 h-4 text-cuci-primary" />
+                <span className="text-sm font-medium">Car Plate</span>
               </div>
-              <span className="text-sm">{orderDetails.customer_name || 'Valued Customer'}</span>
+              <span className="text-sm font-mono">{orderDetails.car_plate}</span>
+            </div>
+            
+            <div className="flex justify-between items-center">
+              <div className="flex items-center gap-2">
+                <User className="w-4 h-4 text-cuci-primary" />
+                <span className="text-sm font-medium">Phone</span>
+              </div>
+              <span className="text-sm">{orderDetails.phone}</span>
             </div>
             
             <div className="flex justify-between items-center">

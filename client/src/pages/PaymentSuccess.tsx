@@ -30,19 +30,20 @@ export default function PaymentSuccess() {
         service: 'Car Wash Service',
         amount: 12,
         branch: 'Tungku Link',
-        customer_email: 'customer@example.com' // This would come from the actual order
+        car_plate: 'UNKNOWN',
+        phone: 'N/A'
       };
       setOrderDetails(fallbackOrder);
       
-      // Send confirmation email for fallback too
+      // Send confirmation for fallback too
       sendConfirmationEmail(fallbackOrder);
     }
   }, []);
 
   const sendConfirmationEmail = async (orderData: any) => {
     try {
-      if (!orderData.customer_email) {
-        console.log('No customer email found - skipping confirmation email');
+      if (!orderData.car_plate || !orderData.phone) {
+        console.log('No customer information found - skipping confirmation');
         return;
       }
 
@@ -52,24 +53,24 @@ export default function PaymentSuccess() {
           'Content-Type': 'application/json',
         },
         body: JSON.stringify({
-          customerEmail: orderData.customer_email,
+          carPlate: orderData.car_plate,
+          phone: orderData.phone,
           transactionId: orderData.transaction_id,
           orderId: orderData.order_id || orderData.transaction_id,
           service: orderData.service,
           amount: orderData.amount,
-          branch: orderData.branch,
-          customerName: orderData.customer_name || 'Valued Customer'
+          branch: orderData.branch
         })
       });
 
       const result = await response.json();
       if (result.success) {
-        console.log('Confirmation email sent successfully');
+        console.log('Payment confirmation processed successfully');
       } else {
-        console.error('Failed to send confirmation email:', result.message);
+        console.error('Failed to process confirmation:', result.message);
       }
     } catch (error) {
-      console.error('Error sending confirmation email:', error);
+      console.error('Error processing confirmation:', error);
     }
   };
 
