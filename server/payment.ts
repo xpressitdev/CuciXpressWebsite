@@ -136,10 +136,13 @@ export async function processPocketPayPayment(paymentData: PaymentRequest): Prom
     // Step 2: Generate Hash Data (following exact documentation format) 
     const liveDomain = 'https://cucixpress.com'; // Live domain for production redirects
     
+    // Convert BND to cents for production API (multiply by 100)
+    const amountInCents = Math.round(paymentData.amount * 100);
+    
     const hashRequest = {
       api_key: POCKET_PAY_CONFIG.API_KEY,
       salt: POCKET_PAY_CONFIG.SALT,
-      subamount_1: paymentData.amount,
+      subamount_1: amountInCents,
       subamount_1_label: "Order Total",
       subamount_2: 0,
       subamount_2_label: "string",
@@ -184,7 +187,7 @@ export async function processPocketPayPayment(paymentData: PaymentRequest): Prom
       api_key: POCKET_PAY_CONFIG.API_KEY,
       salt: POCKET_PAY_CONFIG.SALT,
       hashed_data: hashedData,
-      subamount_1: paymentData.amount,
+      subamount_1: amountInCents,
       subamount_1_label: "Order Total",
       subamount_2: 0,
       subamount_2_label: "string",
