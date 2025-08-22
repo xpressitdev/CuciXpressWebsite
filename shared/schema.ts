@@ -26,6 +26,14 @@ export const subscriptionSignups = pgTable("subscription_signups", {
   createdAt: timestamp("created_at").defaultNow().notNull(),
 });
 
+export const customers = pgTable("customers", {
+  id: serial("id").primaryKey(),
+  carPlate: text("car_plate").notNull(),
+  phone: text("phone").notNull(),
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+  updatedAt: timestamp("updated_at").defaultNow().notNull(),
+});
+
 export const insertUserSchema = createInsertSchema(users).pick({
   username: true,
   password: true,
@@ -43,9 +51,17 @@ export const insertSubscriptionSignupSchema = createInsertSchema(subscriptionSig
   isNotified: true,
 });
 
+export const insertCustomerSchema = createInsertSchema(customers).omit({
+  id: true,
+  createdAt: true,
+  updatedAt: true,
+});
+
 export type InsertUser = z.infer<typeof insertUserSchema>;
 export type User = typeof users.$inferSelect;
 export type InsertCollaborationSubmission = z.infer<typeof insertCollaborationSubmissionSchema>;
 export type CollaborationSubmission = typeof collaborationSubmissions.$inferSelect;
 export type InsertSubscriptionSignup = z.infer<typeof insertSubscriptionSignupSchema>;
 export type SubscriptionSignup = typeof subscriptionSignups.$inferSelect;
+export type InsertCustomer = z.infer<typeof insertCustomerSchema>;
+export type Customer = typeof customers.$inferSelect;

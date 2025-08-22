@@ -24,9 +24,8 @@ export default function PaymentCheckout({ selectedService, onBack }: PaymentChec
   const { toast } = useToast();
   const [isProcessing, setIsProcessing] = useState(false);
   const [formData, setFormData] = useState({
-    customerName: "",
-    customerEmail: "",
-    customerPhone: "",
+    carPlate: "",
+    phone: "",
     selectedBranch: ""
   });
 
@@ -44,7 +43,7 @@ export default function PaymentCheckout({ selectedService, onBack }: PaymentChec
 
 
   const validateForm = () => {
-    const required = ['customerName', 'customerEmail', 'customerPhone', 'selectedBranch'];
+    const required = ['carPlate', 'phone', 'selectedBranch'];
     return required.every(field => formData[field as keyof typeof formData]);
   };
 
@@ -61,15 +60,31 @@ export default function PaymentCheckout({ selectedService, onBack }: PaymentChec
     setIsProcessing(true);
 
     try {
+      // First, save customer information
+      try {
+        await fetch('/api/save-customer', {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+          },
+          body: JSON.stringify({
+            carPlate: formData.carPlate,
+            phone: formData.phone
+          }),
+        });
+      } catch (customerError) {
+        console.warn('Failed to save customer info:', customerError);
+        // Continue with payment even if customer save fails
+      }
+      
       // Extract numeric price from string like "BND 12"
       const numericPrice = parseFloat(selectedService?.price?.replace(/[^\d.]/g, '') || '0');
       
       const paymentData = {
         serviceName: selectedService?.name || 'Car Wash Service',
         amount: numericPrice,
-        customerName: formData.customerName,
-        customerEmail: formData.customerEmail,
-        customerPhone: formData.customerPhone,
+        carPlate: formData.carPlate,
+        phone: formData.phone,
         selectedBranch: formData.selectedBranch
       };
 
@@ -86,12 +101,12 @@ export default function PaymentCheckout({ selectedService, onBack }: PaymentChec
       if (result.success && result.redirect_url) {
         // Store order details for success page (including customer email for confirmation)
         if (result.order_details) {
-          const orderDetailsWithEmail = {
+          const orderDetailsWithCustomer = {
             ...result.order_details,
-            customer_email: formData.customerEmail,
-            customer_name: formData.customerName
+            car_plate: formData.carPlate,
+            phone: formData.phone
           };
-          sessionStorage.setItem('lastPaymentOrder', JSON.stringify(orderDetailsWithEmail));
+          sessionStorage.setItem('lastPaymentOrder', JSON.stringify(orderDetailsWithCustomer));
         }
         
         // Redirect to Pocket Pay for payment
@@ -176,15 +191,7 @@ export default function PaymentCheckout({ selectedService, onBack }: PaymentChec
                 <div className="mt-6 p-4 bg-green-50 border border-green-200 rounded-lg">
                   <h4 className="font-medium text-green-900 mb-2">🔒 Secure Payment</h4>
                   <p className="text-sm text-green-700">
-                    Your payment is processed securely through Pocket Pay. We use industry-standard encryption to protect your card details.
-                  </p>
-                </div>
-
-                {/* Live Payment Notice */}
-                <div className="mt-4 p-4 bg-blue-50 border border-blue-200 rounded-lg">
-                  <h4 className="font-medium text-blue-900 mb-2">💳 Live Payment Processing</h4>
-                  <p className="text-sm text-blue-700">
-                    Payment processing is now live. All transactions will be processed and charged to your selected payment method.
+                    Your payment is processed securely through Pocket Pay. All transactions are live and will be processed and charged to your selected payment method.
                   </p>
                 </div>
               </CardContent>
@@ -213,35 +220,23 @@ export default function PaymentCheckout({ selectedService, onBack }: PaymentChec
                   <h3 className="font-semibold">Customer Information</h3>
                   
                   <div>
-                    <Label htmlFor="customerName">Full Name *</Label>
+                    <Label htmlFor="carPlate">Car Plate Number *</Label>
                     <Input
-                      id="customerName"
-                      value={formData.customerName}
-                      onChange={(e) => handleInputChange('customerName', e.target.value)}
-                      placeholder="Enter your full name"
+                      id="carPlate"
+                      value={formData.carPlate}
+                      onChange={(e) => handleInputChange('carPlate', e.target.value.toUpperCase())}
+                      placeholder="PG1234A"
                       required
                     />
                   </div>
 
                   <div>
-                    <Label htmlFor="customerEmail">Email Address *</Label>
+                    <Label htmlFor="phone">Phone Number *</Label>
                     <Input
-                      id="customerEmail"
-                      type="email"
-                      value={formData.customerEmail}
-                      onChange={(e) => handleInputChange('customerEmail', e.target.value)}
-                      placeholder="Enter your email"
-                      required
-                    />
-                  </div>
-
-                  <div>
-                    <Label htmlFor="customerPhone">Phone Number *</Label>
-                    <Input
-                      id="customerPhone"
-                      value={formData.customerPhone}
-                      onChange={(e) => handleInputChange('customerPhone', e.target.value)}
-                      placeholder="Enter your phone number"
+                      id="phone"
+                      value={formData.phone}
+                      onChange={(e) => handleInputChange('phone', e.target.value)}
+                      placeholder="673-8669378"
                       required
                     />
                   </div>

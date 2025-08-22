@@ -26,9 +26,8 @@ console.log('Pocket Pay Production Config:', {
 interface PaymentRequest {
   serviceName: string;
   amount: number;
-  customerName: string;
-  customerEmail: string;
-  customerPhone: string;
+  carPlate: string;
+  phone: string;
   selectedBranch: string;
 }
 
@@ -96,7 +95,8 @@ export async function processPocketPayPayment(paymentData: PaymentRequest): Prom
     console.log('Processing Pocket Pay transaction:', {
       transaction_id: transactionId,
       amount: paymentData.amount,
-      customer_email: paymentData.customerEmail,
+      car_plate: paymentData.carPlate,
+      phone: paymentData.phone,
       service: paymentData.serviceName,
       branch: paymentData.selectedBranch
     });

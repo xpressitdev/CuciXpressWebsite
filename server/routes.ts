@@ -5,6 +5,7 @@ import { db } from "./db";
 import { collaborationSubmissions, insertCollaborationSubmissionSchema, subscriptionSignups, insertSubscriptionSignupSchema } from "@shared/schema";
 import { sendCollaborationEmail, sendPaymentConfirmation, sendSubscriptionNotification } from "./email";
 import { processPocketPayPayment, handlePaymentCallback, queryTransactionStatus } from "./payment";
+import { storage } from "./storage";
 import { eq, desc } from "drizzle-orm";
 
 const investorInterestSchema = z.object({
@@ -678,7 +679,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
       const paymentData = req.body;
       
       // Validate required fields
-      const requiredFields = ['serviceName', 'amount', 'customerName', 'customerEmail', 'customerPhone', 'selectedBranch'];
+      const requiredFields = ['serviceName', 'amount', 'carPlate', 'phone', 'selectedBranch'];
       const missingFields = requiredFields.filter(field => !paymentData[field]);
       
       if (missingFields.length > 0) {
@@ -696,7 +697,8 @@ export async function registerRoutes(app: Express): Promise<Server> {
         console.log('Payment link created successfully:', {
           transaction_id: result.transaction_id,
           order_id: result.order_id,
-          customer: paymentData.customerEmail,
+          car_plate: paymentData.carPlate,
+          phone: paymentData.phone,
           amount: paymentData.amount,
           service: paymentData.serviceName,
           branch: paymentData.selectedBranch
@@ -713,7 +715,8 @@ export async function registerRoutes(app: Express): Promise<Server> {
             service: paymentData.serviceName,
             amount: paymentData.amount,
             branch: paymentData.selectedBranch,
-            customer: paymentData.customerEmail,
+            car_plate: paymentData.carPlate,
+            phone: paymentData.phone,
             success_indicator: result.success_indicator
           },
           qr_code: result.qr_code
@@ -721,7 +724,8 @@ export async function registerRoutes(app: Express): Promise<Server> {
       } else {
         // Log failed payment
         console.log('Payment processing failed:', {
-          customer: paymentData.customerEmail,
+          car_plate: paymentData.carPlate,
+          phone: paymentData.phone,
           amount: paymentData.amount,
           service: paymentData.serviceName,
           error: result.message
@@ -742,38 +746,46 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
-  // Send payment confirmation email
-  app.post("/api/send-payment-confirmation", async (req, res) => {
+  // Save customer information to database
+  app.post("/api/save-customer", async (req, res) => {
     try {
-      const { customerEmail, transactionId, orderId, service, amount, branch, customerName } = req.body;
+      const { carPlate, phone } = req.body;
       
-      if (!customerEmail || !transactionId || !orderId || !service || !amount || !branch) {
+      if (!carPlate || !phone) {
         return res.status(400).json({
           success: false,
-          message: 'Missing required fields for email confirmation'
+          message: 'Car plate and phone number are required'
         });
       }
       
-      const emailSent = await sendPaymentConfirmation({
-        customerEmail,
-        transactionId,
-        orderId,
-        service,
-        amount,
-        branch,
-        customerName
-      });
+      // Check if customer already exists
+      const existingCustomer = await storage.getCustomerByPlate(carPlate);
       
-      res.json({
-        success: emailSent,
-        message: emailSent ? 'Confirmation email sent successfully' : 'Failed to send confirmation email'
-      });
+      if (existingCustomer) {
+        // Update phone number if different
+        if (existingCustomer.phone !== phone) {
+          await storage.updateCustomer(existingCustomer.id, { phone });
+        }
+        res.json({
+          success: true,
+          message: 'Customer information updated',
+          customer: { ...existingCustomer, phone }
+        });
+      } else {
+        // Create new customer
+        const newCustomer = await storage.createCustomer({ carPlate, phone });
+        res.json({
+          success: true,
+          message: 'Customer information saved',
+          customer: newCustomer
+        });
+      }
       
     } catch (error) {
-      console.error('Email confirmation error:', error);
+      console.error('Customer save error:', error);
       res.status(500).json({
         success: false,
-        message: 'Internal server error while sending confirmation email'
+        message: 'Internal server error while saving customer information'
       });
     }
   });
