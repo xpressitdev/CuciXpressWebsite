@@ -133,11 +133,11 @@ export default function ServicePricing() {
                   </ul>
 
                   <Button 
-                    className={`w-full ${service.popular 
-                      ? 'bg-cuci-primary hover:bg-cuci-primary/90 text-white' 
+                    className={`w-full font-semibold py-3 shadow-lg transition-all duration-300 ${service.popular 
+                      ? 'bg-cuci-primary hover:bg-cuci-primary/90 text-white hover:shadow-xl transform hover:scale-105' 
                       : service.name === "Coming Soon"
-                      ? 'bg-cuci-secondary hover:bg-cuci-secondary/90 text-white'
-                      : 'bg-gray-100 hover:bg-gray-200 text-gray-900'
+                      ? 'bg-cuci-secondary hover:bg-cuci-secondary/90 text-white hover:shadow-xl'
+                      : 'bg-gradient-to-r from-purple-600 to-orange-500 hover:from-purple-700 hover:to-orange-600 text-white hover:shadow-xl transform hover:scale-105'
                     }`}
                     onClick={() => {
                       if (service.name === "Coming Soon") {
