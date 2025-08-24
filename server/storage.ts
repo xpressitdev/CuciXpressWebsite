@@ -8,7 +8,7 @@ export interface IStorage {
   getUserByUsername(username: string): Promise<User | undefined>;
   getUserByEmail(email: string): Promise<User | undefined>;
   createUser(user: InsertUser): Promise<User>;
-  updateUser(id: number, updates: Partial<InsertUser>): Promise<User>;
+  updateUser(id: number, updates: Partial<InsertUser>): Promise<User | null>;
   
   // Customers
   createCustomer(customer: InsertCustomer): Promise<Customer>;
@@ -28,6 +28,38 @@ export class MemStorage implements IStorage {
     this.customers = new Map();
     this.currentId = 1;
     this.currentCustomerId = 1;
+    
+    // Add default admin user
+    const adminUser: User = {
+      id: 1,
+      username: 'admin',
+      password: 'Buy20sell26!!',
+      email: 'admin@cucixpress.com',
+      role: 'admin',
+      app_access: ['car_wash', 'laundry'],
+      created_at: new Date(),
+      last_login: null,
+      profile_data: null
+    };
+    this.users.set(1, adminUser);
+    
+    // Add test customer for demo
+    const testCustomer: User = {
+      id: 2,
+      username: 'testcustomer',
+      password: 'test123',
+      email: 'customer@test.com',
+      role: 'customer',
+      app_access: ['car_wash', 'laundry'],
+      created_at: new Date(),
+      last_login: null,
+      profile_data: {
+        carPlate: 'BB1234',
+        phone: '673 7654321'
+      }
+    };
+    this.users.set(2, testCustomer);
+    this.currentId = 3;
   }
 
   async getUser(id: number): Promise<User | undefined> {
@@ -62,10 +94,10 @@ export class MemStorage implements IStorage {
     return user;
   }
 
-  async updateUser(id: number, updates: Partial<InsertUser>): Promise<User> {
+  async updateUser(id: number, updates: Partial<InsertUser>): Promise<User | null> {
     const existingUser = this.users.get(id);
     if (!existingUser) {
-      throw new Error('User not found');
+      return null; // Return null instead of throwing error
     }
     const updatedUser = { ...existingUser, ...updates, last_login: new Date() };
     this.users.set(id, updatedUser);

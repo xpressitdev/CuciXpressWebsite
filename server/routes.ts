@@ -1344,8 +1344,13 @@ export async function registerRoutes(app: Express): Promise<Server> {
         return res.json({ success: false, error: 'Invalid username or password' });
       }
 
-      // Update last login
-      await storage.updateUser(user.id, { last_login: new Date() });
+      // Update last login (handle gracefully if update fails)
+      try {
+        await storage.updateUser(user.id, { last_login: new Date() });
+      } catch (error) {
+        console.log('Could not update last login time:', error);
+        // Continue with login process even if update fails
+      }
 
       // Create JWT token
       const token = jwt.sign(
