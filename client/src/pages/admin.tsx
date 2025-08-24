@@ -24,7 +24,7 @@ interface SubscriptionsResponse {
 }
 
 export default function Admin() {
-  const { isAuthenticated, isLoading: authLoading, login, logout } = useAuth();
+  const { isAuthenticated, isLoading: authLoading, legacyLogin, logout } = useAuth();
   const queryClient = useQueryClient();
   const [selectedSubmission, setSelectedSubmission] = useState<CollaborationSubmission | null>(null);
 
@@ -46,7 +46,7 @@ export default function Admin() {
   });
 
   const handleLogin = (password: string) => {
-    return login(password);
+    return legacyLogin(password);
   };
 
   const handleMarkAsRead = (id: number) => {
@@ -242,7 +242,7 @@ export default function Admin() {
                                 )}
                                 <p className="text-xs text-gray-500 flex items-center">
                                   <Calendar className="w-3 h-3 mr-1" />
-                                  {formatDate(submission.createdAt)}
+                                  {formatDate(submission.createdAt.toString())}
                                 </p>
                               </div>
                               {!submission.isRead && (
@@ -310,7 +310,7 @@ export default function Admin() {
                               )}
                               <div className="flex items-center text-gray-500">
                                 <Calendar className="w-4 h-4 mr-2" />
-                                {formatDate(selectedSubmission.createdAt)}
+                                {formatDate(selectedSubmission.createdAt.toString())}
                               </div>
                             </div>
                           </div>
@@ -385,7 +385,7 @@ export default function Admin() {
                                 </p>
                                 <p className="text-sm text-gray-500 flex items-center">
                                   <Calendar className="w-3 h-3 mr-1" />
-                                  {formatDate(signup.createdAt)}
+                                  {formatDate(signup.createdAt.toString())}
                                 </p>
                               </div>
                             </div>

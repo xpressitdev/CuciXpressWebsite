@@ -1,14 +1,16 @@
 
-import { useState } from "react";
-import { motion } from "framer-motion";
+import { useState, useEffect } from "react";
+import { motion, AnimatePresence } from "framer-motion";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Badge } from "@/components/ui/badge";
-import { CreditCard, Lock, ArrowLeft } from "lucide-react";
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import { CreditCard, Lock, ArrowLeft, User, UserPlus, History, CheckCircle } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
+import { useAuth, type User as AuthUser } from "@/hooks/useAuth";
 
 interface PaymentCheckoutProps {
   selectedService?: {
@@ -22,12 +24,32 @@ interface PaymentCheckoutProps {
 
 export default function PaymentCheckout({ selectedService, onBack }: PaymentCheckoutProps) {
   const { toast } = useToast();
+  const { user, isAuthenticated, login, register, isLoading } = useAuth();
   const [isProcessing, setIsProcessing] = useState(false);
+  const [showAuth, setShowAuth] = useState(false);
+  const [authMode, setAuthMode] = useState<'login' | 'register'>('login');
+  const [authData, setAuthData] = useState({
+    username: '',
+    password: '',
+    email: ''
+  });
   const [formData, setFormData] = useState({
     carPlate: "",
     phone: "",
     selectedBranch: ""
   });
+
+  // Auto-fill customer data if user is logged in
+  useEffect(() => {
+    if (user && user.profile_data) {
+      const profile = typeof user.profile_data === 'object' ? user.profile_data as any : {};
+      setFormData(prev => ({
+        ...prev,
+        carPlate: profile.carPlate || "",
+        phone: profile.phone || ""
+      }));
+    }
+  }, [user]);
 
   const branches = [
     { id: "tungku", name: "Tungku Link" },
@@ -39,6 +61,46 @@ export default function PaymentCheckout({ selectedService, onBack }: PaymentChec
 
   const handleInputChange = (field: string, value: string) => {
     setFormData(prev => ({ ...prev, [field]: value }));
+  };
+
+  const handleAuthInputChange = (field: string, value: string) => {
+    setAuthData(prev => ({ ...prev, [field]: value }));
+  };
+
+  const handleAuthSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    
+    if (authMode === 'login') {
+      const result = await login(authData.username, authData.password);
+      if (result.success) {
+        setShowAuth(false);
+        toast({
+          title: "Welcome back!",
+          description: "Successfully logged in. Your details will be auto-filled.",
+        });
+      } else {
+        toast({
+          title: "Login Failed",
+          description: result.error || "Invalid username or password",
+          variant: "destructive"
+        });
+      }
+    } else {
+      const result = await register(authData.username, authData.password, authData.email, 'car_wash');
+      if (result.success) {
+        setShowAuth(false);
+        toast({
+          title: "Account Created!",
+          description: "Welcome to Cuci Xpress! Your account has been created successfully.",
+        });
+      } else {
+        toast({
+          title: "Registration Failed",
+          description: result.error || "Failed to create account",
+          variant: "destructive"
+        });
+      }
+    }
   };
 
 
@@ -215,6 +277,55 @@ export default function PaymentCheckout({ selectedService, onBack }: PaymentChec
                 </Badge>
               </CardHeader>
               <CardContent className="space-y-6">
+                {/* User Authentication Section */}
+                {!isAuthenticated && (
+                  <div className="space-y-4">
+                    <div className="flex items-center justify-between">
+                      <h3 className="font-semibold">Customer Account</h3>
+                      <Badge variant="outline" className="text-xs">Optional</Badge>
+                    </div>
+                    
+                    <div className="p-4 bg-amber-50 border border-amber-200 rounded-lg">
+                      <div className="flex items-start gap-3">
+                        <History className="w-5 h-5 text-amber-600 mt-0.5" />
+                        <div>
+                          <h4 className="font-medium text-amber-900 mb-1">Track Your Service History</h4>
+                          <p className="text-sm text-amber-700 mb-3">
+                            Create an account or login to save your car details and view your service history for faster bookings.
+                          </p>
+                          <Button 
+                            variant="outline" 
+                            size="sm"
+                            onClick={() => setShowAuth(true)}
+                            className="bg-white hover:bg-amber-50"
+                          >
+                            <User className="w-4 h-4 mr-2" />
+                            Login / Register
+                          </Button>
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+                )}
+
+                {isAuthenticated && (
+                  <div className="space-y-4">
+                    <div className="flex items-center justify-between">
+                      <h3 className="font-semibold">Welcome back!</h3>
+                      <div className="flex items-center gap-2">
+                        <CheckCircle className="w-4 h-4 text-green-500" />
+                        <span className="text-sm text-green-600">{user?.username}</span>
+                      </div>
+                    </div>
+                    
+                    <div className="p-4 bg-green-50 border border-green-200 rounded-lg">
+                      <p className="text-sm text-green-700">
+                        Your car details have been automatically filled from your profile. You can edit them below if needed.
+                      </p>
+                    </div>
+                  </div>
+                )}
+
                 {/* Customer Information */}
                 <div className="space-y-4">
                   <h3 className="font-semibold">Customer Information</h3>
@@ -294,6 +405,122 @@ export default function PaymentCheckout({ selectedService, onBack }: PaymentChec
           </motion.div>
         </div>
       </div>
+
+      {/* Authentication Modal */}
+      <AnimatePresence>
+        {showAuth && (
+          <motion.div
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
+            className="fixed inset-0 bg-black/50 flex items-center justify-center p-4 z-50"
+            onClick={() => setShowAuth(false)}
+          >
+            <motion.div
+              initial={{ scale: 0.9, opacity: 0 }}
+              animate={{ scale: 1, opacity: 1 }}
+              exit={{ scale: 0.9, opacity: 0 }}
+              onClick={(e) => e.stopPropagation()}
+              className="w-full max-w-md"
+            >
+              <Card>
+                <CardHeader>
+                  <CardTitle className="flex items-center gap-2">
+                    {authMode === 'login' ? (
+                      <>
+                        <User className="w-5 h-5" />
+                        Login to Your Account
+                      </>
+                    ) : (
+                      <>
+                        <UserPlus className="w-5 h-5" />
+                        Create New Account
+                      </>
+                    )}
+                  </CardTitle>
+                </CardHeader>
+                <CardContent className="space-y-4">
+                  <Tabs value={authMode} onValueChange={(value) => setAuthMode(value as 'login' | 'register')}>
+                    <TabsList className="grid w-full grid-cols-2">
+                      <TabsTrigger value="login">Login</TabsTrigger>
+                      <TabsTrigger value="register">Register</TabsTrigger>
+                    </TabsList>
+                    
+                    <form onSubmit={handleAuthSubmit} className="space-y-4 mt-4">
+                      <TabsContent value="login" className="space-y-4 mt-0">
+                        <div>
+                          <Label htmlFor="username">Username</Label>
+                          <Input
+                            id="username"
+                            value={authData.username}
+                            onChange={(e) => handleAuthInputChange('username', e.target.value)}
+                            placeholder="Enter your username"
+                            required
+                          />
+                        </div>
+                        <div>
+                          <Label htmlFor="password">Password</Label>
+                          <Input
+                            id="password"
+                            type="password"
+                            value={authData.password}
+                            onChange={(e) => handleAuthInputChange('password', e.target.value)}
+                            placeholder="Enter your password"
+                            required
+                          />
+                        </div>
+                      </TabsContent>
+
+                      <TabsContent value="register" className="space-y-4 mt-0">
+                        <div>
+                          <Label htmlFor="reg-username">Username</Label>
+                          <Input
+                            id="reg-username"
+                            value={authData.username}
+                            onChange={(e) => handleAuthInputChange('username', e.target.value)}
+                            placeholder="Choose a username"
+                            required
+                          />
+                        </div>
+                        <div>
+                          <Label htmlFor="reg-email">Email (Optional)</Label>
+                          <Input
+                            id="reg-email"
+                            type="email"
+                            value={authData.email}
+                            onChange={(e) => handleAuthInputChange('email', e.target.value)}
+                            placeholder="your@email.com"
+                          />
+                        </div>
+                        <div>
+                          <Label htmlFor="reg-password">Password</Label>
+                          <Input
+                            id="reg-password"
+                            type="password"
+                            value={authData.password}
+                            onChange={(e) => handleAuthInputChange('password', e.target.value)}
+                            placeholder="Create a password"
+                            required
+                          />
+                        </div>
+                      </TabsContent>
+
+                      <div className="flex gap-2">
+                        <Button type="button" variant="outline" onClick={() => setShowAuth(false)} className="flex-1">
+                          Cancel
+                        </Button>
+                        <Button type="submit" className="flex-1">
+                          {authMode === 'login' ? 'Login' : 'Create Account'}
+                        </Button>
+                      </div>
+                    </form>
+                  </Tabs>
+                </CardContent>
+              </Card>
+            </motion.div>
+          </motion.div>
+        )}
+      </AnimatePresence>
     </div>
   );
 }

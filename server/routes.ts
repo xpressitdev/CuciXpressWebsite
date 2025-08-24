@@ -1,6 +1,7 @@
 import type { Express } from "express";
 import { createServer, type Server } from "http";
 import { z } from "zod";
+import jwt from "jsonwebtoken";
 import { db } from "./db";
 import { collaborationSubmissions, insertCollaborationSubmissionSchema, subscriptionSignups, insertSubscriptionSignupSchema } from "@shared/schema";
 import { sendCollaborationEmail, sendPaymentConfirmation, sendSubscriptionNotification } from "./email";
@@ -1279,6 +1280,183 @@ export async function registerRoutes(app: Express): Promise<Server> {
         success: false,
         message: 'Failed to fetch pending orders'
       });
+    }
+  });
+
+  // Simple Customer Authentication API endpoints
+  app.post('/api/auth/register', async (req, res) => {
+    try {
+      const { username, password, email, app_preference } = req.body;
+      
+      // Check if user already exists
+      const existingUser = await storage.getUserByUsername(username);
+      if (existingUser) {
+        return res.json({ success: false, error: 'Username already exists' });
+      }
+
+      // Create user with app access
+      const appAccess = app_preference === 'car_wash' ? ['car_wash'] : ['car_wash', 'laundry'];
+      const newUser = await storage.createUser({
+        username,
+        password, // In production, hash this password
+        email: email || null,
+        app_access: appAccess,
+        role: 'customer'
+      });
+
+      // Create JWT token
+      const token = jwt.sign(
+        { userId: newUser.id, username: newUser.username },
+        process.env.JWT_SECRET || 'dev-secret',
+        { expiresIn: '7d' }
+      );
+
+      // Set cookie
+      res.cookie('auth_token', token, {
+        httpOnly: true,
+        secure: process.env.NODE_ENV === 'production',
+        sameSite: 'lax',
+        maxAge: 7 * 24 * 60 * 60 * 1000 // 7 days
+      });
+
+      res.json({ 
+        success: true, 
+        user: { 
+          id: newUser.id, 
+          username: newUser.username, 
+          email: newUser.email,
+          role: newUser.role,
+          app_access: newUser.app_access
+        } 
+      });
+    } catch (error) {
+      console.error('Registration error:', error);
+      res.json({ success: false, error: 'Failed to create account' });
+    }
+  });
+
+  app.post('/api/auth/login', async (req, res) => {
+    try {
+      const { username, password } = req.body;
+      
+      const user = await storage.getUserByUsername(username);
+      if (!user || user.password !== password) { // In production, compare hashed passwords
+        return res.json({ success: false, error: 'Invalid username or password' });
+      }
+
+      // Update last login
+      await storage.updateUser(user.id, { last_login: new Date() });
+
+      // Create JWT token
+      const token = jwt.sign(
+        { userId: user.id, username: user.username },
+        process.env.JWT_SECRET || 'dev-secret',
+        { expiresIn: '7d' }
+      );
+
+      // Set cookie
+      res.cookie('auth_token', token, {
+        httpOnly: true,
+        secure: process.env.NODE_ENV === 'production',
+        sameSite: 'lax',
+        maxAge: 7 * 24 * 60 * 60 * 1000 // 7 days
+      });
+
+      res.json({ 
+        success: true, 
+        user: { 
+          id: user.id, 
+          username: user.username, 
+          email: user.email,
+          role: user.role,
+          app_access: user.app_access,
+          profile_data: user.profile_data
+        } 
+      });
+    } catch (error) {
+      console.error('Login error:', error);
+      res.json({ success: false, error: 'Login failed' });
+    }
+  });
+
+  app.get('/api/auth/me', async (req, res) => {
+    try {
+      const token = req.cookies.auth_token;
+      if (!token) {
+        return res.status(401).json({ error: 'Not authenticated' });
+      }
+
+      const decoded = jwt.verify(token, process.env.JWT_SECRET || 'dev-secret') as any;
+      const user = await storage.getUser(decoded.userId);
+      
+      if (!user) {
+        return res.status(401).json({ error: 'User not found' });
+      }
+
+      res.json({ 
+        user: { 
+          id: user.id, 
+          username: user.username, 
+          email: user.email,
+          role: user.role,
+          app_access: user.app_access,
+          profile_data: user.profile_data
+        } 
+      });
+    } catch (error) {
+      console.error('Auth check error:', error);
+      res.status(401).json({ error: 'Invalid token' });
+    }
+  });
+
+  app.post('/api/auth/logout', (req, res) => {
+    res.clearCookie('auth_token');
+    res.json({ success: true });
+  });
+
+  // Customer service history endpoint
+  app.get('/api/customer/history/:userId?', async (req, res) => {
+    try {
+      const token = req.cookies.auth_token;
+      if (!token) {
+        return res.status(401).json({ error: 'Not authenticated' });
+      }
+
+      const decoded = jwt.verify(token, process.env.JWT_SECRET || 'dev-secret') as any;
+      const userId = req.params.userId || decoded.userId;
+      
+      // For now, return mock data. In production, this would query your transaction database
+      const mockHistory = {
+        records: [
+          {
+            id: 'CX_001',
+            service_name: 'Full Package',
+            car_plate: 'BB1234',
+            branch: 'tungku',
+            amount: 12,
+            service_date: new Date(Date.now() - 7 * 24 * 60 * 60 * 1000).toISOString(), // 1 week ago
+            payment_status: 'paid',
+            transaction_id: 'PX_20250815_001',
+            duration_minutes: 15
+          },
+          {
+            id: 'CX_002',
+            service_name: 'Basic Wash',
+            car_plate: 'BB1234',
+            branch: 'salar',
+            amount: 8,
+            service_date: new Date(Date.now() - 14 * 24 * 60 * 60 * 1000).toISOString(), // 2 weeks ago
+            payment_status: 'paid',
+            transaction_id: 'PX_20250808_002',
+            duration_minutes: 12
+          }
+        ]
+      };
+
+      res.json(mockHistory);
+    } catch (error) {
+      console.error('Customer history error:', error);
+      res.status(500).json({ error: 'Failed to fetch service history' });
     }
   });
 
