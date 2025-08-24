@@ -1,4 +1,6 @@
 import { users, customers, type User, type InsertUser, type Customer, type InsertCustomer } from "@shared/schema";
+import { db } from "./db";
+import { eq } from "drizzle-orm";
 
 // modify the interface with any CRUD methods
 // you might need
@@ -17,131 +19,73 @@ export interface IStorage {
   getCustomers(): Promise<Customer[]>;
 }
 
-export class MemStorage implements IStorage {
-  private users: Map<number, User>;
-  private customers: Map<number, Customer>;
-  currentId: number;
-  currentCustomerId: number;
-
-  constructor() {
-    this.users = new Map();
-    this.customers = new Map();
-    this.currentId = 1;
-    this.currentCustomerId = 1;
-    
-    // Add default admin user
-    const adminUser: User = {
-      id: 1,
-      username: 'admin',
-      password: 'Buy20sell26!!',
-      email: 'admin@cucixpress.com',
-      role: 'admin',
-      app_access: ['car_wash', 'laundry'],
-      created_at: new Date(),
-      last_login: null,
-      profile_data: null
-    };
-    this.users.set(1, adminUser);
-    
-    // Add test customer for demo
-    const testCustomer: User = {
-      id: 2,
-      username: 'testcustomer',
-      password: 'test123',
-      email: 'customer@test.com',
-      role: 'customer',
-      app_access: ['car_wash', 'laundry'],
-      created_at: new Date(),
-      last_login: null,
-      profile_data: {
-        carPlate: 'BB1234',
-        phone: '673 7654321'
-      }
-    };
-    this.users.set(2, testCustomer);
-    this.currentId = 3;
-  }
-
+export class DatabaseStorage implements IStorage {
   async getUser(id: number): Promise<User | undefined> {
-    return this.users.get(id);
+    const [user] = await db.select().from(users).where(eq(users.id, id));
+    return user || undefined;
   }
 
   async getUserByUsername(username: string): Promise<User | undefined> {
-    return Array.from(this.users.values()).find(
-      (user) => user.username === username,
-    );
+    const [user] = await db.select().from(users).where(eq(users.username, username));
+    return user || undefined;
   }
 
   async getUserByEmail(email: string): Promise<User | undefined> {
-    return Array.from(this.users.values()).find(
-      (user) => user.email === email,
-    );
+    const [user] = await db.select().from(users).where(eq(users.email, email));
+    return user || undefined;
   }
 
   async createUser(insertUser: InsertUser): Promise<User> {
-    const id = this.currentId++;
-    const user: User = { 
-      ...insertUser, 
-      id,
-      email: insertUser.email || null,
-      created_at: new Date(),
-      last_login: null,
-      role: insertUser.role || 'user',
-      app_access: insertUser.app_access || ['car_wash', 'laundry'],
-      profile_data: insertUser.profile_data || null
-    };
-    this.users.set(id, user);
+    const [user] = await db
+      .insert(users)
+      .values({
+        ...insertUser,
+        role: insertUser.role || 'customer',
+        app_access: insertUser.app_access || ['car_wash', 'laundry'],
+      })
+      .returning();
     return user;
   }
 
   async updateUser(id: number, updates: Partial<InsertUser>): Promise<User | null> {
-    const existingUser = this.users.get(id);
-    if (!existingUser) {
-      return null; // Return null instead of throwing error
+    try {
+      const [user] = await db
+        .update(users)
+        .set(updates)
+        .where(eq(users.id, id))
+        .returning();
+      return user || null;
+    } catch (error) {
+      console.error('Error updating user:', error);
+      return null;
     }
-    const updatedUser = { ...existingUser, ...updates, last_login: new Date() };
-    this.users.set(id, updatedUser);
-    return updatedUser;
   }
 
   async createCustomer(insertCustomer: InsertCustomer): Promise<Customer> {
-    const id = this.currentCustomerId++;
-    const now = new Date();
-    const customer: Customer = { 
-      ...insertCustomer, 
-      id, 
-      createdAt: now,
-      updatedAt: now
-    };
-    this.customers.set(id, customer);
+    const [customer] = await db
+      .insert(customers)
+      .values(insertCustomer)
+      .returning();
     return customer;
   }
 
   async getCustomerByPlate(carPlate: string): Promise<Customer | undefined> {
-    return Array.from(this.customers.values()).find(
-      (customer) => customer.carPlate === carPlate,
-    );
+    const [customer] = await db.select().from(customers).where(eq(customers.carPlate, carPlate));
+    return customer || undefined;
   }
 
   async updateCustomer(id: number, updates: Partial<InsertCustomer>): Promise<Customer> {
-    const existingCustomer = this.customers.get(id);
-    if (!existingCustomer) {
-      throw new Error('Customer not found');
-    }
-    
-    const updatedCustomer: Customer = {
-      ...existingCustomer,
-      ...updates,
-      updatedAt: new Date()
-    };
-    
-    this.customers.set(id, updatedCustomer);
-    return updatedCustomer;
+    const [customer] = await db
+      .update(customers)
+      .set({ ...updates, updatedAt: new Date() })
+      .where(eq(customers.id, id))
+      .returning();
+    return customer;
   }
 
   async getCustomers(): Promise<Customer[]> {
-    return Array.from(this.customers.values());
+    return await db.select().from(customers);
   }
 }
 
-export const storage = new MemStorage();
+export const storage = new DatabaseStorage();

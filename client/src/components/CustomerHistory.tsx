@@ -1,5 +1,4 @@
-import { useState } from 'react';
-import { useQuery } from '@tanstack/react-query';
+import { useState, useEffect } from 'react';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
@@ -27,16 +26,36 @@ interface CustomerHistoryProps {
 export default function CustomerHistory({ className = '' }: CustomerHistoryProps) {
   const { user, isAuthenticated } = useAuth();
   const [expandedRecord, setExpandedRecord] = useState<string | null>(null);
+  const [serviceHistory, setServiceHistory] = useState<ServiceRecord[]>([]);
+  const [isLoading, setIsLoading] = useState(false);
+  const [error, setError] = useState<string | null>(null);
 
-  const { data: serviceHistory, isLoading, error } = useQuery({
-    queryKey: ['/api/customer/history', user?.id],
-    enabled: isAuthenticated && !!user,
-    staleTime: 5 * 60 * 1000, // 5 minutes
-  });
+  useEffect(() => {
+    if (isAuthenticated && user) {
+      fetchServiceHistory();
+    }
+  }, [isAuthenticated, user]);
 
-  interface ServiceHistoryResponse {
-    records: ServiceRecord[];
-  }
+  const fetchServiceHistory = async () => {
+    setIsLoading(true);
+    setError(null);
+    try {
+      const response = await fetch(`/api/customer/history/${user?.id}`, {
+        credentials: 'include'
+      });
+      
+      if (response.ok) {
+        const data = await response.json();
+        setServiceHistory(data.records || []);
+      } else {
+        setError('Failed to load service history');
+      }
+    } catch (err) {
+      setError('Network error loading service history');
+    } finally {
+      setIsLoading(false);
+    }
+  };
 
   if (!isAuthenticated || !user) {
     return (
@@ -88,7 +107,7 @@ export default function CustomerHistory({ className = '' }: CustomerHistoryProps
     );
   }
 
-  const records: ServiceRecord[] = (serviceHistory as ServiceHistoryResponse)?.records || [];
+  const records: ServiceRecord[] = serviceHistory;
 
   const formatDate = (dateString: string) => {
     const date = new Date(dateString);
