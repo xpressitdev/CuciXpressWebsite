@@ -6,7 +6,9 @@ import { users, customers, type User, type InsertUser, type Customer, type Inser
 export interface IStorage {
   getUser(id: number): Promise<User | undefined>;
   getUserByUsername(username: string): Promise<User | undefined>;
+  getUserByEmail(email: string): Promise<User | undefined>;
   createUser(user: InsertUser): Promise<User>;
+  updateUser(id: number, updates: Partial<InsertUser>): Promise<User>;
   
   // Customers
   createCustomer(customer: InsertCustomer): Promise<Customer>;
@@ -38,11 +40,36 @@ export class MemStorage implements IStorage {
     );
   }
 
+  async getUserByEmail(email: string): Promise<User | undefined> {
+    return Array.from(this.users.values()).find(
+      (user) => user.email === email,
+    );
+  }
+
   async createUser(insertUser: InsertUser): Promise<User> {
     const id = this.currentId++;
-    const user: User = { ...insertUser, id };
+    const user: User = { 
+      ...insertUser, 
+      id,
+      email: insertUser.email || null,
+      created_at: new Date(),
+      last_login: null,
+      role: insertUser.role || 'user',
+      app_access: insertUser.app_access || ['car_wash', 'laundry'],
+      profile_data: insertUser.profile_data || null
+    };
     this.users.set(id, user);
     return user;
+  }
+
+  async updateUser(id: number, updates: Partial<InsertUser>): Promise<User> {
+    const existingUser = this.users.get(id);
+    if (!existingUser) {
+      throw new Error('User not found');
+    }
+    const updatedUser = { ...existingUser, ...updates, last_login: new Date() };
+    this.users.set(id, updatedUser);
+    return updatedUser;
   }
 
   async createCustomer(insertCustomer: InsertCustomer): Promise<Customer> {

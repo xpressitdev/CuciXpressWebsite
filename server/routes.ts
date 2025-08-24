@@ -7,6 +7,7 @@ import { sendCollaborationEmail, sendPaymentConfirmation, sendSubscriptionNotifi
 import { processPocketPayPayment, handlePaymentCallback, queryTransactionStatus } from "./payment";
 import { kedaiPOSIntegration } from "./kedaipos-integration";
 import { handleKedaiPOSWebhook, getOrderStatus, updateQueueStatus } from "./kedaipos-webhooks";
+import { unifiedAuth } from "./unified-auth";
 import { storage } from "./storage";
 import { eq, desc } from "drizzle-orm";
 
@@ -1043,6 +1044,161 @@ export async function registerRoutes(app: Express): Promise<Server> {
   // Serve diagnostic page for API testing
   app.get("/diagnostic", (req, res) => {
     res.sendFile(process.cwd() + "/diagnostic.html");
+  });
+
+  // === Unified Authentication Endpoints ===
+  
+  // Login endpoint (works for both domains)
+  app.post('/api/auth/login', async (req, res) => {
+    try {
+      const { username, password, remember_me } = req.body;
+      
+      if (!username || !password) {
+        return res.status(400).json({
+          success: false,
+          error: 'Username and password are required'
+        });
+      }
+
+      const result = await unifiedAuth.login(username, password);
+      
+      if (result.success && result.token) {
+        // Set cross-domain cookies
+        unifiedAuth.setAuthCookie(res, result.token);
+        
+        // Update last login
+        if (result.user && result.user.id) {
+          await storage.updateUser(result.user.id, { last_login: new Date() });
+        }
+
+        res.json({
+          success: true,
+          message: 'Login successful',
+          user: result.user,
+          token: result.token
+        });
+      } else {
+        res.status(401).json({
+          success: false,
+          error: result.error || 'Login failed'
+        });
+      }
+    } catch (error) {
+      console.error('Login error:', error);
+      res.status(500).json({
+        success: false,
+        error: 'Internal server error'
+      });
+    }
+  });
+
+  // Register endpoint
+  app.post('/api/auth/register', async (req, res) => {
+    try {
+      const { username, password, email, app_preference } = req.body;
+      
+      if (!username || !password) {
+        return res.status(400).json({
+          success: false,
+          error: 'Username and password are required'
+        });
+      }
+
+      const result = await unifiedAuth.register({
+        username,
+        password,
+        email,
+        app_preference
+      });
+      
+      if (result.success && result.token) {
+        // Set cross-domain cookies
+        unifiedAuth.setAuthCookie(res, result.token);
+
+        res.json({
+          success: true,
+          message: 'Registration successful',
+          user: result.user,
+          token: result.token
+        });
+      } else {
+        res.status(400).json({
+          success: false,
+          error: result.error || 'Registration failed'
+        });
+      }
+    } catch (error) {
+      console.error('Registration error:', error);
+      res.status(500).json({
+        success: false,
+        error: 'Internal server error'
+      });
+    }
+  });
+
+  // Logout endpoint
+  app.post('/api/auth/logout', (req, res) => {
+    unifiedAuth.clearAuthCookies(res);
+    res.json({
+      success: true,
+      message: 'Logged out successfully'
+    });
+  });
+
+  // Get current user endpoint
+  app.get('/api/auth/me', unifiedAuth.requireAuth, async (req, res) => {
+    try {
+      const user = await storage.getUser(req.user.id);
+      if (!user) {
+        return res.status(404).json({
+          success: false,
+          error: 'User not found'
+        });
+      }
+
+      res.json({
+        success: true,
+        user: { ...user, password: undefined } // Never send password
+      });
+    } catch (error) {
+      res.status(500).json({
+        success: false,
+        error: 'Failed to get user data'
+      });
+    }
+  });
+
+  // Check token validity across domains
+  app.post('/api/auth/verify-token', async (req, res) => {
+    try {
+      const { token } = req.body;
+      
+      if (!token) {
+        return res.status(400).json({
+          success: false,
+          error: 'Token required'
+        });
+      }
+
+      const user = await unifiedAuth.getUserFromToken(token);
+      if (!user) {
+        return res.status(401).json({
+          success: false,
+          error: 'Invalid or expired token'
+        });
+      }
+
+      res.json({
+        success: true,
+        user: { ...user, password: undefined },
+        valid: true
+      });
+    } catch (error) {
+      res.status(401).json({
+        success: false,
+        error: 'Token verification failed'
+      });
+    }
   });
 
   // === KedaiPOS Integration Endpoints ===

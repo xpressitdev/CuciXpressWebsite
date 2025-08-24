@@ -1,4 +1,4 @@
-import { pgTable, text, serial, integer, boolean, timestamp } from "drizzle-orm/pg-core";
+import { pgTable, text, serial, integer, boolean, timestamp, jsonb } from "drizzle-orm/pg-core";
 import { createInsertSchema } from "drizzle-zod";
 import { z } from "zod";
 
@@ -6,6 +6,12 @@ export const users = pgTable("users", {
   id: serial("id").primaryKey(),
   username: text("username").notNull().unique(),
   password: text("password").notNull(),
+  email: text("email"),
+  role: text("role").default("user"), // 'admin', 'user'
+  app_access: text("app_access").array().default(["car_wash", "laundry"]), // Which apps user can access
+  created_at: timestamp("created_at").defaultNow(),
+  last_login: timestamp("last_login"),
+  profile_data: jsonb("profile_data"), // Additional profile information
 });
 
 export const collaborationSubmissions = pgTable("collaboration_submissions", {
@@ -37,7 +43,12 @@ export const customers = pgTable("customers", {
 export const insertUserSchema = createInsertSchema(users).pick({
   username: true,
   password: true,
-});
+  email: true,
+  role: true,
+  app_access: true,
+  profile_data: true,
+  last_login: true,
+}).partial({ email: true, role: true, app_access: true, profile_data: true, last_login: true });
 
 export const insertCollaborationSubmissionSchema = createInsertSchema(collaborationSubmissions).omit({
   id: true,
