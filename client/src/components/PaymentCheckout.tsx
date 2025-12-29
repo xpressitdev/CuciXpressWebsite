@@ -314,7 +314,14 @@ export default function PaymentCheckout({ selectedService, onBack }: PaymentChec
                       <h3 className="font-semibold">Welcome back!</h3>
                       <div className="flex items-center gap-2">
                         <CheckCircle className="w-4 h-4 text-green-500" />
-                        <span className="text-sm text-green-600">{user?.username}</span>
+                        <span className="text-sm text-green-600">{user?.email || user?.username}</span>
+                        <button 
+                          onClick={logout}
+                          className="text-xs text-gray-500 hover:text-gray-700 underline ml-2"
+                          data-testid="button-logout"
+                        >
+                          Logout
+                        </button>
                       </div>
                     </div>
                     
