@@ -1129,7 +1129,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
     });
   });
 
-  // Get current user endpoint
+  // Get current user endpoint with car details from queue app database
   app.get('/api/auth/me', unifiedAuth.requireAuth, async (req, res) => {
     try {
       const user = await storage.getUser(req.user.id);
@@ -1140,9 +1140,31 @@ export async function registerRoutes(app: Express): Promise<Server> {
         });
       }
 
+      // Fetch user's car from the cars table
+      let carPlate = '';
+      try {
+        const carResult = await db.execute(
+          sql`SELECT license_plate FROM cars WHERE user_id = ${user.id} LIMIT 1`
+        );
+        if (carResult.rows && carResult.rows.length > 0) {
+          carPlate = (carResult.rows[0] as any).license_plate || '';
+        }
+      } catch (err) {
+        console.log('Could not fetch car info:', err);
+      }
+
       res.json({
         success: true,
-        user: { ...user, password: undefined } // Never send password
+        user: { 
+          ...user, 
+          password: undefined,
+          phone_number: user.phone_number,
+          car_plate: carPlate,
+          profile_data: {
+            carPlate: carPlate,
+            phone: user.phone_number
+          }
+        }
       });
     } catch (error) {
       res.status(500).json({
