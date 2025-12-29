@@ -4,13 +4,13 @@
 import crypto from 'crypto';
 import { sendPaymentConfirmation } from './email';
 
-// Pocket Pay Configuration - Production environment with activated credentials
+// Pocket Pay Configuration - Production environment with credentials from environment
 const POCKET_PAY_CONFIG = {
   TEST_API_URL: 'http://pay.threeg.asia', // Test environment URL
   PROD_API_URL: 'https://pocket-pay.threeg.asia', // Production environment URL
-  API_KEY: '5XDhKvKXimH1P6OrukXzanaSf5UckWsO', // Production API key
-  SALT: '8MTEb1onoIFKSsVK6sxUJfMj1D8PNTIfWQAlvmSfUGWlCn7QiYxoJsnLZFWqSvfG', // Production salt
-  MERCHANT_ID: '680499048' // Merchant ID from admin portal
+  API_KEY: process.env.POCKET_PAY_API_KEY || '', // Production API key from secrets
+  SALT: process.env.POCKET_PAY_SALT || '', // Production salt from secrets
+  MERCHANT_ID: process.env.POCKET_PAY_MERCHANT_ID || '' // Merchant ID from secrets
 };
 
 // Debug production configuration with activated credentials
