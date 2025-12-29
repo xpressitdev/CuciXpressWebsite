@@ -138,6 +138,24 @@ export default function LocationsWithTestimonials() {
       iconBg: "bg-blue-500",
       coordinates: { lat: 4.8007081, lng: 114.6520481 },
       placeId: "tutong-branch"
+    },
+    {
+      name: "Cuci Xpress Lambak",
+      address: "Unit B11, Ground Floor, Block B, PHDPS Complex, Spg. 209, Jalan Penghubung Berakas, Kg. Lambak Kanan, Bandar Seri Begawan BB1714",
+      hours: "Daily: 8:00 AM - 7:00 PM",
+      bgColor: "bg-gradient-to-br from-pink-50 to-pink-100",
+      iconBg: "bg-pink-500",
+      coordinates: { lat: 4.9715818, lng: 114.9499111 },
+      placeId: "lambak-branch"
+    },
+    {
+      name: "Cuci Interior Tungku",
+      address: "A7, Ground Floor, Block A, Eng Ho Complex, Spg. 217-5-54 Jalan, Lebuhraya Tungku, BE3119",
+      hours: "Daily: 8:00 AM - 7:00 PM",
+      bgColor: "bg-gradient-to-br from-teal-50 to-teal-100",
+      iconBg: "bg-teal-500",
+      coordinates: { lat: 4.9239572, lng: 114.9112738 },
+      placeId: "interior-tungku-branch"
     }
   ];
 
@@ -166,7 +184,7 @@ export default function LocationsWithTestimonials() {
           className="text-center mb-16"
         >
           <h2 className="text-4xl font-bold text-gray-900 mb-4">Find Us Near You</h2>
-          <p className="text-xl text-gray-600 max-w-3xl mx-auto">With 4 locations across the region, regular Xpress car wash is always within reach.</p>
+          <p className="text-xl text-gray-600 max-w-3xl mx-auto">With 6 locations across the region, regular Xpress car wash is always within reach.</p>
         </motion.div>
 
         <div className="grid lg:grid-cols-2 gap-12 items-start">
