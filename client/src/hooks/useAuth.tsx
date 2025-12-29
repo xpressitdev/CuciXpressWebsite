@@ -2,10 +2,20 @@ import { useState, useEffect } from 'react';
 
 export interface User {
   id: number;
-  username: string;
+  name?: string;
+  username?: string;
   email: string | null;
-  role: string | null;
-  app_access: string[] | null;
+  role?: string | null;
+  app_access?: string[] | null;
+  is_admin?: boolean;
+  points?: number;
+  level?: number;
+  phone_number?: string;
+  car_plate?: string;
+  profile_data?: {
+    carPlate?: string;
+    phone?: string;
+  };
 }
 
 export function useAuth() {

@@ -10,7 +10,7 @@ import { kedaiPOSIntegration } from "./kedaipos-integration";
 import { handleKedaiPOSWebhook, getOrderStatus, updateQueueStatus } from "./kedaipos-webhooks";
 import { unifiedAuth } from "./unified-auth";
 import { storage } from "./storage";
-import { eq, desc } from "drizzle-orm";
+import { eq, desc, sql } from "drizzle-orm";
 
 const investorInterestSchema = z.object({
   name: z.string().min(1, "Name is required"),
@@ -1374,6 +1374,19 @@ export async function registerRoutes(app: Express): Promise<Server> {
         return res.status(401).json({ error: 'User not found' });
       }
 
+      // Fetch user's car from the cars table
+      let carPlate = '';
+      try {
+        const carResult = await db.execute(
+          sql`SELECT license_plate FROM cars WHERE user_id = ${user.id} LIMIT 1`
+        );
+        if (carResult.rows && carResult.rows.length > 0) {
+          carPlate = (carResult.rows[0] as any).license_plate || '';
+        }
+      } catch (err) {
+        console.log('Could not fetch car info:', err);
+      }
+
       res.json({ 
         user: { 
           id: user.id, 
@@ -1381,7 +1394,13 @@ export async function registerRoutes(app: Express): Promise<Server> {
           email: user.email,
           is_admin: user.is_admin,
           points: user.points,
-          level: user.level
+          level: user.level,
+          phone_number: user.phone_number,
+          car_plate: carPlate,
+          profile_data: {
+            carPlate: carPlate,
+            phone: user.phone_number
+          }
         } 
       });
     } catch (error) {
