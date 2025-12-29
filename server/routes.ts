@@ -768,7 +768,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
-  // Save customer information to database
+  // Save customer information - now handled by queue app's users table
   app.post("/api/save-customer", async (req, res) => {
     try {
       const { carPlate, phone } = req.body;
@@ -780,28 +780,14 @@ export async function registerRoutes(app: Express): Promise<Server> {
         });
       }
       
-      // Check if customer already exists
-      const existingCustomer = await storage.getCustomerByPlate(carPlate);
+      // Customer info is logged here - full customer management is handled by CuciXpressLiveQue app
+      console.log('Customer payment info:', { carPlate, phone });
       
-      if (existingCustomer) {
-        // Update phone number if different
-        if (existingCustomer.phone !== phone) {
-          await storage.updateCustomer(existingCustomer.id, { phone });
-        }
-        res.json({
-          success: true,
-          message: 'Customer information updated',
-          customer: { ...existingCustomer, phone }
-        });
-      } else {
-        // Create new customer
-        const newCustomer = await storage.createCustomer({ carPlate, phone });
-        res.json({
-          success: true,
-          message: 'Customer information saved',
-          customer: newCustomer
-        });
-      }
+      res.json({
+        success: true,
+        message: 'Customer information recorded',
+        customer: { carPlate, phone }
+      });
       
     } catch (error) {
       console.error('Customer save error:', error);
@@ -1067,10 +1053,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
         // Set cross-domain cookies
         unifiedAuth.setAuthCookie(res, result.token);
         
-        // Update last login
-        if (result.user && result.user.id) {
-          await storage.updateUser(result.user.id, { last_login: new Date() });
-        }
+        // Note: last_login tracking handled by queue app
 
         res.json({
           success: true,
@@ -1283,30 +1266,30 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
-  // Simple Customer Authentication API endpoints
+  // Customer Authentication API - uses shared database with CuciXpressLiveQue app
   app.post('/api/auth/register', async (req, res) => {
     try {
-      const { username, password, email, app_preference } = req.body;
+      const { email, password, first_name, last_name, phone_number, address } = req.body;
       
       // Check if user already exists
-      const existingUser = await storage.getUserByUsername(username);
+      const existingUser = await storage.getUserByEmail(email);
       if (existingUser) {
-        return res.json({ success: false, error: 'Username already exists' });
+        return res.json({ success: false, error: 'Email already registered' });
       }
 
-      // Create user with app access
-      const appAccess = app_preference === 'car_wash' ? ['car_wash'] : ['car_wash', 'laundry'];
+      // Create user
       const newUser = await storage.createUser({
-        username,
+        first_name: first_name || 'Guest',
+        last_name: last_name || 'User',
+        email,
         password, // In production, hash this password
-        email: email || null,
-        app_access: appAccess,
-        role: 'customer'
+        phone_number: phone_number || '',
+        address: address || ''
       });
 
       // Create JWT token
       const token = jwt.sign(
-        { userId: newUser.id, username: newUser.username },
+        { userId: newUser.id, email: newUser.email },
         process.env.JWT_SECRET || 'dev-secret',
         { expiresIn: '7d' }
       );
@@ -1323,10 +1306,11 @@ export async function registerRoutes(app: Express): Promise<Server> {
         success: true, 
         user: { 
           id: newUser.id, 
-          username: newUser.username, 
+          name: `${newUser.first_name} ${newUser.last_name}`,
           email: newUser.email,
-          role: newUser.role,
-          app_access: newUser.app_access
+          is_admin: newUser.is_admin,
+          points: newUser.points,
+          level: newUser.level
         } 
       });
     } catch (error) {
@@ -1337,24 +1321,16 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
   app.post('/api/auth/login', async (req, res) => {
     try {
-      const { username, password } = req.body;
+      const { email, password } = req.body;
       
-      const user = await storage.getUserByUsername(username);
+      const user = await storage.getUserByEmail(email);
       if (!user || user.password !== password) { // In production, compare hashed passwords
-        return res.json({ success: false, error: 'Invalid username or password' });
-      }
-
-      // Update last login (handle gracefully if update fails)
-      try {
-        await storage.updateUser(user.id, { last_login: new Date() });
-      } catch (error) {
-        console.log('Could not update last login time:', error);
-        // Continue with login process even if update fails
+        return res.json({ success: false, error: 'Invalid email or password' });
       }
 
       // Create JWT token
       const token = jwt.sign(
-        { userId: user.id, username: user.username },
+        { userId: user.id, email: user.email },
         process.env.JWT_SECRET || 'dev-secret',
         { expiresIn: '7d' }
       );
@@ -1371,11 +1347,11 @@ export async function registerRoutes(app: Express): Promise<Server> {
         success: true, 
         user: { 
           id: user.id, 
-          username: user.username, 
+          name: `${user.first_name} ${user.last_name}`,
           email: user.email,
-          role: user.role,
-          app_access: user.app_access,
-          profile_data: user.profile_data
+          is_admin: user.is_admin,
+          points: user.points,
+          level: user.level
         } 
       });
     } catch (error) {
@@ -1388,7 +1364,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
     try {
       const token = req.cookies.auth_token;
       if (!token) {
-        return res.status(401).json({ error: 'Not authenticated' });
+        return res.status(401).json({ error: 'Authentication required', login_url: '/login' });
       }
 
       const decoded = jwt.verify(token, process.env.JWT_SECRET || 'dev-secret') as any;
@@ -1401,11 +1377,11 @@ export async function registerRoutes(app: Express): Promise<Server> {
       res.json({ 
         user: { 
           id: user.id, 
-          username: user.username, 
+          name: `${user.first_name} ${user.last_name}`,
           email: user.email,
-          role: user.role,
-          app_access: user.app_access,
-          profile_data: user.profile_data
+          is_admin: user.is_admin,
+          points: user.points,
+          level: user.level
         } 
       });
     } catch (error) {

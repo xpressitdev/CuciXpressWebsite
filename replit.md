@@ -19,7 +19,7 @@ Landing page style: Professional but not overly pushy for investments - subtle b
 - **Frontend**: React 18, TypeScript, Wouter for routing, TanStack Query for server state management, Vite for building.
 - **Backend**: Node.js with Express.js, TypeScript, RESTful API endpoints.
 - **Database**: PostgreSQL with Drizzle ORM for type-safe operations and schema management. Neon Database is used as the serverless PostgreSQL provider.
-- **Cross-App Integration**: Shares a database with the `CuciXpressLiveQue` app for unified customer records and service tracking, including real-time queue status synchronization.
+- **Cross-App Integration**: CuciXpressLiveQue app is the master database owner. This website connects to that database for unified customer records (334+ registered users), service tracking, and real-time queue status synchronization.
 - **Data Flow**: Frontend uses TanStack Query to make API calls to the Express backend. The backend validates requests using Zod schemas, processes business logic, and interacts with the PostgreSQL database via Drizzle ORM, returning JSON responses.
 
 ### Feature Specifications
