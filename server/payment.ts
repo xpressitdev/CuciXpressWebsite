@@ -108,7 +108,6 @@ export async function processPocketPayPayment(paymentData: PaymentRequest): Prom
     };
 
     console.log('Sending order request to:', `${POCKET_PAY_CONFIG.PROD_API_URL}/payments/getNewOrderId`);
-    console.log('Order request data:', JSON.stringify(orderRequest, null, 2));
     
     const orderResponse = await fetch(`${POCKET_PAY_CONFIG.PROD_API_URL}/payments/getNewOrderId`, {
       method: 'POST',
