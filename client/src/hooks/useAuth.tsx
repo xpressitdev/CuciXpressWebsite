@@ -58,14 +58,14 @@ export function useAuth() {
           'Content-Type': 'application/json'
         },
         credentials: 'include',
-        body: JSON.stringify({ username, password })
+        body: JSON.stringify({ email: username, password })
       });
       
       const data = await response.json();
       
       if (data.success) {
-        setUser(data.user);
-        setIsAuthenticated(true);
+        // Fetch full profile data with phone and car plate from /api/auth/me
+        await checkAuthStatus();
         return { success: true };
       } else {
         return { success: false, error: data.error };
