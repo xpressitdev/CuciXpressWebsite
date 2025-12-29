@@ -1419,49 +1419,96 @@ export async function registerRoutes(app: Express): Promise<Server> {
     res.json({ success: true });
   });
 
-  // Customer service history endpoint
-  app.get('/api/customer/history/:userId?', async (req, res) => {
+  // Customer service history endpoint - real database query
+  app.get('/api/customer/history/:carPlate?', async (req, res) => {
     try {
-      const token = req.cookies.auth_token;
-      if (!token) {
-        return res.status(401).json({ error: 'Not authenticated' });
+      const carPlate = req.params.carPlate || req.query.carPlate as string;
+      
+      if (!carPlate) {
+        return res.status(400).json({ error: 'Car plate number required' });
       }
 
-      const decoded = jwt.verify(token, process.env.JWT_SECRET || 'dev-secret') as any;
-      const userId = req.params.userId || decoded.userId;
+      const history = await storage.getServiceHistoryByPlate(carPlate.toUpperCase());
       
-      // For now, return mock data. In production, this would query your transaction database
-      const mockHistory = {
-        records: [
-          {
-            id: 'CX_001',
-            service_name: 'Full Package',
-            car_plate: 'BB1234',
-            branch: 'tungku',
-            amount: 12,
-            service_date: new Date(Date.now() - 7 * 24 * 60 * 60 * 1000).toISOString(), // 1 week ago
-            payment_status: 'paid',
-            transaction_id: 'PX_20250815_001',
-            duration_minutes: 15
-          },
-          {
-            id: 'CX_002',
-            service_name: 'Basic Wash',
-            car_plate: 'BB1234',
-            branch: 'salar',
-            amount: 8,
-            service_date: new Date(Date.now() - 14 * 24 * 60 * 60 * 1000).toISOString(), // 2 weeks ago
-            payment_status: 'paid',
-            transaction_id: 'PX_20250808_002',
-            duration_minutes: 12
-          }
-        ]
-      };
-
-      res.json(mockHistory);
+      res.json({
+        records: history.map(record => ({
+          id: record.id,
+          service_name: record.serviceType,
+          car_plate: record.carPlate,
+          branch: record.branch,
+          amount: record.amount / 100, // Convert cents to dollars
+          service_date: record.createdAt,
+          payment_status: record.status,
+          transaction_id: record.transactionId,
+          check_in_time: record.checkInTime,
+          completed_time: record.completedTime
+        }))
+      });
     } catch (error) {
       console.error('Customer history error:', error);
       res.status(500).json({ error: 'Failed to fetch service history' });
+    }
+  });
+
+  // Service History API endpoints for cross-app integration
+  app.post('/api/service-history', async (req, res) => {
+    try {
+      const { carPlate, phone, serviceType, branch, amount, status, transactionId, paymentReference } = req.body;
+      
+      if (!carPlate || !serviceType || !branch || amount === undefined) {
+        return res.status(400).json({ error: 'Missing required fields: carPlate, serviceType, branch, amount' });
+      }
+
+      const record = await storage.createServiceHistory({
+        carPlate: carPlate.toUpperCase(),
+        phone,
+        serviceType,
+        branch,
+        amount: Math.round(amount * 100), // Store in cents
+        status: status || 'pending',
+        transactionId,
+        paymentReference
+      });
+
+      res.json({ success: true, record });
+    } catch (error) {
+      console.error('Create service history error:', error);
+      res.status(500).json({ error: 'Failed to create service history record' });
+    }
+  });
+
+  app.get('/api/service-history/branch/:branch', async (req, res) => {
+    try {
+      const { branch } = req.params;
+      const history = await storage.getServiceHistoryByBranch(branch);
+      res.json({ records: history });
+    } catch (error) {
+      console.error('Get branch history error:', error);
+      res.status(500).json({ error: 'Failed to fetch branch history' });
+    }
+  });
+
+  app.get('/api/service-history/pending', async (req, res) => {
+    try {
+      const branch = req.query.branch as string | undefined;
+      const pending = await storage.getPendingServices(branch);
+      res.json({ records: pending });
+    } catch (error) {
+      console.error('Get pending services error:', error);
+      res.status(500).json({ error: 'Failed to fetch pending services' });
+    }
+  });
+
+  app.patch('/api/service-history/:id', async (req, res) => {
+    try {
+      const id = parseInt(req.params.id);
+      const updates = req.body;
+      
+      const record = await storage.updateServiceHistory(id, updates);
+      res.json({ success: true, record });
+    } catch (error) {
+      console.error('Update service history error:', error);
+      res.status(500).json({ error: 'Failed to update service history' });
     }
   });
 
