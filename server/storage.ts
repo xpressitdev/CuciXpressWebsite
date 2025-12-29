@@ -1,6 +1,6 @@
-import { users, customers, type User, type InsertUser, type Customer, type InsertCustomer } from "@shared/schema";
+import { users, customers, serviceHistory, type User, type InsertUser, type Customer, type InsertCustomer, type ServiceHistory, type InsertServiceHistory } from "@shared/schema";
 import { db } from "./db";
-import { eq } from "drizzle-orm";
+import { eq, desc } from "drizzle-orm";
 
 // modify the interface with any CRUD methods
 // you might need
@@ -17,6 +17,14 @@ export interface IStorage {
   getCustomerByPlate(carPlate: string): Promise<Customer | undefined>;
   updateCustomer(id: number, updates: Partial<InsertCustomer>): Promise<Customer>;
   getCustomers(): Promise<Customer[]>;
+  
+  // Service History
+  createServiceHistory(entry: InsertServiceHistory): Promise<ServiceHistory>;
+  getServiceHistoryByPlate(carPlate: string): Promise<ServiceHistory[]>;
+  getServiceHistoryByCustomerId(customerId: number): Promise<ServiceHistory[]>;
+  updateServiceHistory(id: number, updates: Partial<InsertServiceHistory>): Promise<ServiceHistory>;
+  getServiceHistoryByBranch(branch: string): Promise<ServiceHistory[]>;
+  getPendingServices(branch?: string): Promise<ServiceHistory[]>;
 }
 
 export class DatabaseStorage implements IStorage {
@@ -85,6 +93,62 @@ export class DatabaseStorage implements IStorage {
 
   async getCustomers(): Promise<Customer[]> {
     return await db.select().from(customers);
+  }
+
+  // Service History methods
+  async createServiceHistory(entry: InsertServiceHistory): Promise<ServiceHistory> {
+    const [record] = await db
+      .insert(serviceHistory)
+      .values(entry)
+      .returning();
+    return record;
+  }
+
+  async getServiceHistoryByPlate(carPlate: string): Promise<ServiceHistory[]> {
+    return await db
+      .select()
+      .from(serviceHistory)
+      .where(eq(serviceHistory.carPlate, carPlate))
+      .orderBy(desc(serviceHistory.createdAt));
+  }
+
+  async getServiceHistoryByCustomerId(customerId: number): Promise<ServiceHistory[]> {
+    return await db
+      .select()
+      .from(serviceHistory)
+      .where(eq(serviceHistory.customerId, customerId))
+      .orderBy(desc(serviceHistory.createdAt));
+  }
+
+  async updateServiceHistory(id: number, updates: Partial<InsertServiceHistory>): Promise<ServiceHistory> {
+    const [record] = await db
+      .update(serviceHistory)
+      .set(updates)
+      .where(eq(serviceHistory.id, id))
+      .returning();
+    return record;
+  }
+
+  async getServiceHistoryByBranch(branch: string): Promise<ServiceHistory[]> {
+    return await db
+      .select()
+      .from(serviceHistory)
+      .where(eq(serviceHistory.branch, branch))
+      .orderBy(desc(serviceHistory.createdAt));
+  }
+
+  async getPendingServices(branch?: string): Promise<ServiceHistory[]> {
+    if (branch) {
+      return await db
+        .select()
+        .from(serviceHistory)
+        .where(eq(serviceHistory.branch, branch))
+        .orderBy(serviceHistory.queuePosition);
+    }
+    return await db
+      .select()
+      .from(serviceHistory)
+      .orderBy(serviceHistory.queuePosition);
   }
 }
 

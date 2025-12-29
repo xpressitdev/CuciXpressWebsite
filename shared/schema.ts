@@ -40,6 +40,24 @@ export const customers = pgTable("customers", {
   updatedAt: timestamp("updated_at").defaultNow().notNull(),
 });
 
+export const serviceHistory = pgTable("service_history", {
+  id: serial("id").primaryKey(),
+  customerId: integer("customer_id").references(() => customers.id),
+  carPlate: text("car_plate").notNull(),
+  phone: text("phone"),
+  serviceType: text("service_type").notNull(),
+  branch: text("branch").notNull(),
+  amount: integer("amount").notNull(), // Amount in cents
+  status: text("status").default("pending").notNull(), // pending, in_queue, in_progress, completed, cancelled
+  queuePosition: integer("queue_position"),
+  paymentReference: text("payment_reference"),
+  transactionId: text("transaction_id"),
+  checkInTime: timestamp("check_in_time"),
+  completedTime: timestamp("completed_time"),
+  notes: text("notes"),
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+});
+
 export const insertUserSchema = createInsertSchema(users).pick({
   username: true,
   password: true,
@@ -68,6 +86,11 @@ export const insertCustomerSchema = createInsertSchema(customers).omit({
   updatedAt: true,
 });
 
+export const insertServiceHistorySchema = createInsertSchema(serviceHistory).omit({
+  id: true,
+  createdAt: true,
+});
+
 export type InsertUser = z.infer<typeof insertUserSchema>;
 export type User = typeof users.$inferSelect;
 export type InsertCollaborationSubmission = z.infer<typeof insertCollaborationSubmissionSchema>;
@@ -76,3 +99,5 @@ export type InsertSubscriptionSignup = z.infer<typeof insertSubscriptionSignupSc
 export type SubscriptionSignup = typeof subscriptionSignups.$inferSelect;
 export type InsertCustomer = z.infer<typeof insertCustomerSchema>;
 export type Customer = typeof customers.$inferSelect;
+export type InsertServiceHistory = z.infer<typeof insertServiceHistorySchema>;
+export type ServiceHistory = typeof serviceHistory.$inferSelect;
