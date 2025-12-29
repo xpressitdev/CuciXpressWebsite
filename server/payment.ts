@@ -201,7 +201,6 @@ export async function processPocketPayPayment(paymentData: PaymentRequest): Prom
     };
 
     console.log('Sending payment creation request to:', `${POCKET_PAY_CONFIG.PROD_API_URL}/payments/create`);
-    console.log('Payment creation data:', JSON.stringify(createRequest, null, 2));
     
     const createResponse = await fetch(`${POCKET_PAY_CONFIG.PROD_API_URL}/payments/create`, {
       method: 'POST',
