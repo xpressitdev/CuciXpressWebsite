@@ -158,7 +158,6 @@ export async function processPocketPayPayment(paymentData: PaymentRequest): Prom
     };
 
     console.log('Sending hash request to:', `${POCKET_PAY_CONFIG.PROD_API_URL}/payments/hash`);
-    console.log('Hash request data:', JSON.stringify(hashRequest, null, 2));
     
     const hashResponse = await fetch(`${POCKET_PAY_CONFIG.PROD_API_URL}/payments/hash`, {
       method: 'POST',
