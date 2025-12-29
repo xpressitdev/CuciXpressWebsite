@@ -129,7 +129,8 @@ export async function processPocketPayPayment(paymentData: PaymentRequest): Prom
     const orderId = orderResult.new_id; // According to documentation, it returns "new_id" not "order_id"
 
     // Step 2: Generate Hash Data (following exact documentation format) 
-    const currentDomain = process.env.NODE_ENV === 'development' ? 'http://localhost:5000' : 'https://cucixpress.com';
+    const productionDomain = process.env.PRODUCTION_URL || 'https://cucixpress.com';
+    const currentDomain = process.env.NODE_ENV === 'development' ? 'http://localhost:5000' : productionDomain;
     const liveDomain = currentDomain; // Use current domain for redirects
     
     // Convert BND to cents for production API (multiply by 100)
