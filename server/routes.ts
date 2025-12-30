@@ -1038,16 +1038,17 @@ export async function registerRoutes(app: Express): Promise<Server> {
   // Login endpoint (works for both domains)
   app.post('/api/auth/login', async (req, res) => {
     try {
-      const { username, password, remember_me } = req.body;
+      const { username, email, password, remember_me } = req.body;
+      const loginIdentifier = username || email;
       
-      if (!username || !password) {
+      if (!loginIdentifier || !password) {
         return res.status(400).json({
           success: false,
-          error: 'Username and password are required'
+          error: 'Email and password are required'
         });
       }
 
-      const result = await unifiedAuth.login(username, password);
+      const result = await unifiedAuth.login(loginIdentifier, password);
       
       if (result.success && result.token) {
         // Set cross-domain cookies
