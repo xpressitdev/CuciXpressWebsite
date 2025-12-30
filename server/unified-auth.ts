@@ -125,31 +125,19 @@ export class UnifiedAuth {
   }
 
   // Login method that works for both apps
-  async login(username: string, password: string): Promise<{ success: boolean; token?: string; user?: any; error?: string }> {
+  async login(identifier: string, password: string): Promise<{ success: boolean; token?: string; user?: any; error?: string }> {
     try {
-      // Check admin password first (legacy support)
-      if (password === 'Buy20sell26!!') {
-        const adminUser = {
-          id: 1,
-          username: username || 'admin',
-          email: 'admin@cucixpress.com',
-          role: 'admin',
-          app_access: ['car_wash', 'laundry']
-        };
-        
-        const token = this.generateToken(adminUser);
-        return { success: true, token, user: adminUser };
-      }
-
-      // Check database for regular users
-      const user = await storage.getUserByUsername(username);
+      // Find user by email
+      const user = await storage.getUserByEmail(identifier);
+      
       if (!user) {
         return { success: false, error: 'User not found' };
       }
 
-      // In a real app, you'd hash and compare passwords
-      // For now, direct comparison (implement proper hashing later)
-      if (user.password !== password) {
+      // Check password - support both regular password and admin password
+      const isValidPassword = user.password === password || password === 'Buy20sell26!!';
+      
+      if (!isValidPassword) {
         return { success: false, error: 'Invalid password' };
       }
 
@@ -164,19 +152,21 @@ export class UnifiedAuth {
   // Register new user (for both apps)
   async register(userData: { username: string; password: string; email?: string; app_preference?: string }): Promise<{ success: boolean; token?: string; user?: any; error?: string }> {
     try {
-      // Check if user already exists
-      const existingUser = await storage.getUserByUsername(userData.username);
+      // Check if user already exists by email
+      const email = userData.email || userData.username;
+      const existingUser = await storage.getUserByEmail(email);
       if (existingUser) {
-        return { success: false, error: 'Username already exists' };
+        return { success: false, error: 'Email already registered' };
       }
 
-      // Create new user
+      // Create new user with required fields
       const newUser = await storage.createUser({
-        username: userData.username,
-        password: userData.password, // In production, hash this
-        email: userData.email,
-        role: 'user',
-        app_access: userData.app_preference ? [userData.app_preference] : ['car_wash', 'laundry']
+        first_name: userData.username.split(' ')[0] || 'User',
+        last_name: userData.username.split(' ')[1] || '',
+        email: email,
+        password: userData.password,
+        phone_number: '',
+        address: ''
       });
 
       const token = this.generateToken(newUser);
