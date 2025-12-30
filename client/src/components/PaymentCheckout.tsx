@@ -24,7 +24,7 @@ interface PaymentCheckoutProps {
 
 export default function PaymentCheckout({ selectedService, onBack }: PaymentCheckoutProps) {
   const { toast } = useToast();
-  const { user, isAuthenticated, login, register, isLoading } = useAuth();
+  const { user, isAuthenticated, login, register, logout, isLoading } = useAuth();
   const [isProcessing, setIsProcessing] = useState(false);
   const [showAuth, setShowAuth] = useState(false);
   const [authMode, setAuthMode] = useState<'login' | 'register'>('login');
