@@ -801,29 +801,35 @@ export async function registerRoutes(app: Express): Promise<Server> {
   // Send payment confirmation email
   app.post("/api/send-payment-confirmation", async (req, res) => {
     try {
-      const { carPlate, phone, transactionId, orderId, service, amount, branch } = req.body;
+      const { carPlate, phone, transactionId, orderId, service, amount, branch, customerEmail, customerName } = req.body;
       
-      if (!carPlate || !phone || !transactionId || !orderId || !service || !amount || !branch) {
+      if (!transactionId || !orderId || !service || !amount || !branch) {
         return res.status(400).json({
           success: false,
-          message: 'Missing required fields for email confirmation'
+          message: 'Missing required fields for payment confirmation'
         });
       }
       
-      // For now, just log the confirmation (since we don't have customer email)
-      console.log('Payment confirmation for:', {
-        carPlate,
-        phone, 
-        transactionId,
-        orderId,
-        service,
-        amount,
-        branch
-      });
+      console.log('Payment confirmation for:', { carPlate, phone, transactionId, orderId, service, amount, branch, customerEmail });
+      
+      let emailSent = false;
+      if (customerEmail) {
+        emailSent = await sendPaymentConfirmation({
+          customerEmail,
+          transactionId,
+          orderId,
+          service,
+          amount,
+          branch,
+          customerName: customerName || carPlate || 'Customer'
+        });
+      }
       
       res.json({
         success: true,
-        message: 'Payment confirmed - customer will receive SMS/phone confirmation'
+        message: emailSent
+          ? `Payment confirmation email sent to ${customerEmail}`
+          : 'Payment confirmed - no email address provided'
       });
       
     } catch (error) {

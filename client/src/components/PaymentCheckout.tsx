@@ -36,17 +36,19 @@ export default function PaymentCheckout({ selectedService, onBack }: PaymentChec
   const [formData, setFormData] = useState({
     carPlate: "",
     phone: "",
-    selectedBranch: ""
+    selectedBranch: "",
+    email: ""
   });
 
   // Auto-fill customer data if user is logged in
   useEffect(() => {
-    if (user && user.profile_data) {
-      const profile = typeof user.profile_data === 'object' ? user.profile_data as any : {};
+    if (user) {
+      const profile = user.profile_data && typeof user.profile_data === 'object' ? user.profile_data as any : {};
       setFormData(prev => ({
         ...prev,
-        carPlate: profile.carPlate || "",
-        phone: profile.phone || ""
+        carPlate: profile.carPlate || prev.carPlate,
+        phone: profile.phone || prev.phone,
+        email: user.email || prev.email
       }));
     }
   }, [user]);
@@ -166,7 +168,8 @@ export default function PaymentCheckout({ selectedService, onBack }: PaymentChec
           const orderDetailsWithCustomer = {
             ...result.order_details,
             car_plate: formData.carPlate,
-            phone: formData.phone
+            phone: formData.phone,
+            customer_email: formData.email || undefined
           };
           sessionStorage.setItem('lastPaymentOrder', JSON.stringify(orderDetailsWithCustomer));
         }
@@ -356,6 +359,20 @@ export default function PaymentCheckout({ selectedService, onBack }: PaymentChec
                       onChange={(e) => handleInputChange('phone', e.target.value)}
                       placeholder="673 7654321"
                       required
+                    />
+                  </div>
+
+                  <div>
+                    <Label htmlFor="email">
+                      Email Address
+                      <span className="ml-1 text-xs text-gray-400">(for receipt)</span>
+                    </Label>
+                    <Input
+                      id="email"
+                      type="email"
+                      value={formData.email}
+                      onChange={(e) => handleInputChange('email', e.target.value)}
+                      placeholder="your@email.com"
                     />
                   </div>
 

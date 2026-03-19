@@ -71,6 +71,7 @@ export default function PaymentSuccess() {
         body: JSON.stringify({
           carPlate: orderData.car_plate,
           phone: orderData.phone,
+          customerEmail: orderData.customer_email,
           transactionId: orderData.transaction_id,
           orderId: orderData.order_id || orderData.transaction_id,
           service: orderData.service,
