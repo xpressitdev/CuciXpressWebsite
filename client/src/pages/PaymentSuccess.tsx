@@ -5,11 +5,13 @@ import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { useLocation } from "wouter";
+import { useToast } from "@/hooks/use-toast";
 import PaymentReceipt from "@/components/PaymentReceipt";
 
 export default function PaymentSuccess() {
   const [, setLocation] = useLocation();
   const [orderDetails, setOrderDetails] = useState<any>(null);
+  const { toast } = useToast();
 
   useEffect(() => {
     // Get order details from URL params or session storage
@@ -21,6 +23,13 @@ export default function PaymentSuccess() {
       setOrderDetails(orderData);
       sessionStorage.removeItem('lastPaymentOrder'); // Clean up
       
+      // Show success notification
+      toast({
+        title: "Payment Successful! 🎉",
+        description: `Your ${orderData.service || 'car wash service'} has been confirmed. Please show your QR receipt to the staff.`,
+        duration: 6000,
+      });
+
       // Send confirmation email
       sendConfirmationEmail(orderData);
     } else {
@@ -34,6 +43,13 @@ export default function PaymentSuccess() {
         phone: 'N/A'
       };
       setOrderDetails(fallbackOrder);
+
+      // Show success notification for fallback
+      toast({
+        title: "Payment Successful! 🎉",
+        description: "Your car wash service has been confirmed. Please show your QR receipt to the staff.",
+        duration: 6000,
+      });
       
       // Send confirmation for fallback too
       sendConfirmationEmail(fallbackOrder);
