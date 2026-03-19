@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 import { motion } from "framer-motion";
-import { CheckCircle, Clock, MapPin, Phone, Home } from "lucide-react";
+import { CheckCircle, Clock, MapPin, Phone, Home, XCircle, ArrowLeft } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
@@ -11,29 +11,44 @@ import PaymentReceipt from "@/components/PaymentReceipt";
 export default function PaymentSuccess() {
   const [, setLocation] = useLocation();
   const [orderDetails, setOrderDetails] = useState<any>(null);
+  const [paymentVerified, setPaymentVerified] = useState<boolean | null>(null);
   const { toast } = useToast();
 
   useEffect(() => {
-    // Get order details from URL params or session storage
     const urlParams = new URLSearchParams(window.location.search);
+    const urlSuccessIndicator = urlParams.get('successIndicator');
     const storedOrder = sessionStorage.getItem('lastPaymentOrder');
-    
+
     if (storedOrder) {
       const orderData = JSON.parse(storedOrder);
-      setOrderDetails(orderData);
-      sessionStorage.removeItem('lastPaymentOrder'); // Clean up
-      
-      // Show success notification
-      toast({
-        title: "Payment Successful! 🎉",
-        description: `Your ${orderData.service || 'car wash service'} has been confirmed. Please show your QR receipt to the staff.`,
-        duration: 6000,
-      });
+      sessionStorage.removeItem('lastPaymentOrder');
 
-      // Send confirmation email
-      sendConfirmationEmail(orderData);
+      // Verify payment: successIndicator from URL must match the one stored at checkout
+      const storedIndicator = orderData.success_indicator;
+      const isVerified = storedIndicator && urlSuccessIndicator
+        ? urlSuccessIndicator === storedIndicator
+        : true; // If no indicators to compare, trust the success page redirect
+
+      setOrderDetails(orderData);
+      setPaymentVerified(isVerified);
+
+      if (isVerified) {
+        toast({
+          title: "Payment Successful! 🎉",
+          description: `Your ${orderData.service || 'car wash service'} has been confirmed. Please show your QR receipt to the staff.`,
+          duration: 6000,
+        });
+        sendConfirmationEmail(orderData);
+      } else {
+        toast({
+          title: "Payment Not Completed",
+          description: "Your payment was not completed. No charges have been made.",
+          variant: "destructive",
+          duration: 6000,
+        });
+      }
     } else {
-      // Fallback order details from URL params
+      // No stored order — build a fallback from URL params (no stored indicator to verify against)
       const fallbackOrder = {
         transaction_id: urlParams.get('OrderId') || 'CX_UNKNOWN',
         service: 'Car Wash Service',
@@ -43,15 +58,12 @@ export default function PaymentSuccess() {
         phone: 'N/A'
       };
       setOrderDetails(fallbackOrder);
-
-      // Show success notification for fallback
+      setPaymentVerified(true);
       toast({
         title: "Payment Successful! 🎉",
         description: "Your car wash service has been confirmed. Please show your QR receipt to the staff.",
         duration: 6000,
       });
-      
-      // Send confirmation for fallback too
       sendConfirmationEmail(fallbackOrder);
     }
   }, []);
@@ -90,6 +102,70 @@ export default function PaymentSuccess() {
       console.error('Error processing confirmation:', error);
     }
   };
+
+  // Payment failed / not completed screen
+  if (paymentVerified === false) {
+    return (
+      <div className="min-h-screen bg-gradient-to-br from-red-50 to-rose-100 flex items-center justify-center p-4">
+        <motion.div
+          initial={{ opacity: 0, scale: 0.8 }}
+          animate={{ opacity: 1, scale: 1 }}
+          transition={{ duration: 0.5 }}
+          className="max-w-md w-full"
+        >
+          <Card className="shadow-xl border-0">
+            <CardHeader className="text-center pb-4">
+              <motion.div
+                initial={{ scale: 0 }}
+                animate={{ scale: 1 }}
+                transition={{ delay: 0.2, type: "spring" }}
+                className="w-20 h-20 bg-red-100 rounded-full flex items-center justify-center mx-auto mb-4"
+              >
+                <XCircle className="w-10 h-10 text-red-600" />
+              </motion.div>
+              <CardTitle className="text-2xl font-bold text-red-800">Payment Not Completed</CardTitle>
+              <p className="text-gray-600 mt-2">
+                Your payment was not completed successfully. No charges have been made to your account.
+              </p>
+            </CardHeader>
+            <CardContent className="space-y-4">
+              <div className="bg-amber-50 rounded-lg p-4">
+                <p className="text-sm text-amber-700">
+                  This can happen if the payment was cancelled, declined, or timed out. Please try again or contact support if you believe this is an error.
+                </p>
+              </div>
+              <div className="space-y-3">
+                <Button
+                  className="w-full bg-cuci-primary hover:bg-cuci-primary/90"
+                  onClick={() => {
+                    setLocation('/');
+                    setTimeout(() => document.getElementById('pricing')?.scrollIntoView({ behavior: 'smooth' }), 100);
+                  }}
+                >
+                  <ArrowLeft className="w-4 h-4 mr-2" />
+                  Try Payment Again
+                </Button>
+                <div className="flex gap-3">
+                  <Button variant="outline" className="flex-1" onClick={() => window.open('tel:+6738387000')}>
+                    <Phone className="w-4 h-4 mr-2" />
+                    Call Support
+                  </Button>
+                  <Button variant="outline" className="flex-1" onClick={() => setLocation('/')}>
+                    <Home className="w-4 h-4 mr-2" />
+                    Home
+                  </Button>
+                </div>
+              </div>
+              <div className="text-center text-sm text-gray-500 pt-2 border-t">
+                <p className="font-medium">Customer Support</p>
+                <p>Phone: +673 838 7000 • Daily: 8:00 AM – 7:00 PM</p>
+              </div>
+            </CardContent>
+          </Card>
+        </motion.div>
+      </div>
+    );
+  }
 
   return (
     <div className="min-h-screen bg-gradient-to-br from-green-50 to-emerald-100 p-4">
