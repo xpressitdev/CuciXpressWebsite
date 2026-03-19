@@ -940,20 +940,9 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
-  // Payment success redirect to React component
-  app.get("/payment-success", (req, res) => {
-    const { successIndicator, Message, OrderId } = req.query;
-    
-    // Log successful payment
-    console.log('Payment success redirect:', { successIndicator, Message, OrderId });
-    
-    // Redirect to React PaymentSuccess component with query params
-    const redirectUrl = `/payment-success?successIndicator=${successIndicator || ''}&Message=${Message || ''}&OrderId=${OrderId || ''}`;
-    
-    // Redirect to the appropriate domain based on environment
-    const targetDomain = process.env.NODE_ENV === 'development' ? 'http://localhost:5000' : 'https://cucixpress.com';
-    res.redirect(302, `${targetDomain}${redirectUrl}`);
-  });
+  // /payment-success is handled by the React SPA (wouter route)
+  // Pocket Pay redirects here with successIndicator, Message, OrderId query params
+  // No server-side redirect needed — Express falls through to the SPA catch-all
 
   // Payment callback endpoint for Pocket Pay
   app.post("/api/payment-callback", async (req, res) => {
