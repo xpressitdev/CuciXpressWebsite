@@ -107,15 +107,18 @@ export default function PaymentCheckout({ selectedService, onBack }: PaymentChec
 
 
   const validateForm = () => {
-    const required = ['carPlate', 'phone', 'selectedBranch'];
+    const required = ['carPlate', 'phone', 'selectedBranch', 'email'];
     return required.every(field => formData[field as keyof typeof formData]);
   };
 
   const handlePayment = async () => {
     if (!validateForm()) {
+      const missingEmail = !formData.email;
       toast({
         title: "Missing Information",
-        description: "Please fill in all required fields",
+        description: missingEmail
+          ? "Please enter your email address — your payment receipt will be sent there."
+          : "Please fill in all required fields (car plate, phone, email, and branch).",
         variant: "destructive"
       });
       return;
@@ -363,17 +366,16 @@ export default function PaymentCheckout({ selectedService, onBack }: PaymentChec
                   </div>
 
                   <div>
-                    <Label htmlFor="email">
-                      Email Address
-                      <span className="ml-1 text-xs text-gray-400">(for receipt)</span>
-                    </Label>
+                    <Label htmlFor="email">Email Address *</Label>
                     <Input
                       id="email"
                       type="email"
                       value={formData.email}
                       onChange={(e) => handleInputChange('email', e.target.value)}
                       placeholder="your@email.com"
+                      required
                     />
+                    <p className="text-xs text-gray-500 mt-1">Your payment receipt will be sent here</p>
                   </div>
 
                   <div>
