@@ -114,11 +114,11 @@ export function useAuth() {
     }
   };
 
-  // Legacy support for admin password
+  // Legacy admin password gate — sets auth state directly without a DB user
   const legacyLogin = (password: string): boolean => {
     if (password === 'Buy20sell26!!') {
-      // Convert to new system
-      login('admin', password);
+      setUser({ id: 0, email: 'admin@cucixpress.com', role: 'admin', is_admin: true });
+      setIsAuthenticated(true);
       return true;
     }
     return false;
