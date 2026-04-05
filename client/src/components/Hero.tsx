@@ -30,7 +30,7 @@ export default function Hero() {
           >
             <h1 className="text-4xl md:text-6xl font-bold text-gray-900 leading-tight mb-6">
               We've cleaned over{" "}
-              <span className="text-cuci-primary">114,000</span> cars.
+              <span className="text-cuci-primary">120,000</span> cars.
               <span className="block text-cuci-secondary">
                 And we're just getting started.
               </span>
