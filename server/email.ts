@@ -121,7 +121,7 @@ export async function sendPaymentConfirmation(data: PaymentConfirmationData): Pr
       </div>
       <div class="footer">
         <p>This is an automated receipt from Cuci Xpress.<br>
-        120,000+ cars cleaned &bull; BND 1M+ revenue &bull; 6 branches across Brunei</p>
+        120,000+ cars cleaned &bull; BND 1M+ revenue &bull; 5 branches across Brunei</p>
       </div>
     </div>
   </body>
@@ -149,7 +149,7 @@ WHAT TO DO NEXT:
 Need help? Call +673 838 7000 or visit cucixpress.com
 
 ---
-Cuci Xpress | 120,000+ cars cleaned | BND 1M+ revenue | 6 branches
+Cuci Xpress | 120,000+ cars cleaned | BND 1M+ revenue | 5 branches
   `;
 
   try {
@@ -246,7 +246,7 @@ export async function sendSubscriptionNotification(data: SubscriptionNotificatio
           <li>Family and corporate plans</li>
           <li>Exclusive member pricing</li>
         </ul>
-        <p>In the meantime, visit any of our 6 branches for immediate service!</p>
+        <p>In the meantime, visit any of our 5 branches for immediate service!</p>
         <p style="text-align:center;margin-top:25px;">
           <a href="tel:+6738387000" style="color:#6C5CE7;font-weight:bold;">📞 +673 838 7000</a> &nbsp;|&nbsp;
           <a href="https://cucixpress.com" style="color:#6C5CE7;font-weight:bold;">🌐 cucixpress.com</a>

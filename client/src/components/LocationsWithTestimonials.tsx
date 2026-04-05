@@ -1,5 +1,5 @@
 import { motion, AnimatePresence } from "framer-motion";
-import { MapPin, Navigation, Star } from "lucide-react";
+import { MapPin, Navigation, Star, Crown } from "lucide-react";
 import { useState, useEffect } from "react";
 import { useQuery } from "@tanstack/react-query";
 
@@ -23,25 +23,42 @@ interface LocationProps {
     lng: number;
   };
   placeId: string;
+  flagship?: boolean;
+  services?: string[];
 }
 
-function LocationCard({ name, address, hours, bgColor, iconBg, coordinates, placeId, isSelected, onClick }: LocationProps & { isSelected: boolean; onClick: () => void }) {
+function LocationCard({ name, address, hours, bgColor, iconBg, coordinates, placeId, flagship, services, isSelected, onClick }: LocationProps & { isSelected: boolean; onClick: () => void }) {
   return (
     <motion.div
       initial={{ opacity: 0, x: -30 }}
       whileInView={{ opacity: 1, x: 0 }}
       transition={{ duration: 0.6 }}
       viewport={{ once: true }}
-      className={`bg-white p-6 rounded-2xl shadow-lg hover:shadow-xl transition-all duration-300 cursor-pointer ${isSelected ? 'ring-2 ring-cuci-primary ring-opacity-50' : ''}`}
+      className={`bg-white p-6 rounded-2xl shadow-lg hover:shadow-xl transition-all duration-300 cursor-pointer relative overflow-hidden ${isSelected ? 'ring-2 ring-cuci-primary ring-opacity-50' : ''} ${flagship ? 'border-2 border-yellow-400' : ''}`}
       whileHover={{ scale: 1.02 }}
       onClick={onClick}
     >
+      {flagship && (
+        <div className="absolute top-0 right-0 bg-gradient-to-l from-yellow-400 to-yellow-500 text-white text-xs font-bold px-3 py-1 flex items-center gap-1 rounded-bl-lg">
+          <Crown className="w-3 h-3" />
+          FLAGSHIP
+        </div>
+      )}
       <div className="flex items-start space-x-4">
         <div className={`p-3 rounded-full ${iconBg}`}>
           <MapPin className="w-6 h-6 text-white" />
         </div>
         <div className="flex-1">
-          <h3 className="text-lg font-semibold text-gray-900 mb-2">{name}</h3>
+          <h3 className="text-lg font-semibold text-gray-900 mb-1">{name}</h3>
+          {services && services.length > 0 && (
+            <div className="flex flex-wrap gap-1 mb-2">
+              {services.map((service, i) => (
+                <span key={i} className="text-xs bg-cuci-primary/10 text-cuci-primary font-medium px-2 py-0.5 rounded-full">
+                  {service}
+                </span>
+              ))}
+            </div>
+          )}
           <p className="text-gray-600 mb-2">{address}</p>
           <p className="text-sm text-gray-500 mb-3">{hours}</p>
           <div className="flex space-x-2">
@@ -105,12 +122,14 @@ export default function LocationsWithTestimonials() {
   const locations: LocationProps[] = [
     {
       name: "Cuci Xpress Tungku Link",
-      address: "A6, Ground Floor, Block A, Eng Ho Complex, Spg. 217-5-54 Jalan, Lebuhraya Tungku, BE3119",
+      address: "A6–A7, Ground Floor, Block A, Eng Ho Complex, Spg. 217-5-54 Jalan, Lebuhraya Tungku, BE3119",
       hours: "Daily: 8:00 AM - 7:00 PM",
       bgColor: "bg-gradient-to-br from-purple-50 to-purple-100",
       iconBg: "bg-cuci-primary",
       coordinates: { lat: 4.9112738, lng: 114.9239572 },
-      placeId: "" // Use default place ID (from environment variable)
+      placeId: "",
+      flagship: true,
+      services: ["Exterior Auto Wash", "Interior Detailing"]
     },
     {
       name: "Cuci Xpress Salar",
@@ -119,7 +138,8 @@ export default function LocationsWithTestimonials() {
       bgColor: "bg-gradient-to-br from-orange-50 to-orange-100",
       iconBg: "bg-cuci-secondary",
       coordinates: { lat: 5.00443, lng: 114.99290 },
-      placeId: "salar-branch"
+      placeId: "salar-branch",
+      services: ["Exterior Auto Wash"]
     },
     {
       name: "Cuci Xpress Bengkurong",
@@ -128,7 +148,8 @@ export default function LocationsWithTestimonials() {
       bgColor: "bg-gradient-to-br from-green-50 to-green-100",
       iconBg: "bg-green-500",
       coordinates: { lat: 4.89035, lng: 114.94006 },
-      placeId: "bengkurong-branch"
+      placeId: "bengkurong-branch",
+      services: ["Exterior Auto Wash"]
     },
     {
       name: "Cuci Xpress Tutong",
@@ -137,7 +158,8 @@ export default function LocationsWithTestimonials() {
       bgColor: "bg-gradient-to-br from-blue-50 to-blue-100",
       iconBg: "bg-blue-500",
       coordinates: { lat: 4.8007081, lng: 114.6520481 },
-      placeId: "tutong-branch"
+      placeId: "tutong-branch",
+      services: ["Exterior Auto Wash"]
     },
     {
       name: "Cuci Xpress Lambak",
@@ -146,16 +168,8 @@ export default function LocationsWithTestimonials() {
       bgColor: "bg-gradient-to-br from-pink-50 to-pink-100",
       iconBg: "bg-pink-500",
       coordinates: { lat: 4.9715818, lng: 114.9499111 },
-      placeId: "lambak-branch"
-    },
-    {
-      name: "Cuci Interior Tungku",
-      address: "A7, Ground Floor, Block A, Eng Ho Complex, Spg. 217-5-54 Jalan, Lebuhraya Tungku, BE3119",
-      hours: "Daily: 8:00 AM - 7:00 PM",
-      bgColor: "bg-gradient-to-br from-teal-50 to-teal-100",
-      iconBg: "bg-teal-500",
-      coordinates: { lat: 4.9239572, lng: 114.9112738 },
-      placeId: "interior-tungku-branch"
+      placeId: "lambak-branch",
+      services: ["Exterior Auto Wash"]
     }
   ];
 
@@ -184,7 +198,7 @@ export default function LocationsWithTestimonials() {
           className="text-center mb-16"
         >
           <h2 className="text-4xl font-bold text-gray-900 mb-4">Find Us Near You</h2>
-          <p className="text-xl text-gray-600 max-w-3xl mx-auto">With 6 locations across the region, regular Xpress car wash is always within reach.</p>
+          <p className="text-xl text-gray-600 max-w-3xl mx-auto">With 5 locations across the region, regular Xpress car wash is always within reach.</p>
         </motion.div>
 
         <div className="grid lg:grid-cols-2 gap-12 items-start">

@@ -145,7 +145,7 @@ export default function Stats() {
     },
     {
       icon: <MapPin className="w-8 h-8" />,
-      value: 6,
+      value: 5,
       label: "Active Branches",
       color: "text-green-500",
       bgColor: "bg-gradient-to-br from-green-500/5 to-green-500/10",
