@@ -186,7 +186,22 @@ Zero changes to the existing 9 tables. All FKs into existing tables use
 `integer` to match `branches.id` and `users.id` (verified in
 `docs/SCHEMA_VERIFICATION.md`). New tables use `text` PKs for
 nanoid-style external IDs.
-**Status:** Authored, awaiting manual `psql` apply.
+**Status:** **APPLIED 2026-05-02** to development DB via the Replit safe SQL
+runner (single `BEGIN;...COMMIT;` call, atomic). Verified post-apply:
+all 8 tables present in `information_schema.tables`; existing row counts
+unchanged (`users=508`, `cars=559`, `branches=5`).
+**Mid-flight fix:** First apply attempt failed with
+`functions in index expression must be marked IMMUTABLE` because
+`date(timestamptz)` is `STABLE`, not `IMMUTABLE`, and Postgres rejects
+`STABLE` functions in index expressions. Fix: added a plain
+`ticket_day date NOT NULL DEFAULT ((now() AT TIME ZONE 'UTC')::date)`
+column to `orders` and made the per-day uniqueness index reference that
+column directly (`UNIQUE(branch_id, ticket_code, ticket_day)`). The default
+is evaluated per-insert (where `STABLE` is allowed), and the index now
+references plain columns only. App code can override `ticket_day` to use
+the branch's local timezone if/when multi-timezone support lands.
+`shared/schema.ts` was updated to mirror this column and to omit it from
+`insertOrderSchema` (the DB default fills it in).
 **Rollback:** Forward-only. To undo, write a new migration that drops the
 8 tables in dependency order: `subscriptions`, `orders`, `addons_catalog`,
 `lanes`, `audit_log`, `otp_codes`, `auth_sessions`, `staff`. Verify each

@@ -30,6 +30,24 @@ Landing page style: Professional but not overly pushy for investments - subtle b
 - **Admin Tools**: `/admin` route for managing collaboration submissions.
 - **Service Status Flow**: `pending`, `in_queue`, `in_progress`, `completed`, `cancelled` states for car wash services.
 
+### Authentication (Week 1 plan, in progress)
+Two auth systems coexist by design during the Week 1–Week 2 cutover:
+
+1. **Legacy JWT** (`server/unified-auth.ts`) — currently authoritative for
+   `/api/auth/login`, `/api/auth/me`, `/api/auth/register`, `/api/auth/logout`.
+   Hardened in Task 1.1: requires a 32+ char `JWT_SECRET` at boot (refuses
+   to start otherwise — see `docs/AUTH_AUDIT.md`); the master-password
+   backdoor and the dead duplicate auth routes were removed.
+2. **Lucia v3 scaffold** (`server/auth/lucia.ts`, `server/auth/middleware.ts`)
+   — runs side-by-side via the global `attachLuciaSession` middleware,
+   reads/writes the `cx_session` HttpOnly cookie, and is backed by a custom
+   polymorphic adapter over the new `auth_sessions` table (scoped to
+   `user_type='customer'` for now; staff comes online with the POS work).
+   Debug routes: `GET /api/auth/whoami`, `POST /api/auth/lucia/dev-login`
+   (DEV-ONLY), `POST /api/auth/lucia/logout`. Full E2E verified.
+   Lucia v3 is officially sunset; planned migration to oslojs after the
+   Week-1..Week-5 plan ships.
+
 ## External Dependencies
 
 - **UI/Styling**: Radix UI, Tailwind CSS, Framer Motion, Lucide React (icons).

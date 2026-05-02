@@ -135,6 +135,13 @@ CREATE TABLE IF NOT EXISTS addons_catalog (
 --   status:         'paid' | 'queued' | 'washing' | 'done' | 'voided'
 --   addons:         jsonb array of { id, name, price_cents } snapshots
 -- ------------------------------------------------------------
+-- Note on ticket_day: stored as a separate plain `date` column (defaulting to
+-- the UTC date at insert time) rather than computed in the index expression.
+-- Postgres rejects expression indexes built on STABLE functions like
+-- `date(timestamptz)` ("functions in index expression must be marked
+-- IMMUTABLE"), so we materialise the bucket key in its own column. The app
+-- can also override `ticket_day` to use the branch's local timezone if/when
+-- multi-timezone support lands.
 CREATE TABLE IF NOT EXISTS orders (
   id                   text PRIMARY KEY,
   branch_id            integer NOT NULL REFERENCES branches(id),
@@ -151,6 +158,7 @@ CREATE TABLE IF NOT EXISTS orders (
   payment_method       text NOT NULL CHECK (payment_method IN ('cash', 'card', 'qr', 'subscription', 'voucher')),
   payment_ref          text,
   ticket_code          text NOT NULL,
+  ticket_day           date NOT NULL DEFAULT ((now() AT TIME ZONE 'UTC')::date),
   status               text NOT NULL DEFAULT 'paid' CHECK (status IN ('paid', 'queued', 'washing', 'done', 'voided')),
   created_at           timestamptz NOT NULL DEFAULT now(),
   completed_at         timestamptz
@@ -167,7 +175,7 @@ CREATE INDEX IF NOT EXISTS orders_plate_idx
 
 -- Per-branch daily ticket-code uniqueness (e.g. branch 1 issues A30 once per day)
 CREATE UNIQUE INDEX IF NOT EXISTS orders_branch_ticket_day_uniq
-  ON orders(branch_id, ticket_code, (date(created_at)));
+  ON orders(branch_id, ticket_code, ticket_day);
 
 -- ------------------------------------------------------------
 -- 8. subscriptions

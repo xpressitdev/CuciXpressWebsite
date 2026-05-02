@@ -8,6 +8,8 @@ import { processPocketPayPayment, handlePaymentCallback, queryTransactionStatus 
 import { kedaiPOSIntegration } from "./kedaipos-integration";
 import { handleKedaiPOSWebhook, getOrderStatus, updateQueueStatus } from "./kedaipos-webhooks";
 import { unifiedAuth } from "./unified-auth";
+import { lucia } from "./auth/lucia";
+import { requireLuciaUser } from "./auth/middleware";
 import { storage } from "./storage";
 import { eq, desc, sql } from "drizzle-orm";
 
@@ -1202,8 +1204,72 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
+  // === Lucia v3 scaffold endpoints (Task 1.3) ===
+  // These run side-by-side with the legacy JWT auth above. They are
+  // wired so we can prove the Lucia stack works end-to-end without
+  // touching production traffic. The legacy /api/auth/* endpoints stay
+  // authoritative until the Week-2 migration.
+
+  // GET /api/auth/whoami — read the cx_session cookie if present and
+  // report what Lucia thinks about it. Always 200, never 401. Useful for
+  // debugging cookie/session plumbing without taking a route hostage.
+  app.get('/api/auth/whoami', (req, res) => {
+    const lc = req.lucia ?? { user: null, session: null };
+    if (!lc.user || !lc.session) {
+      return res.json({ authenticated: false });
+    }
+    res.json({
+      authenticated: true,
+      user: {
+        id: lc.user.id,
+        email: (lc.user as any).email,
+        firstName: (lc.user as any).firstName,
+        lastName: (lc.user as any).lastName,
+      },
+      session: {
+        id: lc.session.id,
+        expiresAt: lc.session.expiresAt,
+        fresh: lc.session.fresh,
+      },
+    });
+  });
+
+  // POST /api/auth/lucia/dev-login — DEV-ONLY helper that mints a Lucia
+  // session for an existing customer (by email). Lets us smoke-test the
+  // adapter without wiring a full login flow yet. Disabled outside dev.
+  app.post('/api/auth/lucia/dev-login', async (req, res) => {
+    if (process.env.NODE_ENV === 'production') {
+      return res.status(404).json({ error: 'Not found' });
+    }
+    const { email } = req.body ?? {};
+    if (!email || typeof email !== 'string') {
+      return res.status(400).json({ error: 'email required' });
+    }
+    const rows = (await db.execute(
+      sql`SELECT id FROM users WHERE email = ${email} LIMIT 1`
+    )).rows as Array<{ id: number }>;
+    if (rows.length === 0) {
+      return res.status(404).json({ error: 'No customer with that email' });
+    }
+    const userId = String(rows[0].id);
+    const session = await lucia.createSession(userId, {});
+    const cookie = lucia.createSessionCookie(session.id);
+    res.appendHeader('Set-Cookie', cookie.serialize());
+    res.json({ ok: true, userId, sessionId: session.id });
+  });
+
+  // POST /api/auth/lucia/logout — invalidate the Lucia session and clear
+  // the cookie. Independent of the legacy logout above.
+  app.post('/api/auth/lucia/logout', requireLuciaUser, async (req, res) => {
+    const sid = req.lucia!.session!.id;
+    await lucia.invalidateSession(sid);
+    const cookie = lucia.createBlankSessionCookie();
+    res.appendHeader('Set-Cookie', cookie.serialize());
+    res.json({ ok: true });
+  });
+
   // === KedaiPOS Integration Endpoints ===
-  
+
   // KedaiPOS webhook endpoint
   app.post('/api/kedaipos-webhook', handleKedaiPOSWebhook);
   

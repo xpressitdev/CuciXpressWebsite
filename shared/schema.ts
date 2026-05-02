@@ -54,8 +54,10 @@ import {
   bigserial,
   boolean,
   timestamp,
+  date,
   jsonb,
 } from "drizzle-orm/pg-core";
+import { sql } from "drizzle-orm";
 import { createInsertSchema } from "drizzle-zod";
 import { z } from "zod";
 
@@ -394,6 +396,11 @@ export const orders = pgTable("orders", {
   payment_method: text("payment_method").notNull(),
   payment_ref: text("payment_ref"),
   ticket_code: text("ticket_code").notNull(),
+  // ticket_day: app-supplied bucket for the daily uniqueness constraint.
+  // Defaults to the UTC date at insert time when omitted.
+  ticket_day: date("ticket_day")
+    .notNull()
+    .default(sql`((now() AT TIME ZONE 'UTC')::date)`),
   status: text("status").default("paid").notNull(),
   created_at: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
   completed_at: timestamp("completed_at", { withTimezone: true }),
@@ -402,6 +409,7 @@ export const orders = pgTable("orders", {
 export const insertOrderSchema = createInsertSchema(orders).omit({
   created_at: true,
   completed_at: true,
+  ticket_day: true,
 });
 export type Order = typeof orders.$inferSelect;
 export type InsertOrder = z.infer<typeof insertOrderSchema>;

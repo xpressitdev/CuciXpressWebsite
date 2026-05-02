@@ -3,6 +3,7 @@ import cookieParser from "cookie-parser";
 import { registerRoutes } from "./routes";
 import { setupVite, serveStatic, log } from "./vite";
 import { requireJwtSecret } from "./unified-auth";
+import { attachLuciaSession } from "./auth/middleware";
 
 // Fail-fast on missing or weak JWT_SECRET. Refuse to boot rather than
 // silently fall back to a hardcoded value. See docs/AUTH_AUDIT.md.
@@ -12,6 +13,11 @@ const app = express();
 app.use(cookieParser()); // Add cookie parsing middleware
 app.use(express.json());
 app.use(express.urlencoded({ extended: false }));
+// Attach Lucia session info to every request as `req.lucia`. Read-only —
+// does not 401 on its own. Routes that want to require auth use
+// `requireLuciaUser` from server/auth/middleware.ts. Coexists with the
+// legacy JWT `req.user` set by unified-auth. See server/auth/lucia.ts.
+app.use(attachLuciaSession);
 
 app.use((req, res, next) => {
   const start = Date.now();
