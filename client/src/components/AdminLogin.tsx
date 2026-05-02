@@ -6,12 +6,14 @@ import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { useToast } from '@/hooks/use-toast';
+import type { StaffLoginResult } from '@/hooks/useStaffAuth';
 
 interface AdminLoginProps {
-  onLogin: (password: string) => boolean;
+  onLogin: (email: string, password: string) => Promise<StaffLoginResult>;
 }
 
 export default function AdminLogin({ onLogin }: AdminLoginProps) {
+  const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [showPassword, setShowPassword] = useState(false);
   const [isLoading, setIsLoading] = useState(false);
@@ -19,22 +21,29 @@ export default function AdminLogin({ onLogin }: AdminLoginProps) {
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
+    if (isLoading) return;
     setIsLoading(true);
 
-    // Simulate a small delay for better UX
-    await new Promise(resolve => setTimeout(resolve, 500));
+    const result = await onLogin(email.trim(), password);
 
-    const success = onLogin(password);
-    
-    if (!success) {
-      toast({
-        title: 'Access Denied',
-        description: 'Invalid password. Please try again.',
-        variant: 'destructive',
-      });
+    if (!result.success) {
+      let title = 'Sign-in failed';
+      let description = 'Check your email and password and try again.';
+      if (result.error === 'account_locked') {
+        const mins = Math.max(1, Math.ceil((result.retryAfterSeconds ?? 0) / 60));
+        title = 'Account temporarily locked';
+        description = `Too many failed attempts. Try again in about ${mins} minute${mins === 1 ? '' : 's'}.`;
+      } else if (result.error === 'account_inactive') {
+        title = 'Account inactive';
+        description = 'This staff account is disabled. Ask the owner to re-enable it.';
+      } else if (result.error === 'network') {
+        title = 'Network error';
+        description = "Couldn't reach the server. Check your connection and try again.";
+      }
+      toast({ title, description, variant: 'destructive' });
       setPassword('');
     }
-    
+
     setIsLoading(false);
   };
 
@@ -52,60 +61,76 @@ export default function AdminLogin({ onLogin }: AdminLoginProps) {
               <Lock className="w-6 h-6 text-cuci-primary" />
             </div>
             <CardTitle className="text-2xl font-bold text-gray-900">
-              Admin Access
+              Staff Sign-in
             </CardTitle>
             <p className="text-gray-600 mt-2">
-              Enter password to access collaboration submissions
+              Sign in with your Cuci Xpress staff account
             </p>
           </CardHeader>
           <CardContent>
-            <form onSubmit={handleSubmit} className="space-y-4">
+            <form onSubmit={handleSubmit} className="space-y-4" data-testid="form-staff-login">
               <div>
-                <Label htmlFor="password">Password</Label>
+                <Label htmlFor="staff-email">Email</Label>
+                <Input
+                  id="staff-email"
+                  type="email"
+                  value={email}
+                  onChange={(e) => setEmail(e.target.value)}
+                  placeholder="you@cucixpress.com"
+                  autoComplete="username"
+                  required
+                  className="mt-2"
+                  data-testid="input-staff-email"
+                />
+              </div>
+
+              <div>
+                <Label htmlFor="staff-password">Password</Label>
                 <div className="relative mt-2">
                   <Input
-                    id="password"
+                    id="staff-password"
                     type={showPassword ? 'text' : 'password'}
                     value={password}
                     onChange={(e) => setPassword(e.target.value)}
-                    placeholder="Enter admin password"
+                    placeholder="Your staff password"
+                    autoComplete="current-password"
                     required
+                    minLength={12}
                     className="pr-10"
+                    data-testid="input-staff-password"
                   />
                   <button
                     type="button"
                     onClick={() => setShowPassword(!showPassword)}
                     className="absolute inset-y-0 right-0 pr-3 flex items-center text-gray-400 hover:text-gray-600"
+                    aria-label={showPassword ? 'Hide password' : 'Show password'}
                   >
-                    {showPassword ? (
-                      <EyeOff className="w-4 h-4" />
-                    ) : (
-                      <Eye className="w-4 h-4" />
-                    )}
+                    {showPassword ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
                   </button>
                 </div>
               </div>
-              
+
               <Button
                 type="submit"
                 className="w-full"
-                disabled={isLoading || !password.trim()}
+                disabled={isLoading || !email.trim() || password.length < 12}
+                data-testid="button-staff-login-submit"
               >
                 {isLoading ? (
                   <div className="flex items-center">
                     <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-white mr-2"></div>
-                    Verifying...
+                    Signing in...
                   </div>
                 ) : (
-                  'Access Admin Panel'
+                  'Sign in'
                 )}
               </Button>
             </form>
           </CardContent>
         </Card>
-        
+
         <div className="text-center mt-6">
-          <a 
+          <a
             href="/"
             className="text-cuci-primary hover:text-cuci-primary-dark transition-colors text-sm"
           >

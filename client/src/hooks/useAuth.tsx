@@ -114,15 +114,11 @@ export function useAuth() {
     }
   };
 
-  // Legacy admin password gate — sets auth state directly without a DB user
-  const legacyLogin = (password: string): boolean => {
-    if (password === 'Buy20sell26!!') {
-      setUser({ id: 0, email: 'admin@cucixpress.com', role: 'admin', is_admin: true });
-      setIsAuthenticated(true);
-      return true;
-    }
-    return false;
-  };
+  // NOTE: the legacy `legacyLogin(password)` helper that gated /admin
+  // behind a hardcoded password was removed in the Task-1.6 follow-up.
+  // Admin / staff auth now uses `useStaffAuth` against the real
+  // `/api/auth/staff/*` endpoints, with a per-account password,
+  // server-side enforcement on `/api/admin/*`, lockout, and audit log.
 
   return {
     user,
@@ -131,7 +127,6 @@ export function useAuth() {
     login,
     register,
     logout,
-    legacyLogin, // For backward compatibility
     checkAuthStatus
   };
 }

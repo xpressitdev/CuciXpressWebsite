@@ -10,7 +10,7 @@ import { handleKedaiPOSWebhook, getOrderStatus, updateQueueStatus } from "./keda
 import { unifiedAuth } from "./unified-auth";
 import { lucia } from "./auth/lucia";
 import { staffLucia } from "./auth/staffLucia";
-import { requireLuciaUser, requireStaff } from "./auth/middleware";
+import { requireLuciaUser, requireStaff, requireStaffRole } from "./auth/middleware";
 import { sendOtp, verifyOtp, OTP_CONSTANTS } from "./auth/otp";
 import { loginStaff } from "./auth/staff";
 import {
@@ -275,8 +275,11 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
-  // Admin endpoint to get collaboration submissions
-  app.get("/api/admin/collaborations", async (req, res) => {
+  // Admin endpoint to get collaboration submissions.
+  // Server-side auth (Task 1.6 follow-up): requires a valid staff
+  // session cookie AND owner|manager role. Lane / cashier staff have
+  // no business reason to read inbound business inquiries.
+  app.get("/api/admin/collaborations", requireStaff, requireStaffRole('owner', 'manager'), async (req, res) => {
     try {
       const submissions = await db
         .select()
@@ -293,7 +296,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
   });
 
   // Admin endpoint to mark submission as read
-  app.patch("/api/admin/collaborations/:id/read", async (req, res) => {
+  app.patch("/api/admin/collaborations/:id/read", requireStaff, requireStaffRole('owner', 'manager'), async (req, res) => {
     try {
       const id = parseInt(req.params.id);
       
@@ -369,7 +372,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
   });
 
   // Admin endpoint to get subscription signups
-  app.get("/api/admin/subscriptions", async (req, res) => {
+  app.get("/api/admin/subscriptions", requireStaff, requireStaffRole('owner', 'manager'), async (req, res) => {
     try {
       const signups = await db
         .select()

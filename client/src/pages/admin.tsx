@@ -8,11 +8,11 @@ import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Separator } from "@/components/ui/separator";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
-import { ArrowLeft, Eye, Mail, Phone, Building, MessageSquare, Calendar, LogOut, Users } from "lucide-react";
+import { ArrowLeft, Eye, Mail, Phone, Building, MessageSquare, Calendar, LogOut, Users, ShieldCheck } from "lucide-react";
 import { Link } from "wouter";
 import { motion } from "framer-motion";
 import { apiRequest } from "@/lib/queryClient";
-import { useAuth } from "@/hooks/useAuth";
+import { useStaffAuth } from "@/hooks/useStaffAuth";
 import type { CollaborationSubmission, SubscriptionSignup } from "@shared/schema";
 
 interface CollaborationsResponse {
@@ -24,7 +24,7 @@ interface SubscriptionsResponse {
 }
 
 export default function Admin() {
-  const { isAuthenticated, isLoading: authLoading, legacyLogin, logout } = useAuth();
+  const { staff, isAuthenticated, isLoading: authLoading, login, logout } = useStaffAuth();
   const queryClient = useQueryClient();
   const [selectedSubmission, setSelectedSubmission] = useState<CollaborationSubmission | null>(null);
 
@@ -45,8 +45,8 @@ export default function Admin() {
     },
   });
 
-  const handleLogin = (password: string) => {
-    return legacyLogin(password);
+  const handleLogin = (email: string, password: string) => {
+    return login(email, password);
   };
 
   const handleMarkAsRead = (id: number) => {
@@ -160,17 +160,26 @@ export default function Admin() {
                 Back to Home
               </button>
             </Link>
-            <div className="flex items-center justify-between">
+            <div className="flex items-center justify-between flex-wrap gap-4">
               <div>
                 <h1 className="text-3xl font-bold text-gray-900">Admin Dashboard</h1>
                 <p className="text-gray-600 mt-2">
                   Manage collaboration requests and subscription signups
                 </p>
+                {staff && (
+                  <div className="mt-3 inline-flex items-center gap-2 text-sm text-gray-700 bg-cuci-primary/5 border border-cuci-primary/20 rounded-full px-3 py-1">
+                    <ShieldCheck className="w-4 h-4 text-cuci-primary" />
+                    <span data-testid="text-staff-name">{staff.name}</span>
+                    <span className="text-gray-400">·</span>
+                    <span className="capitalize" data-testid="text-staff-role">{staff.role}</span>
+                  </div>
+                )}
               </div>
               <Button
                 variant="outline"
                 onClick={logout}
                 className="flex items-center gap-2"
+                data-testid="button-staff-logout"
               >
                 <LogOut className="w-4 h-4" />
                 Logout

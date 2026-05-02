@@ -124,10 +124,20 @@ Two auth systems coexist by design during the Week 1–Week 2 cutover:
    correct password, logout invalidates session. Orphan packages
    `passport` and `passport-local` removed in the same pass (never used).
 
-   NOT yet wired: the `/admin` page (`client/src/pages/admin.tsx`) still
-   uses the legacy hardcoded `Buy20sell26!!` backdoor in
-   `useAuth.legacyLogin`. Rewiring that page to the new staff endpoints
-   and removing the backdoor is the next focused task.
+   `/admin` rewire (Task 1.6 follow-up — done): the page now uses
+   `useStaffAuth` (calls `/api/auth/staff/login|logout|whoami`) instead
+   of the old `useAuth.legacyLogin` hardcoded-password gate. The
+   hardcoded `Buy20sell26!!` value AND the `legacyLogin` helper were
+   deleted from `client/src/hooks/useAuth.tsx`. `AdminLogin.tsx` is now
+   an email + password form with proper error toasts (invalid /
+   account_locked / account_inactive / network), and the dashboard
+   header shows the signed-in staff name + role. Crucially, the same
+   pass added the **server-side** lock that was missing the whole time:
+   `/api/admin/collaborations` (GET + PATCH) and
+   `/api/admin/subscriptions` (GET) are now wrapped with
+   `requireStaff` + `requireStaffRole('owner','manager')`. Verified
+   E2E: unauth → 401 (was wide open before), owner cookie → 200,
+   cashier cookie → 403.
 
 ## External Dependencies
 
