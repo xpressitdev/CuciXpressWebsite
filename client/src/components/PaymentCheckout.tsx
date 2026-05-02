@@ -9,6 +9,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { Badge } from "@/components/ui/badge";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { CreditCard, Lock, ArrowLeft, User, UserPlus, History, CheckCircle } from "lucide-react";
+import { SiGoogle } from "react-icons/si";
 import { useToast } from "@/hooks/use-toast";
 import { useAuth, type User as AuthUser } from "@/hooks/useAuth";
 
@@ -24,7 +25,51 @@ interface PaymentCheckoutProps {
 
 export default function PaymentCheckout({ selectedService, onBack }: PaymentCheckoutProps) {
   const { toast } = useToast();
-  const { user, isAuthenticated, login, register, logout, isLoading } = useAuth();
+  const { user, isAuthenticated, login, register, logout, isLoading, checkAuthStatus } = useAuth();
+
+  // After a Google round-trip, the server redirects us back here with
+  // `?google_oauth=ok|cancelled|failed`. Pick that up, refresh the auth
+  // hook so the modal closes / form auto-fills, surface a toast, and
+  // strip the marker from the URL so a refresh doesn't re-trigger it.
+  useEffect(() => {
+    const params = new URLSearchParams(window.location.search);
+    const status = params.get('google_oauth');
+    if (!status) return;
+
+    if (status === 'ok') {
+      checkAuthStatus().then(() => {
+        setShowAuth(false);
+        toast({
+          title: 'Signed in with Google',
+          description: 'Your details are filled in — finish your booking below.',
+        });
+      });
+    } else if (status === 'cancelled') {
+      toast({
+        title: 'Sign-in cancelled',
+        description: 'You can try again or register with a username and password.',
+      });
+    } else {
+      toast({
+        title: 'Google sign-in failed',
+        description: 'Something went wrong. Please try again or use a username and password.',
+        variant: 'destructive',
+      });
+    }
+
+    params.delete('google_oauth');
+    const qs = params.toString();
+    const cleaned = window.location.pathname + (qs ? `?${qs}` : '') + window.location.hash;
+    window.history.replaceState(null, '', cleaned);
+  }, []); // eslint-disable-line react-hooks/exhaustive-deps
+
+  const handleGoogleSignIn = () => {
+    // Round-trip the user back to wherever they currently are. The
+    // server validates this strictly to prevent open-redirects.
+    const returnTo = window.location.pathname + window.location.search + window.location.hash;
+    window.location.href = `/api/auth/google?return_to=${encodeURIComponent(returnTo)}`;
+  };
+
   const [isProcessing, setIsProcessing] = useState(false);
   const [showAuth, setShowAuth] = useState(false);
   const [authMode, setAuthMode] = useState<'login' | 'register'>('login');
@@ -466,6 +511,26 @@ export default function PaymentCheckout({ selectedService, onBack }: PaymentChec
                   </CardTitle>
                 </CardHeader>
                 <CardContent className="space-y-4">
+                  <Button
+                    type="button"
+                    variant="outline"
+                    onClick={handleGoogleSignIn}
+                    className="w-full flex items-center justify-center gap-2"
+                    data-testid="button-google-signin"
+                  >
+                    <SiGoogle className="w-4 h-4" />
+                    Continue with Google
+                  </Button>
+                  <div className="relative">
+                    <div className="absolute inset-0 flex items-center">
+                      <span className="w-full border-t" />
+                    </div>
+                    <div className="relative flex justify-center text-xs uppercase">
+                      <span className="bg-background px-2 text-muted-foreground">
+                        Or continue with
+                      </span>
+                    </div>
+                  </div>
                   <Tabs value={authMode} onValueChange={(value) => setAuthMode(value as 'login' | 'register')}>
                     <TabsList className="grid w-full grid-cols-2">
                       <TabsTrigger value="login">Login</TabsTrigger>
