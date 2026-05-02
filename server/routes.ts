@@ -10,6 +10,7 @@ import { handleKedaiPOSWebhook, getOrderStatus, updateQueueStatus } from "./keda
 import { unifiedAuth } from "./unified-auth";
 import { lucia } from "./auth/lucia";
 import { requireLuciaUser } from "./auth/middleware";
+import { sendOtp, verifyOtp, OTP_CONSTANTS } from "./auth/otp";
 import { storage } from "./storage";
 import { eq, desc, sql } from "drizzle-orm";
 
@@ -1265,6 +1266,51 @@ export async function registerRoutes(app: Express): Promise<Server> {
     await lucia.invalidateSession(sid);
     const cookie = lucia.createBlankSessionCookie();
     res.appendHeader('Set-Cookie', cookie.serialize());
+    res.json({ ok: true });
+  });
+
+  // === OTP endpoints (Task 1.4 — dev-mocked WhatsApp / email codes) ===
+  // Same contract the Week-4 real WABA wrapper will satisfy. These do
+  // NOT mint a session on success — that wiring lands in Week 2/4. For
+  // now they are pure send/verify primitives the front-end can call.
+
+  const otpSendSchema = z.object({
+    identifier: z.string().min(1).max(200),
+    purpose: z.enum(OTP_CONSTANTS.ALLOWED_PURPOSES),
+  });
+  const otpVerifySchema = otpSendSchema.extend({
+    code: z.string().regex(/^\d{6}$/, "code must be 6 digits"),
+  });
+
+  app.post('/api/auth/otp/send', async (req, res) => {
+    const parsed = otpSendSchema.safeParse(req.body);
+    if (!parsed.success) {
+      return res.status(400).json({ ok: false, reason: 'invalid_request', errors: parsed.error.flatten() });
+    }
+    const ip = req.ip ?? null;
+    const result = await sendOtp({ ...parsed.data, ip });
+    if (!result.ok) {
+      return res.status(400).json(result);
+    }
+    res.json({
+      ok: true,
+      expiresAt: result.expiresAt,
+      ttlSeconds: OTP_CONSTANTS.TTL_SECONDS,
+    });
+  });
+
+  app.post('/api/auth/otp/verify', async (req, res) => {
+    const parsed = otpVerifySchema.safeParse(req.body);
+    if (!parsed.success) {
+      return res.status(400).json({ ok: false, reason: 'invalid_request', errors: parsed.error.flatten() });
+    }
+    const ip = req.ip ?? null;
+    const result = await verifyOtp({ ...parsed.data, ip });
+    if (!result.ok) {
+      // Reason-based status: rate-limit-ish failures are 429, the rest 400.
+      const status = result.reason === 'too_many_attempts' ? 429 : 400;
+      return res.status(status).json(result);
+    }
     res.json({ ok: true });
   });
 

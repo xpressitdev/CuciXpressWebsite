@@ -47,6 +47,18 @@ Two auth systems coexist by design during the Week 1–Week 2 cutover:
    (DEV-ONLY), `POST /api/auth/lucia/logout`. Full E2E verified.
    Lucia v3 is officially sunset; planned migration to oslojs after the
    Week-1..Week-5 plan ships.
+3. **OTP module — DEV-MOCKED** (`server/auth/otp.ts`) — pure send/verify
+   primitives backed by the `otp_codes` table. 6-digit codes hashed with
+   Lucia's Scrypt, 5-min TTL, 5-attempt cap, one-active-code-per-
+   `(identifier, purpose)` policy. Every send / verify / failure writes to
+   `audit_log` (never the code or hash). In dev the "send" step prints a
+   single `[otp] DEV-MOCK delivery …` log line and writes the code to
+   `/tmp/last_otp.json` for testing; in prod the same path throws fail-
+   loud so we don't silently drop a "delivered" code. The Week-4 WhatsApp
+   Business API integration only swaps the body of `deliverOtp()`. HTTP
+   surface: `POST /api/auth/otp/send` and `POST /api/auth/otp/verify`.
+   These primitives do NOT yet mint a Lucia session on success — that
+   wiring is a Week-2/4 task.
 
 ## External Dependencies
 
