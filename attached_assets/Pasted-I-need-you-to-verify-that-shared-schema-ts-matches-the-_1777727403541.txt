@@ -1,0 +1,115 @@
+I need you to verify that shared/schema.ts matches the actual database structure. This is a READ-ONLY inspection. Do NOT modify anything.
+Critical context — read these first
+Before doing anything else:
+
+Read MIGRATION_NOTES.md (project root) — explains why we DON'T use Drizzle migrations
+Read docs/SCHEMA_CHANGES.md — the procedure for any future schema changes
+Read shared/schema.ts — the current TypeScript schema definitions
+
+Key rules from those docs:
+
+DO NOT run npm run db:push (it's blocked anyway, but don't try to bypass)
+DO NOT run npx drizzle-kit generate, migrate, push, or introspect
+DO NOT modify shared/schema.ts in this task
+DO NOT make any database changes
+DO NOT install or upgrade any packages
+
+Your task
+Compare the actual database schema to what shared/schema.ts declares, table by table. The database has 9 tables that we know of:
+
+users
+cars
+branches
+achievements
+user_achievements
+collaboration_submissions
+subscription_signups
+service_history
+session
+
+For each table:
+
+Run: psql $DATABASE_URL -c "\d <tablename>"
+Read the corresponding table definition in shared/schema.ts
+Compare column-by-column:
+
+Column name (must match exactly)
+Type (note any varchar(N) vs text differences)
+Nullable (NOT NULL vs nullable)
+Default value
+Constraints (UNIQUE, etc.)
+Foreign keys
+
+
+Note any indexes that exist in DB
+
+How to categorize each finding
+For each mismatch you find, categorize it:
+🟢 COSMETIC — different but functionally equivalent
+
+Examples: text vs varchar(255), serial vs integer+sequence, defaultNow() vs CURRENT_TIMESTAMP
+These have no impact on app behavior
+
+🟡 FUNCTIONAL — different in a way that affects behavior but doesn't break anything
+
+Examples: DB has NOT NULL but schema.ts has nullable, missing index in schema.ts
+These work today but should be cleaned up eventually
+
+🔴 CRITICAL — actively broken or risky
+
+Examples: column referenced in schema.ts but missing from DB, type mismatch causing data corruption, missing FK that should exist
+These need immediate attention
+
+What to report
+Create a new file: docs/SCHEMA_VERIFICATION.md with:
+markdown# Schema Verification Report
+
+**Date:** [today's date]
+**Method:** psql \d compared to shared/schema.ts
+**Result:** [overall summary]
+
+## Table-by-table findings
+
+### users
+- Total columns in DB: X
+- Total columns in schema.ts: Y
+- Findings:
+  - 🟢 [list each cosmetic difference]
+  - 🟡 [list each functional difference]
+  - 🔴 [list each critical difference]
+- Verdict: [✅ functionally compatible / ⚠️ needs attention / 🔴 broken]
+
+### cars
+... [same structure]
+
+[... all 9 tables ...]
+
+## Summary
+
+- Total findings: X cosmetic, Y functional, Z critical
+- Apps currently working: [yes/no based on findings]
+- Recommended action: [defer cleanup to Week 1 / fix immediately / further investigation]
+If you find anything CRITICAL
+STOP. Do not continue verification. Report back to me with:
+
+Which table
+Which column
+What's actually in DB vs what schema.ts says
+Why this is critical
+What you would suggest doing (but DO NOT do it)
+
+When you finish
+Report back with:
+
+The full path to the SCHEMA_VERIFICATION.md you created
+A one-line summary of the overall result
+Total count of cosmetic / functional / critical findings
+Whether you encountered any errors during verification
+
+DO NOT commit the new file — leave it for me to review and commit manually.
+Reminders
+
+Read-only operation, no DB changes
+No package changes, no schema.ts changes
+No automatic fixes — report findings, don't fix them
+Stop and ask if anything is unclear or alarming
