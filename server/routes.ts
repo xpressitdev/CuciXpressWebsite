@@ -9,8 +9,10 @@ import { kedaiPOSIntegration } from "./kedaipos-integration";
 import { handleKedaiPOSWebhook, getOrderStatus, updateQueueStatus } from "./kedaipos-webhooks";
 import { unifiedAuth } from "./unified-auth";
 import { lucia } from "./auth/lucia";
-import { requireLuciaUser } from "./auth/middleware";
+import { staffLucia } from "./auth/staffLucia";
+import { requireLuciaUser, requireStaff } from "./auth/middleware";
 import { sendOtp, verifyOtp, OTP_CONSTANTS } from "./auth/otp";
+import { loginStaff } from "./auth/staff";
 import {
   loadGoogleOAuthConfig,
   buildGoogleClient,
@@ -1459,6 +1461,71 @@ export async function registerRoutes(app: Express): Promise<Server> {
       res.status(503).json({ ok: false, error: 'google_oauth_not_configured' });
     });
   }
+
+  // === Staff password auth (Task 1.6) ===
+  // Independent of customer auth. Uses its own Lucia instance + cookie
+  // (`cx_staff_session`), so a person can be signed in as both a
+  // customer and a staff member on the same browser without conflict.
+
+  // POST /api/auth/staff/login — body: { email, password }
+  app.post('/api/auth/staff/login', async (req, res) => {
+    const { email, password } = req.body ?? {};
+    if (typeof email !== 'string' || typeof password !== 'string') {
+      return res.status(400).json({ ok: false, error: 'email_and_password_required' });
+    }
+
+    const outcome = await loginStaff(email, password, req.ip ?? null);
+    if (!outcome.ok) {
+      const status = outcome.error === 'account_locked' ? 423 : 401;
+      return res.status(status).json({
+        ok: false,
+        error: outcome.error,
+        retryAfterSeconds: outcome.retryAfterSeconds,
+      });
+    }
+
+    const session = await staffLucia.createSession(outcome.staff.id, {});
+    const cookie = staffLucia.createSessionCookie(session.id);
+    res.appendHeader('Set-Cookie', cookie.serialize());
+
+    res.json({
+      ok: true,
+      staff: {
+        id: outcome.staff.id,
+        email: outcome.staff.email,
+        name: outcome.staff.name,
+        role: outcome.staff.role,
+        branchId: outcome.staff.branchId,
+      },
+    });
+  });
+
+  // POST /api/auth/staff/logout — invalidate the staff session.
+  app.post('/api/auth/staff/logout', requireStaff, async (req, res) => {
+    const sid = req.staff!.session!.id;
+    await staffLucia.invalidateSession(sid);
+    const cookie = staffLucia.createBlankSessionCookie();
+    res.appendHeader('Set-Cookie', cookie.serialize());
+    res.json({ ok: true });
+  });
+
+  // GET /api/auth/staff/whoami — returns current staff session info or
+  // { authenticated: false }. Never 401s, so the frontend can poll it
+  // freely on page load.
+  app.get('/api/auth/staff/whoami', (req, res) => {
+    const user = req.staff?.user;
+    if (!user) return res.json({ authenticated: false });
+    res.json({
+      authenticated: true,
+      staff: {
+        id: user.id,
+        email: (user as any).email,
+        name: (user as any).name,
+        role: (user as any).role,
+        branchId: (user as any).branchId,
+      },
+    });
+  });
 
   // === KedaiPOS Integration Endpoints ===
 

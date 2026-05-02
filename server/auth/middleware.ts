@@ -13,11 +13,16 @@
 import type { Request, Response, NextFunction } from "express";
 import type { Session, User } from "lucia";
 import { lucia } from "./lucia";
+import { staffLucia } from "./staffLucia";
 
 declare global {
   namespace Express {
     interface Request {
       lucia?: { user: User; session: Session } | { user: null; session: null };
+      /** Staff Lucia session (Task 1.6). Independent of `req.lucia` — a
+       *  request can be authenticated as both a customer AND a staff
+       *  member at once, with two different cookies. */
+      staff?: { user: User; session: Session } | { user: null; session: null };
     }
   }
 }
@@ -67,4 +72,67 @@ export function requireLuciaUser(
     return res.status(401).json({ error: "Not authenticated" });
   }
   next();
+}
+
+// ---- Staff session middleware (Task 1.6) -------------------
+
+export async function attachStaffSession(
+  req: Request,
+  res: Response,
+  next: NextFunction
+) {
+  const sessionId = staffLucia.readSessionCookie(req.headers.cookie ?? "");
+  if (!sessionId) {
+    req.staff = { user: null, session: null };
+    return next();
+  }
+
+  try {
+    const result = await staffLucia.validateSession(sessionId);
+
+    if (result.session && result.session.fresh) {
+      const cookie = staffLucia.createSessionCookie(result.session.id);
+      res.appendHeader("Set-Cookie", cookie.serialize());
+    }
+    if (!result.session) {
+      const cookie = staffLucia.createBlankSessionCookie();
+      res.appendHeader("Set-Cookie", cookie.serialize());
+    }
+
+    req.staff = result;
+  } catch (err) {
+    console.error("[staff-lucia] session validation failed:", err);
+    req.staff = { user: null, session: null };
+  }
+
+  next();
+}
+
+export function requireStaff(
+  req: Request,
+  res: Response,
+  next: NextFunction
+) {
+  if (!req.staff || !req.staff.user) {
+    return res.status(401).json({ error: "Staff authentication required" });
+  }
+  next();
+}
+
+/**
+ * Stricter gate that requires the staff member to have one of the
+ * allowed roles. Use for owner/manager-only endpoints.
+ */
+export function requireStaffRole(...allowed: Array<"owner" | "manager" | "lane" | "cashier">) {
+  return (req: Request, res: Response, next: NextFunction) => {
+    const user = req.staff?.user;
+    if (!user) {
+      return res.status(401).json({ error: "Staff authentication required" });
+    }
+    const role = (user as any).role as string | undefined;
+    if (!role || !allowed.includes(role as any)) {
+      return res.status(403).json({ error: "Insufficient role" });
+    }
+    next();
+  };
 }

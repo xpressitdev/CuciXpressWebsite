@@ -61,12 +61,13 @@ Two auth systems coexist by design during the Week 1–Week 2 cutover:
    wiring is a Week-2/4 task.
 4. **Google OAuth via Arctic** (`server/auth/google.ts`) — Authorization-
    Code flow with PKCE. Routes: `GET /api/auth/google` (starts the flow,
-   sets `google_oauth_state` + `google_oauth_code_verifier` HttpOnly
-   cookies, 302s to Google) and `GET <callbackPath>` where `callbackPath`
-   is parsed from `GOOGLE_REDIRECT_URI` so it always matches what's
-   registered in Google Cloud Console. The callback verifies state (CSRF),
-   exchanges the code, decodes the id_token (no JWKS verification yet —
-   Week-2/3 hardening), then runs find-or-create:
+   sets `google_oauth_state` + `google_oauth_code_verifier` +
+   `google_oauth_return_to` HttpOnly cookies, 302s to Google) and
+   `GET <callbackPath>` where `callbackPath` is parsed from
+   `GOOGLE_REDIRECT_URI` so it always matches what's registered in
+   Google Cloud Console. The callback verifies state (CSRF), exchanges
+   the code, decodes the id_token (no JWKS verification yet — Week-2/3
+   hardening), then runs find-or-create:
      - Match by `users.google_id` → log in.
      - Else if `email_verified=true` and email matches an existing user
        → LINK (set google_id) and log in.
@@ -77,11 +78,56 @@ Two auth systems coexist by design during the Week 1–Week 2 cutover:
        in a profile.
      - Unverified Google emails are REJECTED (never linked) to prevent
        account-takeover via gmail-forwarding tricks.
-   On success, mints a Lucia `cx_session` cookie and 302s to
-   `/?google_oauth=ok`. Every start / success / failure writes to
-   `audit_log`. Boot-time `loadGoogleOAuthConfig()` validates the three
-   env vars together — partial config refuses to boot. If no Google env
-   vars are set at all, the route returns 503 instead.
+   On success, mints BOTH the new Lucia `cx_session` cookie AND the
+   legacy `cuci_auth_token` JWT cookie — the latter bridges the existing
+   `useAuth` hook so checkout/CRM/admin flows recognise the Google user
+   without any frontend rewiring. Then 302s to a same-origin path with
+   `?google_oauth=ok` appended (taken from the validated `return_to`
+   cookie if set, else `/`). `isSafeReturnTo` strictly rejects
+   `//evil.com`, `https://evil.com`, protocol-relative URLs, control
+   chars, and paths > 256 chars. Every start / success / failure writes
+   to `audit_log` with the resolved `returnTo` in metadata. UI surface:
+   a "Continue with Google" button at the top of the Pay&Que Secure
+   Checkout `Login / Register` modal (`PaymentCheckout.tsx`); on return
+   the modal auto-closes, fires a toast, and strips the marker from the
+   URL. Boot-time `loadGoogleOAuthConfig()` validates the three env
+   vars together — partial config refuses to boot. If no Google env
+   vars are set at all, the route returns 503 instead. Production
+   prereq: `app.set("trust proxy", 1)` is set in `server/index.ts` so
+   `secure: true` cookies stick behind Replit's HTTPS reverse proxy and
+   `req.ip` records real client IPs in `audit_log`.
+
+5. **Staff password auth** (`server/auth/staff.ts`,
+   `server/auth/staffLucia.ts`) — Task 1.6. A SECOND Lucia instance
+   (`staffLucia`, cookie `cx_staff_session`, 12h TTL) backed by its own
+   `StaffSessionAdapter` scoped to `auth_sessions.user_type='staff'`
+   and joined against the `staff` table. Independent of customer auth,
+   so a person can be signed in as both a customer (personal account)
+   and a staff member (POS terminal) on the same browser without one
+   kicking the other out. `loginStaff()` is the single entry point:
+   constant-time hash compare even on unknown emails (no email-
+   enumeration via timing), in-memory lockout (5 failed attempts in
+   15 min → 423 Locked, even a correct password during the lockout
+   window is rejected), inactive accounts return `account_inactive`
+   without consuming attempts. `MIN_PASSWORD_LENGTH=12`. HTTP surface:
+   `POST /api/auth/staff/login`, `POST /api/auth/staff/logout`,
+   `GET /api/auth/staff/whoami`. Middleware: `attachStaffSession` runs
+   globally (sets `req.staff`); `requireStaff` and
+   `requireStaffRole(...roles)` gate endpoints. CLI seeder for the
+   first owner: `STAFF_SEED_PASSWORD='...' tsx scripts/seed-staff.ts
+   <email> <name> <role> [branch_id]` (roles:
+   owner|manager|lane|cashier; password from env so it doesn't land in
+   shell history). Every create/login_success/login_failed/login_locked/
+   login_inactive/logout writes to `audit_log` (entity_type='staff';
+   actor_type='staff' on success, 'system' on failure). E2E verified:
+   happy login, wrong-password, 5-attempt lockout, locked-state rejects
+   correct password, logout invalidates session. Orphan packages
+   `passport` and `passport-local` removed in the same pass (never used).
+
+   NOT yet wired: the `/admin` page (`client/src/pages/admin.tsx`) still
+   uses the legacy hardcoded `Buy20sell26!!` backdoor in
+   `useAuth.legacyLogin`. Rewiring that page to the new staff endpoints
+   and removing the backdoor is the next focused task.
 
 ## External Dependencies
 

@@ -3,7 +3,7 @@ import cookieParser from "cookie-parser";
 import { registerRoutes } from "./routes";
 import { setupVite, serveStatic, log } from "./vite";
 import { requireJwtSecret } from "./unified-auth";
-import { attachLuciaSession } from "./auth/middleware";
+import { attachLuciaSession, attachStaffSession } from "./auth/middleware";
 import { loadGoogleOAuthConfig } from "./auth/google";
 
 // Fail-fast on missing or weak JWT_SECRET. Refuse to boot rather than
@@ -40,6 +40,7 @@ app.use(express.urlencoded({ extended: false }));
 // `requireLuciaUser` from server/auth/middleware.ts. Coexists with the
 // legacy JWT `req.user` set by unified-auth. See server/auth/lucia.ts.
 app.use(attachLuciaSession);
+app.use(attachStaffSession);
 
 app.use((req, res, next) => {
   const start = Date.now();
