@@ -1,44 +1,73 @@
-# Migration Notes — IMPORTANT
+Database Migration Strategy
+Last updated: 2026-05-02
+Status: Authoritative — read before any database schema work
 
-**Date:** 2026-05-02
-**Author:** Hakem (with Claude assistance)
+TL;DR
+We do NOT use Drizzle's migration tooling. We use Drizzle ONLY as a query builder. Schema changes are made via raw SQL files that are reviewed and applied manually.
+See docs/SCHEMA_CHANGES.md for the exact workflow.
 
-## ⚠️ DO NOT RUN db:push OR drizzle-kit generate WITHOUT READING THIS
+⚠️ FORBIDDEN COMMANDS
+These commands have been blocked in package.json and must NEVER be run:
 
-The database for this project (CucumberShowcase / cucixpress.com) was
-consolidated with CuciXpressLiveQue's database on 2026-05-02. Both apps
-now share the same Neon database via DATABASE_URL.
+npm run db:push
+npx drizzle-kit push
+npx drizzle-kit generate
+npx drizzle-kit migrate
+npx drizzle-kit introspect
 
-The shared/schema.ts file was manually aligned with the existing database
-schema. The database already contains all tables defined in the schema —
-no further migration is needed.
+If you bypass the npm script blocks and run npx drizzle-kit ... directly, stop. Read this document. The same logic applies.
 
-## Why running db:push or drizzle-kit generate could be dangerous
+Why we don't use Drizzle migrations
+The CucumberShowcase database (cucixpress.com) was consolidated with the CuciXpressLiveQue database on 2026-05-02. Both apps now share one Neon database.
+The database has 9 tables and 508+ real customers. Drizzle's migration system does NOT have a baseline of this database state. Every time drizzle-kit generate runs, it produces a "fresh database" migration with CREATE TABLE statements (no IF NOT EXISTS) that would error against the existing database.
+Establishing a proper Drizzle baseline requires drizzle-kit introspect, which requires a drizzle-orm version upgrade (currently 0.39.3, needs 0.40.0+). That upgrade introduces dependency risk we've decided not to take.
+Instead, we treat Drizzle as a typed query builder (which it does excellently) and handle schema changes ourselves with plain SQL.
 
-- The database has 508 users, 559 cars, 5 branches, and historical data
-- Drizzle's migrations folder has no baseline of LiveQue's schema history
-- Running `drizzle-kit generate` may produce a "fresh database" migration
-  that tries to CREATE tables that already exist (would fail)
-- Running `db:push` may try to ALTER or DROP existing tables that don't
-  exactly match expectations
+What Drizzle IS used for
 
-## The right approach (TODO for next session)
+Type-safe queries: db.select().from(users).where(eq(users.id, id))
+Type-safe inserts: db.insert(table).values(data).returning()
+TypeScript schema definitions in shared/schema.ts
+Zod schema validation via drizzle-zod
 
-1. Run `npx drizzle-kit introspect` to establish a baseline migration
-   FROM the existing database state
-2. Or use `drizzle-kit generate --custom` for fine-grained control
-3. Verify any generated SQL is non-destructive BEFORE applying
+These all work fine without the migration system.
 
-## Backups (located in project root, also downloaded to laptop)
+What to do when the schema needs to change
+See docs/SCHEMA_CHANGES.md for the full step-by-step procedure.
+Quick summary:
 
-- backup_pre_week1.sql  — earliest snapshot
-- backup_liveque_pre_consolidation.sql  — pre-DATABASE_URL flip
-- backup_pre_schema_fix_*.sql  — pre-schema.ts replacement
+Edit shared/schema.ts (the TypeScript types)
+Write the actual SQL change in migrations/manual/YYYY-MM-DD_description.sql
+Test on a fresh backup database
+Apply to production: psql $DATABASE_URL -f migrations/manual/...
+Commit both files together
 
-## Recovery procedure if something goes wrong
 
-1. Identify which backup represents the desired state
-2. Drop the affected database (or create a new one)
-3. Restore: psql NEW_DATABASE_URL < backup_file.sql
-4. Update DATABASE_URL secret to new database
-5. Restart app
+Recovery procedure if things go wrong
+Backups are downloaded to your laptop:
+
+backup_pre_week1.sql — original CucumberShowcase backup
+backup_liveque_pre_consolidation.sql — pre-database-flip backup
+backup_pre_schema_fix_*.sql — pre-schema.ts replacement
+backup_pre_introspect_*.sql — pre-failed-introspect-attempt
+backup_pre_baseline_fix_*.sql — pre-Option-C-decision
+
+Restore procedure:
+
+Identify which backup represents the desired state
+Provision a new Neon database (or wipe affected one)
+Restore: psql NEW_DATABASE_URL < backup_file.sql
+Update DATABASE_URL secret in Replit projects
+Restart apps
+
+
+History — how we got here
+
+Pre-2026-05-02: CucumberShowcase had its own (mostly empty) Neon database
+2026-05-02 morning: Database consolidation — DATABASE_URL flipped to LiveQue's database
+2026-05-02 afternoon: shared/schema.ts updated to mirror LiveQue's actual schema
+2026-05-02 evening: Attempted drizzle-kit generate — produced dangerous CREATE TABLE migration (no IF NOT EXISTS)
+2026-05-02 evening: Deleted dangerous migration, documented the issue
+2026-05-03 morning: Attempted drizzle-kit introspect — failed due to drizzle-orm@0.39.3 missing gel-core export
+2026-05-03 morning: Re-ran drizzle-kit generate — produced the same dangerous output, confirming the underlying tooling problem
+2026-05-03 morning: Decided to abandon Drizzle migrations entirely (this document)
