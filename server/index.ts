@@ -2,6 +2,11 @@ import express, { type Request, Response, NextFunction } from "express";
 import cookieParser from "cookie-parser";
 import { registerRoutes } from "./routes";
 import { setupVite, serveStatic, log } from "./vite";
+import { requireJwtSecret } from "./unified-auth";
+
+// Fail-fast on missing or weak JWT_SECRET. Refuse to boot rather than
+// silently fall back to a hardcoded value. See docs/AUTH_AUDIT.md.
+requireJwtSecret();
 
 const app = express();
 app.use(cookieParser()); // Add cookie parsing middleware

@@ -1,7 +1,6 @@
 import type { Express } from "express";
 import { createServer, type Server } from "http";
 import { z } from "zod";
-import jwt from "jsonwebtoken";
 import { db } from "./db";
 import { collaborationSubmissions, insertCollaborationSubmissionSchema, subscriptionSignups, insertSubscriptionSignupSchema } from "@shared/schema";
 import { sendCollaborationEmail, sendPaymentConfirmation, sendSubscriptionNotification } from "./email";
@@ -1284,153 +1283,12 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
-  // Customer Authentication API - uses shared database with CuciXpressLiveQue app
-  app.post('/api/auth/register', async (req, res) => {
-    try {
-      const { email, password, first_name, last_name, phone_number, address } = req.body;
-      
-      // Check if user already exists
-      const existingUser = await storage.getUserByEmail(email);
-      if (existingUser) {
-        return res.json({ success: false, error: 'Email already registered' });
-      }
-
-      // Create user
-      const newUser = await storage.createUser({
-        first_name: first_name || 'Guest',
-        last_name: last_name || 'User',
-        email,
-        password, // In production, hash this password
-        phone_number: phone_number || '',
-        address: address || ''
-      });
-
-      // Create JWT token
-      const token = jwt.sign(
-        { userId: newUser.id, email: newUser.email },
-        process.env.JWT_SECRET || 'dev-secret',
-        { expiresIn: '7d' }
-      );
-
-      // Set cookie
-      res.cookie('auth_token', token, {
-        httpOnly: true,
-        secure: process.env.NODE_ENV === 'production',
-        sameSite: 'lax',
-        maxAge: 7 * 24 * 60 * 60 * 1000 // 7 days
-      });
-
-      res.json({ 
-        success: true, 
-        user: { 
-          id: newUser.id, 
-          name: `${newUser.first_name} ${newUser.last_name}`,
-          email: newUser.email,
-          is_admin: newUser.is_admin,
-          points: newUser.points,
-          level: newUser.level
-        } 
-      });
-    } catch (error) {
-      console.error('Registration error:', error);
-      res.json({ success: false, error: 'Failed to create account' });
-    }
-  });
-
-  app.post('/api/auth/login', async (req, res) => {
-    try {
-      const { email, password } = req.body;
-      
-      const user = await storage.getUserByEmail(email);
-      if (!user || user.password !== password) { // In production, compare hashed passwords
-        return res.json({ success: false, error: 'Invalid email or password' });
-      }
-
-      // Create JWT token
-      const token = jwt.sign(
-        { userId: user.id, email: user.email },
-        process.env.JWT_SECRET || 'dev-secret',
-        { expiresIn: '7d' }
-      );
-
-      // Set cookie
-      res.cookie('auth_token', token, {
-        httpOnly: true,
-        secure: process.env.NODE_ENV === 'production',
-        sameSite: 'lax',
-        maxAge: 7 * 24 * 60 * 60 * 1000 // 7 days
-      });
-
-      res.json({ 
-        success: true, 
-        user: { 
-          id: user.id, 
-          name: `${user.first_name} ${user.last_name}`,
-          email: user.email,
-          is_admin: user.is_admin,
-          points: user.points,
-          level: user.level
-        } 
-      });
-    } catch (error) {
-      console.error('Login error:', error);
-      res.json({ success: false, error: 'Login failed' });
-    }
-  });
-
-  app.get('/api/auth/me', async (req, res) => {
-    try {
-      const token = req.cookies.auth_token;
-      if (!token) {
-        return res.status(401).json({ error: 'Authentication required', login_url: '/login' });
-      }
-
-      const decoded = jwt.verify(token, process.env.JWT_SECRET || 'dev-secret') as any;
-      const user = await storage.getUser(decoded.userId);
-      
-      if (!user) {
-        return res.status(401).json({ error: 'User not found' });
-      }
-
-      // Fetch user's car from the cars table
-      let carPlate = '';
-      try {
-        const carResult = await db.execute(
-          sql`SELECT license_plate FROM cars WHERE user_id = ${user.id} LIMIT 1`
-        );
-        if (carResult.rows && carResult.rows.length > 0) {
-          carPlate = (carResult.rows[0] as any).license_plate || '';
-        }
-      } catch (err) {
-        console.log('Could not fetch car info:', err);
-      }
-
-      res.json({ 
-        user: { 
-          id: user.id, 
-          name: `${user.first_name} ${user.last_name}`,
-          email: user.email,
-          is_admin: user.is_admin,
-          points: user.points,
-          level: user.level,
-          phone_number: user.phone_number,
-          car_plate: carPlate,
-          profile_data: {
-            carPlate: carPlate,
-            phone: user.phone_number
-          }
-        } 
-      });
-    } catch (error) {
-      console.error('Auth check error:', error);
-      res.status(401).json({ error: 'Invalid token' });
-    }
-  });
-
-  app.post('/api/auth/logout', (req, res) => {
-    res.clearCookie('auth_token');
-    res.json({ success: true });
-  });
+  // NOTE: Duplicate auth routes (register/login/me/logout writing to the
+  // 'auth_token' cookie) were removed 2026-05-02. They were dead code —
+  // Express keeps the first registration of any path, so the active set
+  // at lines ~1034-1185 (using unifiedAuth + 'cuci_auth_token') always
+  // won. They also each contained a hardcoded JWT_SECRET fallback.
+  // See docs/AUTH_AUDIT.md (sections 1, 2, and "Findings beyond scope").
 
   // Customer service history endpoint - real database query
   app.get('/api/customer/history/:carPlate?', async (req, res) => {

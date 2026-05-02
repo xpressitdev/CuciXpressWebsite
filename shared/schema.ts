@@ -51,6 +51,7 @@ import {
   text,
   serial,
   integer,
+  bigserial,
   boolean,
   timestamp,
   jsonb,
@@ -258,3 +259,171 @@ export type Achievement = typeof achievements.$inferSelect;
 export type InsertAchievement = z.infer<typeof insertAchievementSchema>;
 export type UserAchievement = typeof userAchievements.$inferSelect;
 export type InsertUserAchievement = z.infer<typeof insertUserAchievementSchema>;
+
+// ============================================================
+// AUTH + POS PREREQS — added 2026-05-02
+// Migration: migrations/manual/2026-05-02_01_auth_and_pos_prereqs.sql
+// ============================================================
+
+// --- Staff (POS / CRM operators) -----------------------------
+export const staff = pgTable("staff", {
+  id: text("id").primaryKey(),
+  email: text("email").notNull().unique(),
+  name: text("name").notNull(),
+  role: text("role").notNull(), // 'owner' | 'manager' | 'lane' | 'cashier'
+  branch_id: integer("branch_id").references(() => branches.id),
+  password_hash: text("password_hash"),
+  is_active: boolean("is_active").default(true).notNull(),
+  created_at: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
+});
+
+export const insertStaffSchema = createInsertSchema(staff).omit({
+  created_at: true,
+});
+export type Staff = typeof staff.$inferSelect;
+export type InsertStaff = z.infer<typeof insertStaffSchema>;
+
+// --- Auth sessions (Lucia v3) --------------------------------
+// Distinct from the legacy 'session' table owned by connect-pg-simple
+// in LiveQue. Do not unify.
+export const authSessions = pgTable("auth_sessions", {
+  id: text("id").primaryKey(),
+  user_id: text("user_id").notNull(),
+  user_type: text("user_type").notNull(), // 'customer' | 'staff'
+  expires_at: timestamp("expires_at", { withTimezone: true }).notNull(),
+  ip: text("ip"),
+  user_agent: text("user_agent"),
+  created_at: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
+});
+
+export const insertAuthSessionSchema = createInsertSchema(authSessions).omit({
+  created_at: true,
+});
+export type AuthSession = typeof authSessions.$inferSelect;
+export type InsertAuthSession = z.infer<typeof insertAuthSessionSchema>;
+
+// --- OTP codes -----------------------------------------------
+export const otpCodes = pgTable("otp_codes", {
+  id: text("id").primaryKey(),
+  identifier: text("identifier").notNull(), // phone or email
+  code_hash: text("code_hash").notNull(),   // never plaintext
+  purpose: text("purpose").notNull(),       // 'login' | 'verify_phone' | 'verify_email'
+  expires_at: timestamp("expires_at", { withTimezone: true }).notNull(),
+  consumed_at: timestamp("consumed_at", { withTimezone: true }),
+  attempts: integer("attempts").default(0).notNull(),
+  created_at: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
+});
+
+export const insertOtpCodeSchema = createInsertSchema(otpCodes).omit({
+  consumed_at: true,
+  attempts: true,
+  created_at: true,
+});
+export type OtpCode = typeof otpCodes.$inferSelect;
+export type InsertOtpCode = z.infer<typeof insertOtpCodeSchema>;
+
+// --- Audit log -----------------------------------------------
+export const auditLog = pgTable("audit_log", {
+  id: bigserial("id", { mode: "number" }).primaryKey(),
+  actor_id: text("actor_id"),
+  actor_type: text("actor_type"), // 'customer' | 'staff' | 'system'
+  action: text("action").notNull(),
+  entity_type: text("entity_type"),
+  entity_id: text("entity_id"),
+  metadata: jsonb("metadata").default({}).notNull(),
+  ip: text("ip"),
+  created_at: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
+});
+
+export const insertAuditLogSchema = createInsertSchema(auditLog).omit({
+  id: true,
+  created_at: true,
+});
+export type AuditLog = typeof auditLog.$inferSelect;
+export type InsertAuditLog = z.infer<typeof insertAuditLogSchema>;
+
+// --- Lanes (per-branch wash lanes) ---------------------------
+export const lanes = pgTable("lanes", {
+  id: text("id").primaryKey(),
+  branch_id: integer("branch_id").references(() => branches.id).notNull(),
+  name: text("name").notNull(),
+  position: integer("position").default(0).notNull(),
+  is_active: boolean("is_active").default(true).notNull(),
+});
+
+export const insertLaneSchema = createInsertSchema(lanes);
+export type Lane = typeof lanes.$inferSelect;
+export type InsertLane = z.infer<typeof insertLaneSchema>;
+
+// --- Addons catalog (POS upsells) ----------------------------
+export const addonsCatalog = pgTable("addons_catalog", {
+  id: text("id").primaryKey(),
+  name: text("name").notNull(),
+  price_cents: integer("price_cents").notNull(),
+  sort_order: integer("sort_order").default(0).notNull(),
+  is_active: boolean("is_active").default(true).notNull(),
+});
+
+export const insertAddonCatalogSchema = createInsertSchema(addonsCatalog);
+export type AddonCatalog = typeof addonsCatalog.$inferSelect;
+export type InsertAddonCatalog = z.infer<typeof insertAddonCatalogSchema>;
+
+// --- Orders (POS transactions) -------------------------------
+// addons: jsonb array of { id: string, name: string, price_cents: number }
+// payment_method: 'cash' | 'card' | 'qr' | 'subscription' | 'voucher'
+// status: 'paid' | 'queued' | 'washing' | 'done' | 'voided'
+export type OrderAddonSnapshot = {
+  id: string;
+  name: string;
+  price_cents: number;
+};
+
+export const orders = pgTable("orders", {
+  id: text("id").primaryKey(),
+  branch_id: integer("branch_id").references(() => branches.id).notNull(),
+  lane_id: text("lane_id").references(() => lanes.id),
+  customer_id: integer("customer_id").references(() => users.id),
+  staff_id: text("staff_id").references(() => staff.id),
+  plate: text("plate").notNull(),
+  package_id: text("package_id"),
+  package_name: text("package_name").notNull(),
+  package_price_cents: integer("package_price_cents").notNull(),
+  addons: jsonb("addons").$type<OrderAddonSnapshot[]>().default([]).notNull(),
+  subtotal_cents: integer("subtotal_cents").notNull(),
+  total_cents: integer("total_cents").notNull(),
+  payment_method: text("payment_method").notNull(),
+  payment_ref: text("payment_ref"),
+  ticket_code: text("ticket_code").notNull(),
+  status: text("status").default("paid").notNull(),
+  created_at: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
+  completed_at: timestamp("completed_at", { withTimezone: true }),
+});
+
+export const insertOrderSchema = createInsertSchema(orders).omit({
+  created_at: true,
+  completed_at: true,
+});
+export type Order = typeof orders.$inferSelect;
+export type InsertOrder = z.infer<typeof insertOrderSchema>;
+
+// --- Subscriptions (membership state) ------------------------
+export const subscriptions = pgTable("subscriptions", {
+  id: text("id").primaryKey(),
+  customer_id: integer("customer_id").references(() => users.id).notNull(),
+  tier: text("tier").notNull(), // 'unlimited' | 'family' | 'corporate'
+  price_cents: integer("price_cents").notNull(),
+  status: text("status").default("active").notNull(),
+  current_period_start: timestamp("current_period_start", { withTimezone: true }).defaultNow().notNull(),
+  current_period_end: timestamp("current_period_end", { withTimezone: true }).notNull(),
+  washes_used_this_cycle: integer("washes_used_this_cycle").default(0).notNull(),
+  cancelled_at: timestamp("cancelled_at", { withTimezone: true }),
+  created_at: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
+});
+
+export const insertSubscriptionSchema = createInsertSchema(subscriptions).omit({
+  created_at: true,
+  cancelled_at: true,
+  washes_used_this_cycle: true,
+});
+export type Subscription = typeof subscriptions.$inferSelect;
+export type InsertSubscription = z.infer<typeof insertSubscriptionSchema>;

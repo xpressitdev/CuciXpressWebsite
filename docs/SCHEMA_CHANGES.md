@@ -170,3 +170,24 @@ Ask a developer
 Test on a backup
 Take more backups than you think you need
 Wait until tomorrow if you're unsure
+
+---
+
+## Applied migrations log
+
+Append-only. Newest at the top.
+
+### 2026-05-02 — `migrations/manual/2026-05-02_01_auth_and_pos_prereqs.sql`
+**Author:** agent (Week 1 plan execution)
+**Summary:** Adds 8 new tables required for Lucia v3 auth and the POS surface
+in a single forward-only migration. Tables: `staff`, `auth_sessions`,
+`otp_codes`, `audit_log`, `lanes`, `addons_catalog`, `orders`, `subscriptions`.
+Zero changes to the existing 9 tables. All FKs into existing tables use
+`integer` to match `branches.id` and `users.id` (verified in
+`docs/SCHEMA_VERIFICATION.md`). New tables use `text` PKs for
+nanoid-style external IDs.
+**Status:** Authored, awaiting manual `psql` apply.
+**Rollback:** Forward-only. To undo, write a new migration that drops the
+8 tables in dependency order: `subscriptions`, `orders`, `addons_catalog`,
+`lanes`, `audit_log`, `otp_codes`, `auth_sessions`, `staff`. Verify each
+`DROP` against then-current foreign-key references first.

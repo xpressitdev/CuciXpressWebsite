@@ -11,13 +11,33 @@ declare global {
   }
 }
 
+/**
+ * Returns the JWT signing secret from the environment.
+ * Throws if missing or weak — the app must refuse to boot rather than
+ * silently fall back to a hardcoded value that anyone reading the source
+ * could use to forge tokens.
+ *
+ * Call this at startup (in server/index.ts) for fail-fast behaviour, and
+ * everywhere a JWT is signed or verified.
+ */
+export function requireJwtSecret(): string {
+  const s = process.env.JWT_SECRET;
+  if (!s || s.length < 32) {
+    throw new Error(
+      'JWT_SECRET is required and must be at least 32 characters. ' +
+      'Set it in Replit Secrets before booting.'
+    );
+  }
+  return s;
+}
+
 // Unified Authentication System for Multiple Domains
 export class UnifiedAuth {
   private jwtSecret: string;
   private allowedDomains: string[];
 
   constructor() {
-    this.jwtSecret = process.env.JWT_SECRET || 'cuci-xpress-unified-secret-key-2025';
+    this.jwtSecret = requireJwtSecret();
     this.allowedDomains = [
       'cucixpress.com',
       'cuci-xpress.com', 
@@ -134,10 +154,10 @@ export class UnifiedAuth {
         return { success: false, error: 'User not found' };
       }
 
-      // Check password - support both regular password and admin password
-      const isValidPassword = user.password === password || password === 'Buy20sell26!!';
-      
-      if (!isValidPassword) {
+      // Check password (plaintext compare — to be replaced with hashed
+      // verification in the Lucia v3 cutover; tracked in docs/AUTH_AUDIT.md
+      // finding #2). The previous master-password backdoor was removed.
+      if (user.password !== password) {
         return { success: false, error: 'Invalid password' };
       }
 
