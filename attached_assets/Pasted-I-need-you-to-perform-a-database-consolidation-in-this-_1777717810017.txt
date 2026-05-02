@@ -1,0 +1,63 @@
+I need you to perform a database consolidation in this project. We are pointing CucumberShowcase at the same database that CuciXpressLiveQue uses, then adding the 3 missing tables that this project's schema requires.
+
+CONTEXT:
+- This project (CucumberShowcase / cucixpress.com) currently uses its own Neon database with mostly empty tables (only 2 users)
+- The CuciXpressLiveQue project (cuci-xpress.com) uses a separate Neon database with 508 real customers
+- We want CucumberShowcase to read from LiveQue's database so login, customer data, etc. are unified
+- LiveQue's database has tables: users, cars, branches, achievements, user_achievements
+- CucumberShowcase's schema (in shared/schema.ts) defines: users, collaboration_submissions, subscription_signups, service_history
+- The users table already matches between the two (same Postgres column names — verified)
+- The 3 new tables we need to add to LiveQue's DB: collaboration_submissions, subscription_signups, service_history
+
+CRITICAL RULES — PLEASE FOLLOW STRICTLY:
+1. DO NOT drop, rename, or modify any existing tables
+2. DO NOT modify the existing users, cars, branches, achievements, user_achievements tables in any way
+3. ONLY add new tables (collaboration_submissions, subscription_signups, service_history)
+4. If drizzle-kit asks any destructive question (drop, rename, alter type), STOP and ask me before answering
+5. Take a backup of any state before making changes
+6. Report back what you did at each step so I can verify
+
+TASKS — please do these in order:
+
+STEP 1 — Verify current state
+- Run `psql $DATABASE_URL -c "\\dt"` and report the current tables
+- Run `psql $DATABASE_URL -c "SELECT COUNT(*) FROM users;"` and report the count
+- Confirm we are currently on the OLD CucumberShowcase database (should show ~2 users)
+
+STEP 2 — Update DATABASE_URL secret
+- I have ALREADY updated the DATABASE_URL secret manually to point to LiveQue's database
+- Verify the change by running `psql $DATABASE_URL -c "SELECT COUNT(*) FROM users;"` again
+- It should now show 508 users (or close to it). If it still shows 2, the secret didn't update — stop and report
+- Also run `psql $DATABASE_URL -c "\\dt"` and confirm you see: users, cars, branches, achievements, user_achievements
+- Confirm you DO NOT see: collaboration_submissions, subscription_signups, service_history (these are what we'll add next)
+
+STEP 3 — Run schema migration
+- Run `npm run db:push` (or whatever the migration command is in this project)
+- Read all prompts carefully
+- Only confirm CREATE operations
+- If asked about ALTER, DROP, RENAME on existing tables — STOP and report the prompt text to me
+- Show me the full output of the migration
+
+STEP 4 — Verify migration succeeded
+- Run `psql $DATABASE_URL -c "\\dt"` again
+- Verify all 8 tables exist: users, cars, branches, achievements, user_achievements, collaboration_submissions, subscription_signups, service_history
+- Verify users count is still 508 (no data loss)
+
+STEP 5 — Test the app
+- Restart the application (npm run dev or equivalent)
+- Confirm it starts without errors
+- DO NOT modify any code
+
+DO NOT in this task:
+- Do not modify any TypeScript code
+- Do not modify shared/schema.ts
+- Do not modify any environment variables other than what I told you
+- Do not delete any files
+- Do not run any migration command other than db:push
+
+REPORT BACK with:
+- The output of each step
+- The final list of tables in the database
+- The user count before and after
+- Whether the app starts successfully
+- Anything unexpected you encountered
