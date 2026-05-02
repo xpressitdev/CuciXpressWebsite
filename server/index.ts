@@ -22,6 +22,16 @@ if (googleOAuthConfig) {
 }
 
 const app = express();
+// Replit (and most platforms) terminate TLS at a reverse proxy and forward
+// HTTP to our process. Without this, Express thinks the connection is
+// insecure, which means:
+//   - `secure: true` cookies (Lucia session, OAuth flight cookies) get
+//     dropped silently by the browser in production.
+//   - `req.ip` returns the proxy IP instead of the real client IP, so our
+//     audit_log "ip" column would record garbage.
+// Trusting the immediate proxy hop fixes both. We do NOT trust arbitrary
+// hops (would be `true`) — only the platform's edge proxy.
+app.set("trust proxy", 1);
 app.use(cookieParser()); // Add cookie parsing middleware
 app.use(express.json());
 app.use(express.urlencoded({ extended: false }));
