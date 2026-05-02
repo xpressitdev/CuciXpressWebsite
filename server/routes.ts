@@ -1335,12 +1335,22 @@ export async function registerRoutes(app: Express): Promise<Server> {
     const googleClient = buildGoogleClient(googleCfg);
 
     // GET /api/auth/google — start the flow.
+    // Optional `?return_to=/some/path` lets the caller (e.g. the Pay&Que
+    // checkout modal) bring the user back to where they were instead of
+    // dumping them on the homepage. We validate strictly against open-
+    // redirect attacks before storing it in a short-lived cookie.
     app.get('/api/auth/google', async (req, res) => {
       try {
         const { url, state, codeVerifier } = startGoogleAuth(googleClient);
         const cookieOpts = makeOAuthFlightCookieOptions();
         res.cookie(STATE_COOKIE, state, cookieOpts);
         res.cookie(VERIFIER_COOKIE, codeVerifier, cookieOpts);
+
+        const rawReturnTo = req.query.return_to;
+        if (isSafeReturnTo(rawReturnTo)) {
+          res.cookie(RETURN_TO_COOKIE, rawReturnTo, cookieOpts);
+        }
+
         await writeGoogleAudit('google.start', 'anonymous', req.ip ?? null);
         res.redirect(url.toString());
       } catch (err) {
@@ -1358,10 +1368,13 @@ export async function registerRoutes(app: Express): Promise<Server> {
       const queryState = typeof req.query.state === 'string' ? req.query.state : null;
       const cookieState = req.cookies?.[STATE_COOKIE] ?? null;
       const codeVerifier = req.cookies?.[VERIFIER_COOKIE] ?? null;
+      const rawReturnTo = req.cookies?.[RETURN_TO_COOKIE] ?? null;
+      const returnTo = isSafeReturnTo(rawReturnTo) ? rawReturnTo : '/';
 
       // Always clear in-flight cookies before responding, success or not.
       res.clearCookie(STATE_COOKIE, { path: '/' });
       res.clearCookie(VERIFIER_COOKIE, { path: '/' });
+      res.clearCookie(RETURN_TO_COOKIE, { path: '/' });
 
       // 1. Catch user-cancelled or error responses from Google.
       if (typeof req.query.error === 'string') {
@@ -1369,7 +1382,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
           reason: 'google_returned_error',
           error: req.query.error,
         });
-        return res.redirect('/?google_oauth=cancelled');
+        return res.redirect(appendOauthStatus(returnTo, 'cancelled'));
       }
 
       // 2. Validate the handshake.
@@ -1396,24 +1409,44 @@ export async function registerRoutes(app: Express): Promise<Server> {
         const claims = decodeIdTokenClaims(tokens.idToken());
         const outcome = await findOrCreateGoogleUser(claims);
 
+        // Mint Lucia session (cx_session cookie) — the new source of truth.
         const session = await lucia.createSession(String(outcome.userId), {});
         const sessionCookie = lucia.createSessionCookie(session.id);
         res.appendHeader('Set-Cookie', sessionCookie.serialize());
+
+        // ALSO mint the legacy JWT cookie (cuci_auth_token) so the
+        // existing `useAuth` hook + every legacy route still recognises
+        // the user without any front-end rewiring. This is the bridge
+        // that keeps the checkout flow continuous after Google sign-in.
+        // We pull username/email straight from the row we just touched.
+        const userRow = (await db.execute(sql`
+          SELECT id, username, email FROM users WHERE id = ${outcome.userId} LIMIT 1
+        `)).rows[0] as { id: number; username: string | null; email: string | null } | undefined;
+        if (userRow) {
+          const legacyToken = unifiedAuth.generateToken({
+            id: userRow.id,
+            username: userRow.username ?? `user${userRow.id}`,
+            email: userRow.email,
+          });
+          unifiedAuth.setAuthCookie(res, legacyToken);
+        }
 
         await writeGoogleAudit('google.callback_success', claims.email ?? String(outcome.userId), ip, {
           outcome: outcome.kind,
           userId: outcome.userId,
           googleSub: claims.sub,
+          returnTo,
         });
 
-        // Front-end can treat ?google_oauth=ok as the trigger to refresh
-        // its session-aware UI without a full reload prompt.
-        res.redirect('/?google_oauth=ok');
+        // Send the user back to where they came from (or `/`) with a
+        // `google_oauth=ok` flag the front-end uses to refresh its
+        // auth-aware UI without a full reload prompt.
+        res.redirect(appendOauthStatus(returnTo, 'ok'));
       } catch (err: any) {
         const reason = err?.message || 'unknown';
         console.error('[google-oauth] callback failed:', err);
         await writeGoogleAudit('google.callback_failed', 'anonymous', ip, { reason });
-        res.status(500).json({ ok: false, error: 'google_callback_failed' });
+        res.redirect(appendOauthStatus(returnTo, 'failed'));
       }
     });
   } else {

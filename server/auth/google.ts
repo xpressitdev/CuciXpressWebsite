@@ -115,6 +115,7 @@ export function buildGoogleClient(cfg: GoogleOAuthConfig): Google {
 
 export const STATE_COOKIE = "google_oauth_state";
 export const VERIFIER_COOKIE = "google_oauth_code_verifier";
+export const RETURN_TO_COOKIE = "google_oauth_return_to";
 
 /** Cookie max-age for the in-flight OAuth handshake. 10 min is plenty. */
 export const OAUTH_COOKIE_MAX_AGE_SECONDS = 10 * 60;
@@ -127,6 +128,44 @@ export function makeOAuthFlightCookieOptions() {
     path: "/",
     maxAge: OAUTH_COOKIE_MAX_AGE_SECONDS * 1000,
   };
+}
+
+/**
+ * Validate a `return_to` value before round-tripping it through a cookie
+ * and back into a redirect. This is an open-redirect prevention check —
+ * we MUST refuse anything that could escape our own origin, otherwise an
+ * attacker can craft a sign-in link that ends with the user landing on
+ * `evil.example.com` while we set their cookies.
+ *
+ * Rules:
+ *   - Must start with a single "/" (relative path on our origin).
+ *   - Must NOT start with "//" (protocol-relative URL → other host).
+ *   - Must NOT start with "/\\" (browser quirk also protocol-relative).
+ *   - Must NOT contain "://" anywhere (full URL embedded as a path).
+ *   - Length-capped to 256 chars to keep cookie/header size sane.
+ *   - No control characters or whitespace.
+ */
+export function isSafeReturnTo(value: unknown): value is string {
+  if (typeof value !== "string") return false;
+  if (value.length === 0 || value.length > 256) return false;
+  if (!value.startsWith("/")) return false;
+  if (value.startsWith("//") || value.startsWith("/\\")) return false;
+  if (value.includes("://")) return false;
+  if (/[\s\x00-\x1f\x7f]/.test(value)) return false;
+  return true;
+}
+
+/**
+ * Append a `google_oauth=<status>` query param to a same-origin path,
+ * preserving any existing query string. Used so the front-end can show
+ * a "you're signed in" toast and refresh its auth state.
+ */
+export function appendOauthStatus(
+  path: string,
+  status: "ok" | "cancelled" | "failed"
+): string {
+  const sep = path.includes("?") ? "&" : "?";
+  return `${path}${sep}google_oauth=${status}`;
 }
 
 // ---- Authorization start ------------------------------------
