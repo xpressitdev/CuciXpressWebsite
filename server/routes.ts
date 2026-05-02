@@ -11,6 +11,17 @@ import { unifiedAuth } from "./unified-auth";
 import { lucia } from "./auth/lucia";
 import { requireLuciaUser } from "./auth/middleware";
 import { sendOtp, verifyOtp, OTP_CONSTANTS } from "./auth/otp";
+import {
+  loadGoogleOAuthConfig,
+  buildGoogleClient,
+  startGoogleAuth,
+  decodeIdTokenClaims,
+  findOrCreateGoogleUser,
+  writeGoogleAudit,
+  makeOAuthFlightCookieOptions,
+  STATE_COOKIE,
+  VERIFIER_COOKIE,
+} from "./auth/google";
 import { storage } from "./storage";
 import { eq, desc, sql } from "drizzle-orm";
 
@@ -1313,6 +1324,105 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
     res.json({ ok: true });
   });
+
+  // === Google OAuth (Task 1.5) ============================================
+  // Authorization-code flow with PKCE via the `arctic` library. Mints a
+  // Lucia session on success — replacing the legacy JWT for Google sign-in.
+  // Routes are only registered if Google is fully configured; otherwise we
+  // return 503 so the front-end gets a clear "not available" signal.
+  const googleCfg = loadGoogleOAuthConfig();
+  if (googleCfg) {
+    const googleClient = buildGoogleClient(googleCfg);
+
+    // GET /api/auth/google — start the flow.
+    app.get('/api/auth/google', async (req, res) => {
+      try {
+        const { url, state, codeVerifier } = startGoogleAuth(googleClient);
+        const cookieOpts = makeOAuthFlightCookieOptions();
+        res.cookie(STATE_COOKIE, state, cookieOpts);
+        res.cookie(VERIFIER_COOKIE, codeVerifier, cookieOpts);
+        await writeGoogleAudit('google.start', 'anonymous', req.ip ?? null);
+        res.redirect(url.toString());
+      } catch (err) {
+        console.error('[google-oauth] start failed:', err);
+        res.status(500).json({ ok: false, error: 'google_start_failed' });
+      }
+    });
+
+    // GET <callbackPath> — handle Google's redirect back to us.
+    // Path comes from GOOGLE_REDIRECT_URI so it always matches what's
+    // registered in Google Cloud Console.
+    app.get(googleCfg.callbackPath, async (req, res) => {
+      const ip = req.ip ?? null;
+      const code = typeof req.query.code === 'string' ? req.query.code : null;
+      const queryState = typeof req.query.state === 'string' ? req.query.state : null;
+      const cookieState = req.cookies?.[STATE_COOKIE] ?? null;
+      const codeVerifier = req.cookies?.[VERIFIER_COOKIE] ?? null;
+
+      // Always clear in-flight cookies before responding, success or not.
+      res.clearCookie(STATE_COOKIE, { path: '/' });
+      res.clearCookie(VERIFIER_COOKIE, { path: '/' });
+
+      // 1. Catch user-cancelled or error responses from Google.
+      if (typeof req.query.error === 'string') {
+        await writeGoogleAudit('google.callback_failed', 'anonymous', ip, {
+          reason: 'google_returned_error',
+          error: req.query.error,
+        });
+        return res.redirect('/?google_oauth=cancelled');
+      }
+
+      // 2. Validate the handshake.
+      if (!code || !queryState || !cookieState || !codeVerifier) {
+        await writeGoogleAudit('google.callback_failed', 'anonymous', ip, {
+          reason: 'missing_params_or_cookies',
+          hasCode: !!code,
+          hasQueryState: !!queryState,
+          hasCookieState: !!cookieState,
+          hasVerifier: !!codeVerifier,
+        });
+        return res.status(400).json({ ok: false, error: 'invalid_oauth_callback' });
+      }
+      if (queryState !== cookieState) {
+        await writeGoogleAudit('google.callback_failed', 'anonymous', ip, {
+          reason: 'state_mismatch',
+        });
+        return res.status(400).json({ ok: false, error: 'state_mismatch' });
+      }
+
+      // 3. Exchange + decode + find-or-create + mint session.
+      try {
+        const tokens = await googleClient.validateAuthorizationCode(code, codeVerifier);
+        const claims = decodeIdTokenClaims(tokens.idToken());
+        const outcome = await findOrCreateGoogleUser(claims);
+
+        const session = await lucia.createSession(String(outcome.userId), {});
+        const sessionCookie = lucia.createSessionCookie(session.id);
+        res.appendHeader('Set-Cookie', sessionCookie.serialize());
+
+        await writeGoogleAudit('google.callback_success', claims.email ?? String(outcome.userId), ip, {
+          outcome: outcome.kind,
+          userId: outcome.userId,
+          googleSub: claims.sub,
+        });
+
+        // Front-end can treat ?google_oauth=ok as the trigger to refresh
+        // its session-aware UI without a full reload prompt.
+        res.redirect('/?google_oauth=ok');
+      } catch (err: any) {
+        const reason = err?.message || 'unknown';
+        console.error('[google-oauth] callback failed:', err);
+        await writeGoogleAudit('google.callback_failed', 'anonymous', ip, { reason });
+        res.status(500).json({ ok: false, error: 'google_callback_failed' });
+      }
+    });
+  } else {
+    // No Google config — surface a clear "not available" so the front-end
+    // doesn't render a broken sign-in button.
+    app.get('/api/auth/google', (_req, res) => {
+      res.status(503).json({ ok: false, error: 'google_oauth_not_configured' });
+    });
+  }
 
   // === KedaiPOS Integration Endpoints ===
 

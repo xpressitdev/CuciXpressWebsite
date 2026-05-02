@@ -70,13 +70,20 @@ export const users = pgTable("users", {
   last_name: text("last_name").notNull(),
   email: text("email").notNull().unique(), // ← ADDED .unique() to match DB
   password: text("password").notNull(),
-  phone_number: text("phone_number").notNull(),
-  address: text("address").notNull(),
+  // Task 1.5: phone_number / address dropped NOT NULL to support
+  // Google-OAuth-only users who haven't entered a profile yet. Existing
+  // 508 users all have values; the alter is non-destructive.
+  phone_number: text("phone_number"),
+  address: text("address"),
   is_admin: boolean("is_admin").default(false), // ← REMOVED .notNull() to match DB
   points: integer("points").default(0), // ← REMOVED .notNull() to match DB
   level: integer("level").default(1), // ← REMOVED .notNull() to match DB
   created_at: timestamp("created_at").defaultNow(),
   last_login: timestamp("last_login"),
+  // Task 1.5: Google OAuth identity. Holds Google's `sub` claim. Nullable
+  // because legacy users sign in by password. Unique partial index in DB
+  // so multiple legacy NULLs are allowed but a `sub` can map to one user.
+  google_id: text("google_id").unique(),
 });
 
 // ============================================================

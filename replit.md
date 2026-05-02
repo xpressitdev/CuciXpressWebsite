@@ -59,6 +59,29 @@ Two auth systems coexist by design during the Week 1–Week 2 cutover:
    surface: `POST /api/auth/otp/send` and `POST /api/auth/otp/verify`.
    These primitives do NOT yet mint a Lucia session on success — that
    wiring is a Week-2/4 task.
+4. **Google OAuth via Arctic** (`server/auth/google.ts`) — Authorization-
+   Code flow with PKCE. Routes: `GET /api/auth/google` (starts the flow,
+   sets `google_oauth_state` + `google_oauth_code_verifier` HttpOnly
+   cookies, 302s to Google) and `GET <callbackPath>` where `callbackPath`
+   is parsed from `GOOGLE_REDIRECT_URI` so it always matches what's
+   registered in Google Cloud Console. The callback verifies state (CSRF),
+   exchanges the code, decodes the id_token (no JWKS verification yet —
+   Week-2/3 hardening), then runs find-or-create:
+     - Match by `users.google_id` → log in.
+     - Else if `email_verified=true` and email matches an existing user
+       → LINK (set google_id) and log in.
+     - Else create a new user with a Scrypt-of-random-bytes placeholder
+       password (so legacy bcrypt password-login is impossible until
+       reset). `users.phone_number` and `users.address` were dropped to
+       NULLABLE in this task to support Google users who haven't filled
+       in a profile.
+     - Unverified Google emails are REJECTED (never linked) to prevent
+       account-takeover via gmail-forwarding tricks.
+   On success, mints a Lucia `cx_session` cookie and 302s to
+   `/?google_oauth=ok`. Every start / success / failure writes to
+   `audit_log`. Boot-time `loadGoogleOAuthConfig()` validates the three
+   env vars together — partial config refuses to boot. If no Google env
+   vars are set at all, the route returns 503 instead.
 
 ## External Dependencies
 

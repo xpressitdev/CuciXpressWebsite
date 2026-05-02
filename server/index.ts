@@ -4,10 +4,22 @@ import { registerRoutes } from "./routes";
 import { setupVite, serveStatic, log } from "./vite";
 import { requireJwtSecret } from "./unified-auth";
 import { attachLuciaSession } from "./auth/middleware";
+import { loadGoogleOAuthConfig } from "./auth/google";
 
 // Fail-fast on missing or weak JWT_SECRET. Refuse to boot rather than
 // silently fall back to a hardcoded value. See docs/AUTH_AUDIT.md.
 requireJwtSecret();
+
+// Google OAuth config validation. Throws on partial config (some env
+// vars set but not all) so a misconfig never silently boots. Returns
+// null if no Google env vars are set, in which case Google sign-in is
+// simply unavailable.
+const googleOAuthConfig = loadGoogleOAuthConfig();
+if (googleOAuthConfig) {
+  log(`[google-oauth] enabled, callback path = ${googleOAuthConfig.callbackPath}`);
+} else {
+  log(`[google-oauth] disabled (no GOOGLE_CLIENT_ID set)`);
+}
 
 const app = express();
 app.use(cookieParser()); // Add cookie parsing middleware

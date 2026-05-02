@@ -168,7 +168,9 @@ declare module "lucia" {
       email: string;
       firstName: string;
       lastName: string;
-      phoneNumber: string;
+      // Nullable since Task 1.5 — Google-OAuth-only users won't have a
+      // phone number until they complete their profile.
+      phoneNumber: string | null;
     };
     DatabaseSessionAttributes: {};
   }
