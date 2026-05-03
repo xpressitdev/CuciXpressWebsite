@@ -820,6 +820,188 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
+  // GET /api/admin/reports/payment-methods
+  // Same range/branch filters as the orders report. Aggregates orders by
+  // payment_method (+ qr_provider for QR payments) so the owner can see
+  // the cash/card/transfer/QR mix at a glance.
+  app.get('/api/admin/reports/payment-methods', requireStaff, requireStaffRole('owner', 'manager'), async (req, res) => {
+    const branchParam = String(req.query.branch_id ?? 'all').trim();
+    const branchId =
+      branchParam === '' || branchParam === 'all' ? null : Number(branchParam);
+    if (branchId !== null && (!Number.isFinite(branchId) || branchId <= 0)) {
+      return res.status(400).json({ error: 'invalid_branch_id' });
+    }
+    const isDate = (s: string) => /^\d{4}-\d{2}-\d{2}$/.test(s);
+    const fromParam = String(req.query.from ?? '').trim();
+    const toParam = String(req.query.to ?? '').trim();
+
+    try {
+      const todayRow = (await db.execute(
+        sql`SELECT (now() AT TIME ZONE 'Asia/Brunei')::date AS d`,
+      )).rows[0] as { d: string };
+      const from = isDate(fromParam) ? fromParam : todayRow.d;
+      const to = isDate(toParam) ? toParam : from;
+      const branchFilter = branchId !== null ? sql`AND o.branch_id = ${branchId}` : sql``;
+
+      const rows = (await db.execute(sql`
+        SELECT
+          o.payment_method,
+          o.qr_provider,
+          COUNT(*)::int                                                                            AS transactions,
+          COUNT(*) FILTER (WHERE o.status <> 'refunded')::int                                      AS paid_count,
+          COUNT(*) FILTER (WHERE o.status =  'refunded')::int                                      AS refund_count,
+          COALESCE(SUM(CASE WHEN o.status <> 'refunded' THEN o.total_cents ELSE 0 END),0)::bigint  AS sales_cents,
+          COALESCE(SUM(CASE WHEN o.status =  'refunded' THEN o.total_cents ELSE 0 END),0)::bigint  AS refund_cents
+          FROM orders o
+         WHERE o.ticket_day BETWEEN ${from}::date AND ${to}::date
+           ${branchFilter}
+         GROUP BY 1, 2
+         ORDER BY sales_cents DESC
+      `)).rows as Array<any>;
+
+      const totalSales = rows.reduce((a, r) => a + Number(r.sales_cents ?? 0), 0);
+      const totalTx    = rows.reduce((a, r) => a + Number(r.transactions ?? 0), 0);
+
+      const branches = (await db.execute(
+        sql`SELECT id, name FROM branches ORDER BY name`,
+      )).rows;
+
+      res.json({
+        filter: { branch_id: branchId, from, to },
+        branches,
+        totals: { transactions: totalTx, sales_cents: totalSales },
+        rows: rows.map((r) => {
+          const sales = Number(r.sales_cents ?? 0);
+          return {
+            payment_method: r.payment_method,
+            qr_provider: r.qr_provider,
+            transactions: Number(r.transactions ?? 0),
+            paid_count: Number(r.paid_count ?? 0),
+            refund_count: Number(r.refund_count ?? 0),
+            sales_cents: sales,
+            refund_cents: Number(r.refund_cents ?? 0),
+            share_pct: totalSales > 0 ? Math.round((sales / totalSales) * 1000) / 10 : 0,
+          };
+        }),
+      });
+    } catch (err) {
+      console.error('[admin.reports.payment-methods] failed:', err);
+      res.status(500).json({ error: 'report_failed' });
+    }
+  });
+
+  // GET /api/admin/reports/best-selling
+  // Same range/branch filters. Counts package + addon line-items across
+  // non-refunded orders. Each order contributes 1 package row (using
+  // orders.package_name + orders.package_id) plus one row per addon
+  // unwrapped from orders.addons jsonb (each element has {id,name,
+  // price_cents}). Revenue for the package = total_cents minus the sum
+  // of its addon snapshot prices (so package + addons sum back to the
+  // order total). Returns the top N (default 25, capped at 100).
+  app.get('/api/admin/reports/best-selling', requireStaff, requireStaffRole('owner', 'manager'), async (req, res) => {
+    const branchParam = String(req.query.branch_id ?? 'all').trim();
+    const branchId =
+      branchParam === '' || branchParam === 'all' ? null : Number(branchParam);
+    if (branchId !== null && (!Number.isFinite(branchId) || branchId <= 0)) {
+      return res.status(400).json({ error: 'invalid_branch_id' });
+    }
+    const isDate = (s: string) => /^\d{4}-\d{2}-\d{2}$/.test(s);
+    const fromParam = String(req.query.from ?? '').trim();
+    const toParam = String(req.query.to ?? '').trim();
+    const limit = Math.min(100, Math.max(5, Number(req.query.limit ?? 25) || 25));
+
+    try {
+      const todayRow = (await db.execute(
+        sql`SELECT (now() AT TIME ZONE 'Asia/Brunei')::date AS d`,
+      )).rows[0] as { d: string };
+      const from = isDate(fromParam) ? fromParam : todayRow.d;
+      const to = isDate(toParam) ? toParam : from;
+      const branchFilter = branchId !== null ? sql`AND branch_id = ${branchId}` : sql``;
+
+      const rows = (await db.execute(sql`
+        WITH paid AS (
+          SELECT id, package_id, package_name, total_cents, COALESCE(addons,'[]'::jsonb) AS addons
+            FROM orders
+           WHERE status <> 'refunded'
+             AND ticket_day BETWEEN ${from}::date AND ${to}::date
+             ${branchFilter}
+        ),
+        pkg_items AS (
+          SELECT
+            'package'                                                  AS kind,
+            COALESCE(package_id, 'pkg_unknown')                        AS item_id,
+            COALESCE(package_name, 'Unknown package')                  AS item_name,
+            1                                                          AS qty,
+            (total_cents
+              - COALESCE((SELECT SUM((a->>'price_cents')::int)
+                            FROM jsonb_array_elements(addons) a), 0)
+            )::bigint                                                  AS revenue_cents
+            FROM paid
+        ),
+        addon_items AS (
+          SELECT
+            'addon'                                                    AS kind,
+            COALESCE(a->>'id',   'addon_unknown')                      AS item_id,
+            COALESCE(a->>'name', 'Unknown add-on')                     AS item_name,
+            1                                                          AS qty,
+            COALESCE((a->>'price_cents')::bigint, 0)                   AS revenue_cents
+            FROM paid, jsonb_array_elements(paid.addons) a
+        ),
+        all_items AS (
+          SELECT * FROM pkg_items
+          UNION ALL
+          SELECT * FROM addon_items
+        )
+        SELECT kind, item_id, item_name,
+               SUM(qty)::int          AS quantity,
+               SUM(revenue_cents)::bigint AS revenue_cents
+          FROM all_items
+         GROUP BY kind, item_id, item_name
+         ORDER BY quantity DESC, revenue_cents DESC
+         LIMIT ${limit}
+      `)).rows as Array<any>;
+
+      const totalsRow = (await db.execute(sql`
+        SELECT
+          COALESCE(SUM(1 + COALESCE(jsonb_array_length(addons),0)),0)::int AS items_sold,
+          COALESCE(SUM(total_cents),0)::bigint                             AS revenue_cents
+          FROM orders
+         WHERE status <> 'refunded'
+           AND ticket_day BETWEEN ${from}::date AND ${to}::date
+           ${branchFilter}
+      `)).rows[0] as { items_sold: number; revenue_cents: number };
+
+      const totalQty     = Number(totalsRow.items_sold ?? 0);
+      const totalRevenue = Number(totalsRow.revenue_cents ?? 0);
+
+      const branches = (await db.execute(
+        sql`SELECT id, name FROM branches ORDER BY name`,
+      )).rows;
+
+      res.json({
+        filter: { branch_id: branchId, from, to, limit },
+        branches,
+        totals: { items_sold: totalQty, revenue_cents: totalRevenue },
+        rows: rows.map((r) => {
+          const qty = Number(r.quantity ?? 0);
+          const rev = Number(r.revenue_cents ?? 0);
+          return {
+            kind: r.kind,
+            item_id: r.item_id,
+            item_name: r.item_name,
+            quantity: qty,
+            revenue_cents: rev,
+            qty_share_pct:    totalQty > 0     ? Math.round((qty / totalQty)         * 1000) / 10 : 0,
+            revenue_share_pct: totalRevenue > 0 ? Math.round((rev / totalRevenue)     * 1000) / 10 : 0,
+          };
+        }),
+      });
+    } catch (err) {
+      console.error('[admin.reports.best-selling] failed:', err);
+      res.status(500).json({ error: 'report_failed' });
+    }
+  });
+
   // Test Google API key endpoint
   app.get("/api/test-google-api", async (req, res) => {
     try {

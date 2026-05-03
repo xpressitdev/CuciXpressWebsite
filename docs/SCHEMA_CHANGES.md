@@ -784,3 +784,27 @@ auto-generated filename `cucixpress_master_sales_<from>_to_<to>_<utc>.xlsx`.
 
 Owner/manager only via `requireStaffRole`. Uses the existing
 `xlsx@^0.18.5` package — no new deps.
+
+---
+
+## Phase 5b — Payment Methods + Best Selling reports (no schema change)
+
+Two new admin endpoints, owner/manager only, on the existing tables.
+
+- `GET /api/admin/reports/payment-methods?branch_id=&from=&to=`
+  Aggregates orders by `payment_method` × `qr_provider` for the
+  date range. Returns `transactions`, `paid_count`, `refund_count`,
+  `sales_cents`, `refund_cents`, and `share_pct` (% of total sales).
+
+- `GET /api/admin/reports/best-selling?branch_id=&from=&to=&limit=`
+  Counts package + addon line-items across non-refunded orders.
+  Each order contributes 1 package row (from `orders.package_name`
+  + `orders.package_id`) plus one row per addon unwrapped from
+  `orders.addons` jsonb. Package revenue = `total_cents` minus the
+  sum of addon snapshot prices, so package + addons sum back to
+  the order total. `limit` clamped to 5..100, default 25.
+
+Both endpoints reuse the same Asia/Brunei `ticket_day` filter as
+the existing reports. Surfaced in `/admin` as two new tabs
+(**Payment Methods**, **Best Selling**) alongside Dashboard / Order
+Report. Tab strip widened from 4 to 6 columns on desktop.

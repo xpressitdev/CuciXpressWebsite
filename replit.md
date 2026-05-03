@@ -311,6 +311,8 @@ Two auth systems coexist by design during the Week 1–Week 2 cutover:
    `await res.json()` so the success toast actually reads
    `data.order.ticket_code`.
 
+   **Phase 5b — Payment Methods + Best Selling reports (no migration).** Two new admin endpoints — `GET /api/admin/reports/payment-methods` returns sales/refund/share by payment_method × qr_provider for the date range; `GET /api/admin/reports/best-selling` returns the top N (default 25, capped 100) package + addon line-items by quantity, with revenue and revenue-share. Each order contributes 1 package row plus one row per addon unwrapped from the `orders.addons` jsonb snapshot; package revenue = total minus addon snapshot prices so package + addons sum back to the order total. Both surfaced as new tabs (Payment Methods, Best Selling) alongside Dashboard and Order Report. Tab strip widened to 6 columns on desktop.
+
    **Phase 5a addendum — Power BI export.** New
    `GET /api/admin/reports/orders/export` endpoint streams an
    `.xlsx` matching the 25-column "Master Sales Data" layout the

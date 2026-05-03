@@ -40,6 +40,8 @@ import {
   RefreshCw,
   Search,
   Download,
+  CreditCard,
+  TrendingUp,
 } from "lucide-react";
 import { Link } from "wouter";
 import { motion } from "framer-motion";
@@ -211,7 +213,7 @@ export default function Admin() {
           </div>
 
           <Tabs defaultValue="dashboard" className="w-full">
-            <TabsList className="grid w-full grid-cols-2 md:grid-cols-4">
+            <TabsList className="grid w-full grid-cols-2 sm:grid-cols-3 md:grid-cols-6">
               <TabsTrigger value="dashboard" className="flex items-center gap-2" data-testid="tab-dashboard">
                 <BarChart3 className="w-4 h-4" />
                 Dashboard
@@ -219,6 +221,14 @@ export default function Admin() {
               <TabsTrigger value="orders" className="flex items-center gap-2" data-testid="tab-orders-report">
                 <ClipboardList className="w-4 h-4" />
                 Order Report
+              </TabsTrigger>
+              <TabsTrigger value="payments" className="flex items-center gap-2" data-testid="tab-payments-report">
+                <CreditCard className="w-4 h-4" />
+                Payment Methods
+              </TabsTrigger>
+              <TabsTrigger value="best-selling" className="flex items-center gap-2" data-testid="tab-best-selling-report">
+                <TrendingUp className="w-4 h-4" />
+                Best Selling
               </TabsTrigger>
               <TabsTrigger value="collaborations" className="flex items-center gap-2">
                 <MessageSquare className="w-4 h-4" />
@@ -241,6 +251,14 @@ export default function Admin() {
 
             <TabsContent value="orders" className="mt-6">
               <OrdersReportTab />
+            </TabsContent>
+
+            <TabsContent value="payments" className="mt-6">
+              <PaymentMethodsTab />
+            </TabsContent>
+
+            <TabsContent value="best-selling" className="mt-6">
+              <BestSellingTab />
             </TabsContent>
 
             <TabsContent value="collaborations" className="mt-6">
@@ -988,6 +1006,388 @@ function OrdersReportTab() {
                   Next
                 </Button>
               </div>
+            </div>
+          )}
+        </CardContent>
+      </Card>
+    </div>
+  );
+}
+
+// =====================================================================
+// Phase 5b — Payment Methods tab
+// Date-range + branch filter, then a single sortable table with the
+// share each payment method has of total sales. Keeps the same
+// "filter card on top, summary tiles, then table" rhythm as the
+// Order Report tab so the owner sees a familiar layout.
+// =====================================================================
+interface PaymentMethodsResponse {
+  filter: { branch_id: number | null; from: string; to: string };
+  branches: Array<{ id: number; name: string }>;
+  totals: { transactions: number; sales_cents: number };
+  rows: Array<{
+    payment_method: string;
+    qr_provider: string | null;
+    transactions: number;
+    paid_count: number;
+    refund_count: number;
+    sales_cents: number;
+    refund_cents: number;
+    share_pct: number;
+  }>;
+}
+
+const qrProviderLabels: Record<string, string> = {
+  pocket_pay: "Pocket Pay",
+  pocket_pay_invoice: "Pocket Pay (Invoice)",
+  baiduri_ms: "Baiduri MS",
+  dst_easy: "DST Easy / Quickpay",
+  quickpay: "Quickpay",
+};
+
+function PaymentMethodsTab() {
+  const today = todayBNT();
+  const [branchId, setBranchId] = useState<string>("all");
+  const [from, setFrom] = useState<string>(today);
+  const [to, setTo] = useState<string>(today);
+
+  const queryParams = useMemo(() => {
+    const sp = new URLSearchParams();
+    sp.set("branch_id", branchId);
+    sp.set("from", from);
+    sp.set("to", to);
+    return sp.toString();
+  }, [branchId, from, to]);
+
+  const { data, isLoading, isFetching, error, refetch } = useQuery<PaymentMethodsResponse>({
+    queryKey: ["/api/admin/reports/payment-methods", queryParams],
+    queryFn: async () => {
+      const res = await fetch(`/api/admin/reports/payment-methods?${queryParams}`, {
+        credentials: "include",
+      });
+      if (!res.ok) throw new Error("report_failed");
+      return res.json();
+    },
+  });
+
+  const branches = data?.branches ?? [];
+  const totals = data?.totals;
+  const rows = data?.rows ?? [];
+
+  const onReset = () => {
+    setBranchId("all");
+    setFrom(today);
+    setTo(today);
+  };
+
+  return (
+    <div className="space-y-6">
+      <Card>
+        <CardHeader>
+          <CardTitle className="text-base">Filter</CardTitle>
+        </CardHeader>
+        <CardContent>
+          <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
+            <div className="space-y-1">
+              <label className="text-xs text-gray-600">Date From</label>
+              <Input type="date" value={from} onChange={(e) => setFrom(e.target.value)} data-testid="input-pm-from" />
+            </div>
+            <div className="space-y-1">
+              <label className="text-xs text-gray-600">Date To</label>
+              <Input type="date" value={to} onChange={(e) => setTo(e.target.value)} data-testid="input-pm-to" />
+            </div>
+            <div className="space-y-1">
+              <label className="text-xs text-gray-600">Branch</label>
+              <Select value={branchId} onValueChange={setBranchId}>
+                <SelectTrigger data-testid="select-pm-branch"><SelectValue /></SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="all">All branches</SelectItem>
+                  {branches.map((b) => (
+                    <SelectItem key={b.id} value={String(b.id)}>{b.name}</SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
+          </div>
+          <div className="flex gap-2 mt-4">
+            <Button onClick={() => refetch()} disabled={isFetching} data-testid="button-pm-search">
+              <Search className="w-4 h-4 mr-1" />
+              Search
+            </Button>
+            <Button variant="outline" onClick={onReset} data-testid="button-pm-reset">Reset</Button>
+          </div>
+        </CardContent>
+      </Card>
+
+      <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+        {isLoading || !totals ? (
+          Array.from({ length: 2 }).map((_, i) => (
+            <div key={i} className="h-20 rounded-lg bg-gray-100 animate-pulse" />
+          ))
+        ) : (
+          <>
+            <div className="rounded-lg border p-3 bg-blue-50/40">
+              <div className="text-xs text-gray-600">Total Transactions</div>
+              <div className="font-semibold text-gray-900 mt-1">{totals.transactions.toLocaleString()}</div>
+            </div>
+            <div className="rounded-lg border p-3 bg-emerald-50/40">
+              <div className="text-xs text-gray-600">Total Sales</div>
+              <div className="font-semibold text-gray-900 mt-1">{formatBND(totals.sales_cents)}</div>
+            </div>
+          </>
+        )}
+      </div>
+
+      <Card>
+        <CardHeader>
+          <CardTitle className="text-base flex items-center justify-between">
+            <span>Payment Methods Breakdown</span>
+            {isFetching && <RefreshCw className="w-4 h-4 animate-spin text-gray-400" />}
+          </CardTitle>
+        </CardHeader>
+        <CardContent>
+          {error ? (
+            <p className="text-sm text-red-600 py-4">Failed to load report.</p>
+          ) : rows.length === 0 && !isLoading ? (
+            <p className="text-sm text-gray-500 py-4 text-center">No payments in this range.</p>
+          ) : (
+            <div className="overflow-x-auto">
+              <Table>
+                <TableHeader>
+                  <TableRow>
+                    <TableHead>Payment Method</TableHead>
+                    <TableHead className="text-right">Transactions</TableHead>
+                    <TableHead className="text-right">Refunds</TableHead>
+                    <TableHead className="text-right">Sales</TableHead>
+                    <TableHead className="text-right">Share</TableHead>
+                  </TableRow>
+                </TableHeader>
+                <TableBody>
+                  {rows.map((r, i) => {
+                    const label = paymentMethodLabels[r.payment_method] ?? r.payment_method;
+                    const subLabel = r.qr_provider ? (qrProviderLabels[r.qr_provider] ?? r.qr_provider) : null;
+                    return (
+                      <TableRow key={`${r.payment_method}-${r.qr_provider ?? "_"}-${i}`} data-testid={`row-pm-${r.payment_method}`}>
+                        <TableCell className="text-sm">
+                          <div className="font-medium">{label}</div>
+                          {subLabel && <div className="text-xs text-gray-500">{subLabel}</div>}
+                        </TableCell>
+                        <TableCell className="text-right text-sm">{r.transactions.toLocaleString()}</TableCell>
+                        <TableCell className="text-right text-sm text-red-600">
+                          {r.refund_count > 0 ? `${r.refund_count} (−${formatBND(r.refund_cents)})` : "—"}
+                        </TableCell>
+                        <TableCell className="text-right text-sm font-medium">{formatBND(r.sales_cents)}</TableCell>
+                        <TableCell className="text-right text-sm">
+                          <div className="flex items-center justify-end gap-2">
+                            <div className="w-20 h-2 bg-gray-100 rounded-full overflow-hidden">
+                              <div
+                                className="h-full bg-cuci-primary"
+                                style={{ width: `${Math.min(100, r.share_pct)}%` }}
+                              />
+                            </div>
+                            <span className="tabular-nums">{r.share_pct.toFixed(1)}%</span>
+                          </div>
+                        </TableCell>
+                      </TableRow>
+                    );
+                  })}
+                </TableBody>
+              </Table>
+            </div>
+          )}
+        </CardContent>
+      </Card>
+    </div>
+  );
+}
+
+// =====================================================================
+// Phase 5b — Best Selling tab
+// Top items sold (packages + addons unwrapped from the order snapshot)
+// over the date range, with quantity, revenue, and share of revenue.
+// =====================================================================
+interface BestSellingResponse {
+  filter: { branch_id: number | null; from: string; to: string; limit: number };
+  branches: Array<{ id: number; name: string }>;
+  totals: { items_sold: number; revenue_cents: number };
+  rows: Array<{
+    kind: "package" | "addon";
+    item_id: string;
+    item_name: string;
+    quantity: number;
+    revenue_cents: number;
+    qty_share_pct: number;
+    revenue_share_pct: number;
+  }>;
+}
+
+function BestSellingTab() {
+  const today = todayBNT();
+  const [branchId, setBranchId] = useState<string>("all");
+  const [from, setFrom] = useState<string>(today);
+  const [to, setTo] = useState<string>(today);
+  const [limit, setLimit] = useState<string>("25");
+
+  const queryParams = useMemo(() => {
+    const sp = new URLSearchParams();
+    sp.set("branch_id", branchId);
+    sp.set("from", from);
+    sp.set("to", to);
+    sp.set("limit", limit);
+    return sp.toString();
+  }, [branchId, from, to, limit]);
+
+  const { data, isLoading, isFetching, error, refetch } = useQuery<BestSellingResponse>({
+    queryKey: ["/api/admin/reports/best-selling", queryParams],
+    queryFn: async () => {
+      const res = await fetch(`/api/admin/reports/best-selling?${queryParams}`, {
+        credentials: "include",
+      });
+      if (!res.ok) throw new Error("report_failed");
+      return res.json();
+    },
+  });
+
+  const branches = data?.branches ?? [];
+  const totals = data?.totals;
+  const rows = data?.rows ?? [];
+
+  const onReset = () => {
+    setBranchId("all");
+    setFrom(today);
+    setTo(today);
+    setLimit("25");
+  };
+
+  return (
+    <div className="space-y-6">
+      <Card>
+        <CardHeader>
+          <CardTitle className="text-base">Filter</CardTitle>
+        </CardHeader>
+        <CardContent>
+          <div className="grid grid-cols-1 md:grid-cols-4 gap-3">
+            <div className="space-y-1">
+              <label className="text-xs text-gray-600">Date From</label>
+              <Input type="date" value={from} onChange={(e) => setFrom(e.target.value)} data-testid="input-bs-from" />
+            </div>
+            <div className="space-y-1">
+              <label className="text-xs text-gray-600">Date To</label>
+              <Input type="date" value={to} onChange={(e) => setTo(e.target.value)} data-testid="input-bs-to" />
+            </div>
+            <div className="space-y-1">
+              <label className="text-xs text-gray-600">Branch</label>
+              <Select value={branchId} onValueChange={setBranchId}>
+                <SelectTrigger data-testid="select-bs-branch"><SelectValue /></SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="all">All branches</SelectItem>
+                  {branches.map((b) => (
+                    <SelectItem key={b.id} value={String(b.id)}>{b.name}</SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
+            <div className="space-y-1">
+              <label className="text-xs text-gray-600">Show top</label>
+              <Select value={limit} onValueChange={setLimit}>
+                <SelectTrigger data-testid="select-bs-limit"><SelectValue /></SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="10">Top 10</SelectItem>
+                  <SelectItem value="25">Top 25</SelectItem>
+                  <SelectItem value="50">Top 50</SelectItem>
+                  <SelectItem value="100">Top 100</SelectItem>
+                </SelectContent>
+              </Select>
+            </div>
+          </div>
+          <div className="flex gap-2 mt-4">
+            <Button onClick={() => refetch()} disabled={isFetching} data-testid="button-bs-search">
+              <Search className="w-4 h-4 mr-1" />
+              Search
+            </Button>
+            <Button variant="outline" onClick={onReset} data-testid="button-bs-reset">Reset</Button>
+          </div>
+        </CardContent>
+      </Card>
+
+      <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+        {isLoading || !totals ? (
+          Array.from({ length: 2 }).map((_, i) => (
+            <div key={i} className="h-20 rounded-lg bg-gray-100 animate-pulse" />
+          ))
+        ) : (
+          <>
+            <div className="rounded-lg border p-3 bg-violet-50/40">
+              <div className="text-xs text-gray-600">Items Sold</div>
+              <div className="font-semibold text-gray-900 mt-1">{totals.items_sold.toLocaleString()}</div>
+            </div>
+            <div className="rounded-lg border p-3 bg-emerald-50/40">
+              <div className="text-xs text-gray-600">Total Revenue</div>
+              <div className="font-semibold text-gray-900 mt-1">{formatBND(totals.revenue_cents)}</div>
+            </div>
+          </>
+        )}
+      </div>
+
+      <Card>
+        <CardHeader>
+          <CardTitle className="text-base flex items-center justify-between">
+            <span>Best Selling Items</span>
+            {isFetching && <RefreshCw className="w-4 h-4 animate-spin text-gray-400" />}
+          </CardTitle>
+        </CardHeader>
+        <CardContent>
+          {error ? (
+            <p className="text-sm text-red-600 py-4">Failed to load report.</p>
+          ) : rows.length === 0 && !isLoading ? (
+            <p className="text-sm text-gray-500 py-4 text-center">No items sold in this range.</p>
+          ) : (
+            <div className="overflow-x-auto">
+              <Table>
+                <TableHeader>
+                  <TableRow>
+                    <TableHead className="w-10">#</TableHead>
+                    <TableHead>Item</TableHead>
+                    <TableHead>Type</TableHead>
+                    <TableHead className="text-right">Qty</TableHead>
+                    <TableHead className="text-right">Revenue</TableHead>
+                    <TableHead className="text-right">Revenue Share</TableHead>
+                  </TableRow>
+                </TableHeader>
+                <TableBody>
+                  {rows.map((r, i) => (
+                    <TableRow key={`${r.kind}-${r.item_id}`} data-testid={`row-bs-${r.kind}-${r.item_id}`}>
+                      <TableCell className="text-xs text-gray-500 tabular-nums">{i + 1}</TableCell>
+                      <TableCell className="text-sm font-medium">{r.item_name}</TableCell>
+                      <TableCell>
+                        <Badge
+                          variant="outline"
+                          className={`text-xs capitalize ${
+                            r.kind === "package"
+                              ? "border-violet-200 text-violet-700 bg-violet-50"
+                              : "border-amber-200 text-amber-700 bg-amber-50"
+                          }`}
+                        >
+                          {r.kind === "package" ? "Package" : "Add-on"}
+                        </Badge>
+                      </TableCell>
+                      <TableCell className="text-right text-sm tabular-nums">{r.quantity.toLocaleString()}</TableCell>
+                      <TableCell className="text-right text-sm font-medium">{formatBND(r.revenue_cents)}</TableCell>
+                      <TableCell className="text-right text-sm">
+                        <div className="flex items-center justify-end gap-2">
+                          <div className="w-20 h-2 bg-gray-100 rounded-full overflow-hidden">
+                            <div
+                              className={`h-full ${r.kind === "package" ? "bg-violet-500" : "bg-amber-500"}`}
+                              style={{ width: `${Math.min(100, r.revenue_share_pct)}%` }}
+                            />
+                          </div>
+                          <span className="tabular-nums">{r.revenue_share_pct.toFixed(1)}%</span>
+                        </div>
+                      </TableCell>
+                    </TableRow>
+                  ))}
+                </TableBody>
+              </Table>
             </div>
           )}
         </CardContent>
