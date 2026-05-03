@@ -10,7 +10,7 @@ import { handleKedaiPOSWebhook, getOrderStatus, updateQueueStatus } from "./keda
 import { unifiedAuth } from "./unified-auth";
 import { lucia } from "./auth/lucia";
 import { staffLucia } from "./auth/staffLucia";
-import { requireLuciaUser, requireStaff, requireStaffRole } from "./auth/middleware";
+import { requireLuciaUser, requireStaff, requireStaffRole, requireStaffOrPlateOwner } from "./auth/middleware";
 import { sendOtp, verifyOtp, OTP_CONSTANTS } from "./auth/otp";
 import { loginStaff } from "./auth/staff";
 import {
@@ -900,8 +900,10 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
-  // QR Code Verification API for staff scanning
-  app.post('/api/verify-qr', async (req, res) => {
+  // QR Code Verification API for staff scanning.
+  // Locked to staff (Task 2.3): only the lane/cashier should be able to
+  // mark a transaction's QR as verified.
+  app.post('/api/verify-qr', requireStaff, async (req, res) => {
     const { qr_data } = req.body;
     
     try {
@@ -1535,14 +1537,22 @@ export async function registerRoutes(app: Express): Promise<Server> {
   // KedaiPOS webhook endpoint
   app.post('/api/kedaipos-webhook', handleKedaiPOSWebhook);
   
-  // Get order status for KedaiPOS
-  app.get('/api/kedaipos/order/:transaction_id/status', getOrderStatus);
-  
-  // Update queue status from KedaiPOS
-  app.patch('/api/kedaipos/queue/:transaction_id', updateQueueStatus);
-  
-  // Manual POS integration endpoint for staff to add customers to queue
-  app.post('/api/add-to-queue', async (req, res) => {
+  // Get order status for KedaiPOS.
+  // Locked to staff (Task 2.3): currently mock data, but the real
+  // implementation will return live order state — never anonymous-readable.
+  // If KedaiPOS itself ever needs to poll this, swap the guard for an
+  // API-key header check, not anonymous access.
+  app.get('/api/kedaipos/order/:transaction_id/status', requireStaff, getOrderStatus);
+
+  // Update queue status from KedaiPOS.
+  // Locked to staff (Task 2.3): a queue status change is a destructive
+  // operation that must be tied to a known operator.
+  app.patch('/api/kedaipos/queue/:transaction_id', requireStaff, updateQueueStatus);
+
+  // Manual POS integration endpoint for staff to add customers to queue.
+  // Locked to staff (Task 2.3): mutates KedaiPOS state on behalf of the
+  // shop, only operators may call it.
+  app.post('/api/add-to-queue', requireStaff, async (req, res) => {
     try {
       const { transaction_id, status = 'IN_PROGRESS' } = req.body;
       
@@ -1580,8 +1590,10 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
-  // POS Dashboard endpoint - get all pending orders
-  app.get('/api/pos/pending-orders', async (req, res) => {
+  // POS Dashboard endpoint - get all pending orders.
+  // Locked to staff (Task 2.3): pending-order data is operational and
+  // must never be exposed to anonymous traffic.
+  app.get('/api/pos/pending-orders', requireStaff, async (req, res) => {
     try {
       // In a real implementation, you'd query your database for pending orders
       // For now, return mock data structure that KedaiPOS would expect
@@ -1618,8 +1630,13 @@ export async function registerRoutes(app: Express): Promise<Server> {
   // won. They also each contained a hardcoded JWT_SECRET fallback.
   // See docs/AUTH_AUDIT.md (sections 1, 2, and "Findings beyond scope").
 
-  // Customer service history endpoint - real database query
-  app.get('/api/customer/history/:carPlate?', async (req, res) => {
+  // Customer service history endpoint - real database query.
+  // Hybrid guard (Task 2.3): a request is allowed if it's either
+  //   (a) authenticated as staff (any role), or
+  //   (b) authenticated as the customer who owns that license plate.
+  // Without this guard, anyone could enumerate plates and pull another
+  // person's wash history, which is a privacy leak.
+  app.get('/api/customer/history/:carPlate?', requireStaffOrPlateOwner, async (req, res) => {
     try {
       const carPlate = req.params.carPlate || req.query.carPlate as string;
       
@@ -1649,8 +1666,11 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
-  // Service History API endpoints for cross-app integration
-  app.post('/api/service-history', async (req, res) => {
+  // Service History API endpoints for cross-app integration.
+  // Locked to staff (Task 2.3): writing a service-history row is a
+  // privileged operation. The KedaiPOS webhook path is separate and uses
+  // its own HMAC signature check (`/api/kedaipos-webhook`).
+  app.post('/api/service-history', requireStaff, async (req, res) => {
     try {
       const { carPlate, phone, serviceType, branch, amount, status, transactionId, paymentReference } = req.body;
       
@@ -1676,7 +1696,8 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
-  app.get('/api/service-history/branch/:branch', async (req, res) => {
+  // Locked to staff (Task 2.3): branch-wide history is internal data.
+  app.get('/api/service-history/branch/:branch', requireStaff, async (req, res) => {
     try {
       const { branch } = req.params;
       const history = await storage.getServiceHistoryByBranch(branch);
@@ -1687,7 +1708,8 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
-  app.get('/api/service-history/pending', async (req, res) => {
+  // Locked to staff (Task 2.3): pending-services list drives the lane queue.
+  app.get('/api/service-history/pending', requireStaff, async (req, res) => {
     try {
       const branch = req.query.branch as string | undefined;
       const pending = await storage.getPendingServices(branch);
@@ -1698,7 +1720,8 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
-  app.patch('/api/service-history/:id', async (req, res) => {
+  // Locked to staff (Task 2.3): only operators flip status / mark complete.
+  app.patch('/api/service-history/:id', requireStaff, async (req, res) => {
     try {
       const id = parseInt(req.params.id);
       const updates = req.body;

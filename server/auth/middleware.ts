@@ -12,6 +12,8 @@
 
 import type { Request, Response, NextFunction } from "express";
 import type { Session, User } from "lucia";
+import { sql } from "drizzle-orm";
+import { db } from "../db";
 import { lucia } from "./lucia";
 import { staffLucia } from "./staffLucia";
 
@@ -135,4 +137,59 @@ export function requireStaffRole(...allowed: Array<"owner" | "manager" | "lane" 
     }
     next();
   };
+}
+
+/**
+ * Hybrid guard for customer-history-style endpoints keyed by license plate.
+ *
+ * Allows the request through if EITHER:
+ *   1. There is a valid staff session (any role) — operations need to look up
+ *      any customer's history at the lane.
+ *   2. There is a valid customer (Lucia) session AND the requested plate
+ *      belongs to one of that customer's cars (case-insensitive match against
+ *      `cars.license_plate`).
+ *
+ * Otherwise responds 401. The plate is read from `req.params.carPlate` first,
+ * falling back to `req.query.carPlate`. If no plate is supplied, returns
+ * 400 — the wrapped route would have done the same.
+ *
+ * Defensive: any DB error during the ownership lookup is treated as "not
+ * owner" rather than crashing the request, so a transient DB hiccup never
+ * leaks data.
+ */
+export async function requireStaffOrPlateOwner(
+  req: Request,
+  res: Response,
+  next: NextFunction
+) {
+  // Staff bypass — fastest path, no DB work.
+  if (req.staff?.user) return next();
+
+  const rawPlate =
+    (req.params?.carPlate as string | undefined) ??
+    (typeof req.query?.carPlate === "string" ? req.query.carPlate : undefined);
+  if (!rawPlate || !rawPlate.trim()) {
+    return res.status(400).json({ error: "Car plate number required" });
+  }
+
+  const customer = req.lucia?.user;
+  if (!customer) {
+    return res.status(401).json({ error: "Authentication required" });
+  }
+
+  try {
+    const result = await db.execute(sql`
+      SELECT 1
+        FROM cars
+       WHERE user_id = ${Number(customer.id)}
+         AND UPPER(license_plate) = UPPER(${rawPlate})
+       LIMIT 1
+    `);
+    if (result.rows.length > 0) return next();
+  } catch (err) {
+    console.error("[requireStaffOrPlateOwner] ownership lookup failed:", err);
+    // Fall through to 403 — never leak data on a failed check.
+  }
+
+  return res.status(403).json({ error: "Plate does not belong to this account" });
 }
