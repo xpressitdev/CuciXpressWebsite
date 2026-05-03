@@ -29,6 +29,7 @@ import {
   Upload,
   User,
   X,
+  BarChart3,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -806,6 +807,19 @@ export default function POS() {
                   )}
                 </div>
               )}
+              {/* End-of-Day shortcut: deep-links to /admin where the cashier
+                  can pull the dashboard, payment-method breakdown, and Excel
+                  export. Same staff session, no second login. */}
+              <Link href="/admin">
+                <Button
+                  variant="outline"
+                  size="sm"
+                  data-testid="button-pos-eod-report"
+                >
+                  <BarChart3 className="w-4 h-4 mr-1" />
+                  End-of-Day Report
+                </Button>
+              </Link>
               <Button
                 variant="outline"
                 size="sm"
