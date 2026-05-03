@@ -10,61 +10,33 @@ import brandBanner from "../assets/gallery-8.jpg";
 
 export default function Gallery() {
   const galleryImages = [
-    {
-      src: dingPayment,
-      alt: "Smiling Cuci Xpress team member providing friendly service with 'pay with ding!' digital payment option",
-      span: "col-span-2 row-span-2",
-    },
-    {
-      src: storefront,
-      alt: "Cuci Xpress storefront with purple and orange branding at sunset",
-      span: "col-span-1 row-span-1",
-    },
-    {
-      src: washTunnel,
-      alt: "Automated car wash tunnel with brushes and spray equipment",
-      span: "col-span-1 row-span-1",
-    },
-    {
-      src: nightView,
-      alt: "Cuci Xpress night view with purple branding and red car entering wash bay",
-      span: "col-span-1 row-span-1",
-    },
-    {
-      src: carWashBay,
-      alt: "White Haval car getting washed in automated car wash bay with purple fans overhead",
-      span: "col-span-1 row-span-1",
-    },
-    {
-      src: dualWash,
-      alt: "Two white Audi cars being washed simultaneously in automated wash bays",
-      span: "col-span-2 row-span-1",
-    },
-    {
-      src: luxuryCars,
-      alt: "Professional detail cleaning of luxury vehicles including Jeep and Ford Ranger with Cuci Xpress staff providing meticulous care",
-      span: "col-span-1 row-span-1",
-    },
-    {
-      src: brandBanner,
-      alt: "Cuci Xpress purple branded drive-thru car wash promotional banner with red sports car design",
-      span: "col-span-1 row-span-1",
-    },
+    { src: dingPayment, alt: "Smiling Cuci Xpress team member providing friendly service with 'pay with ding!' digital payment option", span: "col-span-2 row-span-2" },
+    { src: storefront, alt: "Cuci Xpress storefront with purple and orange branding at sunset", span: "col-span-1 row-span-1" },
+    { src: washTunnel, alt: "Automated car wash tunnel with brushes and spray equipment", span: "col-span-1 row-span-1" },
+    { src: nightView, alt: "Cuci Xpress night view with purple branding and red car entering wash bay", span: "col-span-1 row-span-1" },
+    { src: carWashBay, alt: "White Haval car getting washed in automated car wash bay with purple fans overhead", span: "col-span-1 row-span-1" },
+    { src: dualWash, alt: "Two white Audi cars being washed simultaneously in automated wash bays", span: "col-span-2 row-span-1" },
+    { src: luxuryCars, alt: "Professional detail cleaning of luxury vehicles with Cuci Xpress staff providing meticulous care", span: "col-span-1 row-span-1" },
+    { src: brandBanner, alt: "Cuci Xpress purple branded drive-thru car wash promotional banner with red sports car design", span: "col-span-1 row-span-1" },
   ];
 
   return (
     <section id="gallery" className="py-20 bg-gray-50">
       <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
         <motion.div
-          initial={{ opacity: 0, y: 30 }}
+          initial={{ opacity: 0, y: 20 }}
           whileInView={{ opacity: 1, y: 0 }}
           transition={{ duration: 0.6 }}
           viewport={{ once: true }}
-          className="text-center mb-16"
+          className="text-center mb-14"
         >
-          <h2 className="text-4xl font-bold text-gray-900 mb-4">See Our Work</h2>
-          <p className="text-xl text-gray-600 max-w-3xl mx-auto">
-            Experience our drive-thru car wash technology and see the quality results we deliver across all locations.
+          <div className="cuci-eyebrow mb-3">Behind the scenes</div>
+          <h2 className="text-4xl md:text-5xl font-extrabold tracking-tight text-gray-900 mb-4">
+            See our <span className="text-cuci-primary">work</span>
+          </h2>
+          <p className="text-lg text-gray-600 max-w-3xl mx-auto">
+            Experience our drive-thru car wash technology and the quality results
+            we deliver across all locations.
           </p>
         </motion.div>
 
@@ -72,17 +44,18 @@ export default function Gallery() {
           {galleryImages.map((image, index) => (
             <motion.div
               key={index}
-              initial={{ opacity: 0, scale: 0.8 }}
+              initial={{ opacity: 0, scale: 0.9 }}
               whileInView={{ opacity: 1, scale: 1 }}
-              transition={{ duration: 0.6, delay: index * 0.1 }}
+              transition={{ duration: 0.5, delay: index * 0.05 }}
               viewport={{ once: true }}
-              whileHover={{ scale: 1.02 }}
-              className={image.span}
+              whileHover={{ translateX: -2, translateY: -2 }}
+              className={`${image.span} overflow-hidden rounded-xl border-2 border-black bg-black`}
+              style={{ boxShadow: "4px 4px 0px 0px rgba(0,0,0,0.9)" }}
             >
               <img
                 src={image.src}
                 alt={image.alt}
-                className="w-full h-full object-cover rounded-2xl shadow-lg hover:shadow-xl transition-shadow"
+                className="w-full h-full object-cover"
               />
             </motion.div>
           ))}
