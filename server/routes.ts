@@ -193,6 +193,88 @@ function processGoogleReviews(data: any) {
 }
 
 export async function registerRoutes(app: Express): Promise<Server> {
+  // ===================================================================
+  // Public Live Queue snapshot (no auth). Polled ~every 15s by both
+  // the /queue page and the home-page widget.
+  //
+  // Status mapping for v1:
+  //   queued  = orders today with status in ('paid','queued')
+  //   washing = orders today with status = 'washing'
+  //   today_total = orders today with status = 'done'
+  // Wait estimate: queued × 8 minutes (simple per-car heuristic; will
+  // be refined once we have lane-level timings from LiveQue).
+  //
+  // We use a single SELECT for active orders rather than one query per
+  // branch, so this stays cheap even at 5 branches × 15s polling.
+  // ===================================================================
+  app.get("/api/queue/snapshot", async (_req, res) => {
+    try {
+      const PER_CAR_MIN = 8;
+
+      const branchesRes = await db.execute(sql`
+        SELECT id, name, location, is_open
+        FROM branches
+        ORDER BY id ASC
+      `);
+      const branches = branchesRes.rows as Array<{
+        id: number; name: string; location: string | null; is_open: boolean;
+      }>;
+
+      const activeRes = await db.execute(sql`
+        SELECT branch_id, plate, package_name, status, created_at
+        FROM orders
+        WHERE status IN ('paid','queued','washing')
+          AND date(created_at AT TIME ZONE 'Asia/Brunei')
+            = (now() AT TIME ZONE 'Asia/Brunei')::date
+        ORDER BY branch_id ASC,
+          CASE status WHEN 'washing' THEN 0 ELSE 1 END,
+          created_at ASC
+      `);
+      const active = activeRes.rows as Array<{
+        branch_id: number; plate: string; package_name: string; status: string; created_at: string;
+      }>;
+
+      const totalsRes = await db.execute(sql`
+        SELECT branch_id, COUNT(*)::int AS done_count
+        FROM orders
+        WHERE status = 'done'
+          AND date(created_at AT TIME ZONE 'Asia/Brunei')
+            = (now() AT TIME ZONE 'Asia/Brunei')::date
+        GROUP BY branch_id
+      `);
+      const totals = totalsRes.rows as Array<{ branch_id: number; done_count: number }>;
+      const todayMap = new Map(totals.map((t) => [t.branch_id, t.done_count]));
+
+      const result = branches.map((b) => {
+        const mine = active.filter((o) => o.branch_id === b.id);
+        const washing = mine
+          .filter((o) => o.status === 'washing')
+          .map((o) => ({ plate: o.plate, package_name: o.package_name }));
+        const queued = mine
+          .filter((o) => o.status !== 'washing')
+          .map((o, i) => ({ plate: o.plate, package_name: o.package_name, position: i + 1 }));
+        return {
+          id: b.id,
+          name: b.name,
+          location: b.location,
+          is_open: b.is_open,
+          washing_count: washing.length,
+          queued_count: queued.length,
+          today_total: todayMap.get(b.id) ?? 0,
+          est_wait_minutes: queued.length * PER_CAR_MIN,
+          washing,
+          queued,
+        };
+      });
+
+      res.set('Cache-Control', 'no-store');
+      res.json({ branches: result, server_time: new Date().toISOString() });
+    } catch (err) {
+      console.error('queue/snapshot failed', err);
+      res.status(500).json({ message: 'Failed to load queue snapshot' });
+    }
+  });
+
   // Investor interest form submission
   app.post("/api/investor-interest", async (req, res) => {
     try {

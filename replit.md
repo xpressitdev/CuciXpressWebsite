@@ -331,3 +331,9 @@ Two auth systems coexist by design during the Week 1–Week 2 cutover:
    KedaiPOS labels so dashboards keep working unchanged. Hard-capped
    at 100,000 rows per export (413 + JSON hint when exceeded).
    Surfaced as an "Export to Excel" button on the Order Report tab.
+
+   **Phase 6 (in progress) — Public Live Queue.** New `GET /api/queue/snapshot` (no auth) aggregates today's orders across all 5 branches into per-branch `washing[]`, `queued[]`, `today_total`, and `est_wait_minutes` (= queued × 8 min, simple v1 heuristic). Polled every 15s by both:
+   - `/queue` page (`client/src/pages/queue.tsx`) — branch picker on the left, KPI tiles + live wash-lane visualization for the selected branch (cars rendered as cards from ENTRY → EXIT, washing cars highlighted in cuci-primary).
+   - `<LiveQueueWidget>` on the home page, sandwiched between Hero and Stats — compact card with per-branch wait bars, "today · N washed" pill, and a "Shortest wait" suggestion linking to `/queue`.
+   
+   The Navigation "Live-Queue" pill (desktop + mobile) was switched from the external `cuci-xpress.com` link to the internal `/queue` route. Functional version only — visual revamp deferred to Phase 7 along with the rest of the landing redesign.

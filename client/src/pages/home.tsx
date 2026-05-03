@@ -1,5 +1,6 @@
 import Navigation from "@/components/Navigation";
 import Hero from "@/components/Hero";
+import LiveQueueWidget from "@/components/LiveQueueWidget";
 import Stats from "@/components/Stats";
 import LocationsWithTestimonials from "@/components/LocationsWithTestimonials";
 import Gallery from "@/components/Gallery";
@@ -14,6 +15,7 @@ export default function Home() {
       <Navigation />
       <main>
         <Hero />
+        <LiveQueueWidget />
         <Stats />
         <LocationsWithTestimonials />
         <Gallery />
