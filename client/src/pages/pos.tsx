@@ -257,9 +257,20 @@ export default function POS() {
     }
   };
 
+  // Catalog is now branch-scoped: a package may be hidden at branches
+  // it isn't assigned to (see migration 2026-05-04_08). We re-key by
+  // branchId so switching branches refetches.
   const { data: catalog, isLoading: catalogLoading } = useQuery<CatalogResponse>({
-    queryKey: ["/api/pos/catalog"],
-    enabled: isAuthenticated,
+    queryKey: ["/api/pos/catalog", branchId],
+    enabled: isAuthenticated && branchId !== null,
+    queryFn: async () => {
+      const r = await fetch(
+        `/api/pos/catalog?branch_id=${encodeURIComponent(String(branchId))}`,
+        { credentials: "include" },
+      );
+      if (!r.ok) throw new Error("catalog_failed");
+      return r.json();
+    },
   });
 
   const { data: todayData } = useQuery<{ orders: TodayOrder[] }>({

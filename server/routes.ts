@@ -1016,6 +1016,20 @@ export async function registerRoutes(app: Express): Promise<Server> {
   // ==========================================================================
 
   // GET /api/admin/catalog/packages
+  // GET /api/admin/branches  — small helper used by the package edit
+  // dialog (and anywhere else admin needs to render branch checkboxes).
+  app.get('/api/admin/branches', requireStaff, requireStaffRole('owner', 'manager'), async (_req, res) => {
+    try {
+      const rows = (await db.execute(
+        sql`SELECT id, name, location FROM branches ORDER BY name`,
+      )).rows;
+      res.json({ rows });
+    } catch (err) {
+      console.error('[admin.branches.list] failed:', err);
+      res.status(500).json({ error: 'list_failed' });
+    }
+  });
+
   app.get('/api/admin/catalog/packages', requireStaff, requireStaffRole('owner'), async (_req, res) => {
     try {
       const rows = (await db.execute(sql`
@@ -1031,8 +1045,23 @@ export async function registerRoutes(app: Express): Promise<Server> {
          GROUP BY 1
       `)).rows as Array<{ package_id: string; n: number }>;
       const usage = new Map(used.map((u) => [u.package_id, u.n]));
+      // Branch assignments. Empty array = "available at all branches"
+      // (the migration's default; matches POS read logic).
+      const pb = (await db.execute(sql`
+        SELECT package_id, branch_id FROM package_branches
+      `)).rows as Array<{ package_id: string; branch_id: number }>;
+      const branchMap = new Map<string, number[]>();
+      for (const r of pb) {
+        const arr = branchMap.get(r.package_id) ?? [];
+        arr.push(r.branch_id);
+        branchMap.set(r.package_id, arr);
+      }
       res.json({
-        rows: rows.map((r: any) => ({ ...r, order_count: usage.get(r.id) ?? 0 })),
+        rows: rows.map((r: any) => ({
+          ...r,
+          order_count: usage.get(r.id) ?? 0,
+          branch_ids: (branchMap.get(r.id) ?? []).sort((a, b) => a - b),
+        })),
       });
     } catch (err) {
       console.error('[admin.catalog.packages.list] failed:', err);
@@ -1047,7 +1076,28 @@ export async function registerRoutes(app: Express): Promise<Server> {
     price_cents: z.number().int().min(0).max(1_000_00),
     is_active: z.boolean().optional(),
     sort_order: z.number().int().min(0).max(999).optional(),
+    // Empty array = available at all branches (POS treats "no rows" as
+    // "show everywhere"). A non-empty array restricts the package to
+    // those specific branches.
+    branch_ids: z.array(z.number().int().positive()).max(50).optional(),
   });
+
+  // Replace the package_branches join rows for a given package with
+  // exactly the supplied list. Wrapped in a single UPSERT-style block
+  // so a partial failure doesn't leave the join half-rewritten.
+  async function rewritePackageBranches(packageId: string, branchIds: number[]) {
+    await db.execute(sql`DELETE FROM package_branches WHERE package_id = ${packageId}`);
+    if (branchIds.length === 0) return;
+    // Insert all rows in one statement; ON CONFLICT no-ops in case the
+    // caller passed duplicates by accident.
+    for (const bid of branchIds) {
+      await db.execute(sql`
+        INSERT INTO package_branches (package_id, branch_id)
+        VALUES (${packageId}, ${bid})
+        ON CONFLICT DO NOTHING
+      `);
+    }
+  }
 
   // POST /api/admin/catalog/packages
   app.post('/api/admin/catalog/packages', requireStaff, requireStaffRole('owner'), async (req, res) => {
@@ -1055,7 +1105,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
     if (!parsed.success) {
       return res.status(400).json({ error: 'invalid_body', details: parsed.error.flatten() });
     }
-    const { name, description, duration_minutes, price_cents, is_active, sort_order } = parsed.data;
+    const { name, description, duration_minutes, price_cents, is_active, sort_order, branch_ids } = parsed.data;
     const id = `pkg_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 8)}`;
     try {
       const inserted = (await db.execute(sql`
@@ -1066,7 +1116,10 @@ export async function registerRoutes(app: Express): Promise<Server> {
         )
         RETURNING id, name, description, duration_minutes, price_cents, is_active, sort_order, created_at
       `)).rows[0];
-      res.json({ row: inserted });
+      if (branch_ids && branch_ids.length > 0) {
+        await rewritePackageBranches(id, branch_ids);
+      }
+      res.json({ row: { ...inserted, branch_ids: (branch_ids ?? []).slice().sort((a, b) => a - b) } });
     } catch (err) {
       console.error('[admin.catalog.packages.create] failed:', err);
       res.status(500).json({ error: 'create_failed' });
@@ -1095,7 +1148,16 @@ export async function registerRoutes(app: Express): Promise<Server> {
          RETURNING id, name, description, duration_minutes, price_cents, is_active, sort_order, created_at
       `)).rows[0];
       if (!updated) return res.status(404).json({ error: 'not_found' });
-      res.json({ row: updated });
+      // Only touch branch assignments when the caller actually sent the
+      // field. `branch_ids: []` is a meaningful "none / all" assignment
+      // — see the migration header for the empty-set semantics.
+      if (p.branch_ids !== undefined) {
+        await rewritePackageBranches(id, p.branch_ids);
+      }
+      const currentBranches = (await db.execute(sql`
+        SELECT branch_id FROM package_branches WHERE package_id = ${id} ORDER BY branch_id
+      `)).rows as Array<{ branch_id: number }>;
+      res.json({ row: { ...updated, branch_ids: currentBranches.map((r) => r.branch_id) } });
     } catch (err) {
       console.error('[admin.catalog.packages.update] failed:', err);
       res.status(500).json({ error: 'update_failed' });
@@ -2403,17 +2465,41 @@ export async function registerRoutes(app: Express): Promise<Server> {
   // Returns the current active package + pricing matrix + active addons.
   // Shape is deliberately denormalised so the POS page can render in one
   // query and not babysit cache invalidations.
-  app.get('/api/pos/catalog', requireStaff, async (_req, res) => {
+  app.get('/api/pos/catalog', requireStaff, async (req, res) => {
     try {
       // Flat per-package pricing in BND cents (2026-05-04_03 dropped
       // the size×branch pricing matrix — Cuci Xpress prices are uniform
       // across vehicle sizes).
-      const packagesRows = (await db.execute(sql`
-        SELECT id, name, description, duration_minutes, price_cents, sort_order
-          FROM packages
-         WHERE is_active = true
-         ORDER BY sort_order ASC, name ASC
-      `)).rows as Array<{
+      //
+      // Branch filtering (added 2026-05-04_08): if `branch_id` is in
+      // the query, hide packages that are explicitly assigned to other
+      // branches. A package with NO rows in package_branches stays
+      // visible everywhere — that's the documented default.
+      const rawBranch = req.query.branch_id;
+      const branchId = rawBranch != null && rawBranch !== '' ? Number(rawBranch) : null;
+      const useBranchFilter = branchId !== null && Number.isFinite(branchId);
+      const packagesRows = (await db.execute(
+        useBranchFilter
+          ? sql`
+              SELECT p.id, p.name, p.description, p.duration_minutes, p.price_cents, p.sort_order
+                FROM packages p
+               WHERE p.is_active = true
+                 AND (
+                   NOT EXISTS (SELECT 1 FROM package_branches pb WHERE pb.package_id = p.id)
+                   OR EXISTS (
+                     SELECT 1 FROM package_branches pb
+                      WHERE pb.package_id = p.id AND pb.branch_id = ${branchId}
+                   )
+                 )
+               ORDER BY p.sort_order ASC, p.name ASC
+            `
+          : sql`
+              SELECT id, name, description, duration_minutes, price_cents, sort_order
+                FROM packages
+               WHERE is_active = true
+               ORDER BY sort_order ASC, name ASC
+            `,
+      )).rows as Array<{
         id: string;
         name: string;
         description: string | null;

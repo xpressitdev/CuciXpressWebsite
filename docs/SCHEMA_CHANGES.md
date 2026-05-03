@@ -840,3 +840,35 @@ read-only view with an amber banner instead of buttons.
 Skipped this phase: **promotions / promo codes** — owner deferred
 (they have none today). Will be revisited later if promo support is
 needed at the till.
+
+---
+
+## 2026-05-04_08 — Branch-scoped packages
+
+New join table `package_branches (package_id text, branch_id integer,
+PK composite)` plus an index on `branch_id`. Adds a many-to-many
+between packages and branches so the Tungku-only Interior Cleaning
+package no longer appears at other tills.
+
+**Empty-set semantics: a package with NO rows in `package_branches`
+is treated as "available at all branches"** — both the POS read
+filter and the admin UI follow this convention. This lets the seven
+existing packages keep working without any data migration; they just
+stay empty in the new table.
+
+API surface:
+- `GET /api/admin/branches` (owner+manager) — small helper used by
+  the package edit dialog.
+- `GET /api/admin/catalog/packages` now returns `branch_ids: number[]`
+  per row (sorted, empty = all).
+- `POST/PATCH /api/admin/catalog/packages` accept optional
+  `branch_ids`. Rewriting is destructive-replace within a single
+  helper (`rewritePackageBranches`) so a partial failure can't leave
+  the join half-rewritten. PATCH only touches the join when the field
+  is explicitly present (i.e. `branch_ids: []` is a valid "switch to
+  all branches" instruction; absent means "don't change").
+- `GET /api/pos/catalog?branch_id=X` filters packages by branch using
+  `(NOT EXISTS … OR EXISTS branch_id = X)`. POS now passes its active
+  `branch_id` and re-keys the query so a branch switch refetches.
+
+Add-ons remain global per owner direction (universal upsells).
