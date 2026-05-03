@@ -1532,6 +1532,247 @@ export async function registerRoutes(app: Express): Promise<Server> {
     });
   });
 
+  // === POS surface endpoints (Task 2.4) =====================================
+  // Three thin endpoints that drive the cashier-facing POS page at /pos.
+  // All three sit behind `requireStaff` — the public surface never sees
+  // catalog or order data. Pricing math always re-runs on the server from
+  // the catalog rows, never trusting client-supplied amounts.
+  // ==========================================================================
+
+  // GET /api/pos/catalog
+  // Returns the current active package + pricing matrix + active addons.
+  // Shape is deliberately denormalised so the POS page can render in one
+  // query and not babysit cache invalidations.
+  app.get('/api/pos/catalog', requireStaff, async (_req, res) => {
+    try {
+      const packagesRows = (await db.execute(sql`
+        SELECT id, name, description, duration_minutes, sort_order
+          FROM packages
+         WHERE is_active = true
+         ORDER BY sort_order ASC, name ASC
+      `)).rows as Array<{
+        id: string;
+        name: string;
+        description: string | null;
+        duration_minutes: number | null;
+        sort_order: number;
+      }>;
+
+      // Default (branch_id IS NULL) prices only — branch overrides come
+      // later when we wire per-branch deviations.
+      const pricingRows = (await db.execute(sql`
+        SELECT package_id, vehicle_size, price_cents
+          FROM package_pricing
+         WHERE is_active = true AND branch_id IS NULL
+         ORDER BY package_id ASC, vehicle_size ASC
+      `)).rows as Array<{
+        package_id: string;
+        vehicle_size: 'small' | 'medium' | 'large' | 'xlarge';
+        price_cents: number;
+      }>;
+
+      const addonsRows = (await db.execute(sql`
+        SELECT id, name, price_cents, sort_order
+          FROM addons_catalog
+         WHERE is_active = true
+         ORDER BY sort_order ASC, name ASC
+      `)).rows as Array<{
+        id: string;
+        name: string;
+        price_cents: number;
+        sort_order: number;
+      }>;
+
+      // Stitch pricing onto each package as { vehicle_size: price_cents }.
+      const pricingByPkg = new Map<string, Record<string, number>>();
+      for (const r of pricingRows) {
+        const m = pricingByPkg.get(r.package_id) ?? {};
+        m[r.vehicle_size] = r.price_cents;
+        pricingByPkg.set(r.package_id, m);
+      }
+
+      res.json({
+        packages: packagesRows.map((p) => ({
+          ...p,
+          prices_by_size: pricingByPkg.get(p.id) ?? {},
+        })),
+        addons: addonsRows,
+        payment_methods: [
+          'cash',
+          'bank_transfer',
+          'card',
+          'qr_code',
+          'baiduri_pay',
+          'quick_pay',
+          'subscription',
+          'voucher',
+        ] as const,
+        vehicle_sizes: ['small', 'medium', 'large', 'xlarge'] as const,
+      });
+    } catch (err) {
+      console.error('[pos.catalog] failed:', err);
+      res.status(500).json({ error: 'Failed to load catalog' });
+    }
+  });
+
+  // POST /api/pos/orders
+  // Body: { package_id, vehicle_size, plate, addon_ids[], payment_method,
+  //         payment_ref?, branch_id, order_notes?, item_notes? }
+  // The server authoritatively recomputes the price from the catalog and
+  // generates a per-branch-per-day ticket code.
+  const posOrderSchema = z.object({
+    package_id: z.string().min(1),
+    vehicle_size: z.enum(['small', 'medium', 'large', 'xlarge']),
+    plate: z.string().trim().min(1).max(20),
+    addon_ids: z.array(z.string().min(1)).default([]),
+    payment_method: z.enum([
+      'cash', 'bank_transfer', 'card', 'qr_code',
+      'baiduri_pay', 'quick_pay', 'subscription', 'voucher',
+    ]),
+    payment_ref: z.string().trim().max(120).optional().nullable(),
+    branch_id: z.number().int().positive(),
+    order_notes: z.string().trim().max(500).optional().nullable(),
+    item_notes: z.string().trim().max(500).optional().nullable(),
+  });
+
+  app.post('/api/pos/orders', requireStaff, async (req, res) => {
+    const parsed = posOrderSchema.safeParse(req.body);
+    if (!parsed.success) {
+      return res.status(400).json({
+        error: 'invalid_request',
+        details: parsed.error.flatten(),
+      });
+    }
+    const body = parsed.data;
+    const staffId = (req.staff!.user as any).id as string;
+
+    try {
+      // 1. Look up the package + price for the chosen vehicle size.
+      const pkgRows = (await db.execute(sql`
+        SELECT p.id, p.name, pp.price_cents
+          FROM packages p
+          JOIN package_pricing pp ON pp.package_id = p.id
+         WHERE p.id = ${body.package_id}
+           AND p.is_active = true
+           AND pp.vehicle_size = ${body.vehicle_size}
+           AND pp.is_active = true
+           AND pp.branch_id IS NULL
+         LIMIT 1
+      `)).rows as Array<{ id: string; name: string; price_cents: number }>;
+      if (pkgRows.length === 0) {
+        return res.status(400).json({ error: 'package_not_available' });
+      }
+      const pkg = pkgRows[0];
+
+      // 2. Look up + snapshot the requested addons.
+      let addonSnapshots: Array<{ id: string; name: string; price_cents: number }> = [];
+      if (body.addon_ids.length > 0) {
+        const addonRows = (await db.execute(sql`
+          SELECT id, name, price_cents
+            FROM addons_catalog
+           WHERE id = ANY(${body.addon_ids})
+             AND is_active = true
+        `)).rows as Array<{ id: string; name: string; price_cents: number }>;
+        if (addonRows.length !== body.addon_ids.length) {
+          return res.status(400).json({ error: 'addon_not_available' });
+        }
+        addonSnapshots = addonRows;
+      }
+
+      // 3. Compute totals server-side. Never trust client amounts.
+      const addonsTotal = addonSnapshots.reduce((s, a) => s + a.price_cents, 0);
+      const subtotal = pkg.price_cents + addonsTotal;
+      const total = subtotal; // tax/service charge stay 0 until tax wiring lands
+
+      // 4. Allocate the next ticket code for this branch + day.
+      // Format: T-001, T-002, ... Per the unique index
+      // `orders_branch_ticket_day_uniq(branch_id, ticket_code, ticket_day)`.
+      const seqRow = (await db.execute(sql`
+        SELECT COALESCE(
+          MAX( NULLIF(regexp_replace(ticket_code, '\\D', '', 'g'), '')::int ),
+          0
+        ) + 1 AS next_seq
+          FROM orders
+         WHERE branch_id = ${body.branch_id}
+           AND ticket_day = (now() AT TIME ZONE 'UTC')::date
+      `)).rows as Array<{ next_seq: number }>;
+      const seq = seqRow[0]?.next_seq ?? 1;
+      const ticketCode = `T-${String(seq).padStart(3, '0')}`;
+
+      // 5. Insert. `id` is text — generate a random one.
+      const orderId = `ord_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 8)}`;
+
+      await db.execute(sql`
+        INSERT INTO orders (
+          id, branch_id, staff_id, plate,
+          package_id, package_name, package_price_cents,
+          addons, subtotal_cents, total_cents,
+          payment_method, payment_ref,
+          ticket_code, status,
+          order_notes, item_notes
+        ) VALUES (
+          ${orderId}, ${body.branch_id}, ${staffId}, ${body.plate.toUpperCase()},
+          ${pkg.id}, ${pkg.name}, ${pkg.price_cents},
+          ${JSON.stringify(addonSnapshots)}::jsonb, ${subtotal}, ${total},
+          ${body.payment_method}, ${body.payment_ref ?? null},
+          ${ticketCode}, 'paid',
+          ${body.order_notes ?? null}, ${body.item_notes ?? null}
+        )
+      `);
+
+      res.status(201).json({
+        ok: true,
+        order: {
+          id: orderId,
+          ticket_code: ticketCode,
+          branch_id: body.branch_id,
+          plate: body.plate.toUpperCase(),
+          package_name: pkg.name,
+          package_price_cents: pkg.price_cents,
+          addons: addonSnapshots,
+          subtotal_cents: subtotal,
+          total_cents: total,
+          payment_method: body.payment_method,
+          status: 'paid',
+        },
+      });
+    } catch (err: any) {
+      // Most likely failure mode: a near-simultaneous insert grabbed the
+      // same ticket sequence. Surface a 409 so the client can retry.
+      if (err?.code === '23505') {
+        console.warn('[pos.orders] ticket collision, advise retry');
+        return res.status(409).json({ error: 'ticket_collision_retry' });
+      }
+      console.error('[pos.orders] failed:', err);
+      res.status(500).json({ error: 'Failed to create order' });
+    }
+  });
+
+  // GET /api/pos/orders/today?branch_id=N
+  // Today's orders for a branch, newest first. Used by the right-rail of
+  // the POS page so the cashier sees what's been booked.
+  app.get('/api/pos/orders/today', requireStaff, async (req, res) => {
+    const branchId = Number(req.query.branch_id);
+    if (!Number.isFinite(branchId) || branchId <= 0) {
+      return res.status(400).json({ error: 'branch_id required' });
+    }
+    try {
+      const rows = (await db.execute(sql`
+        SELECT id, ticket_code, plate, package_name,
+               total_cents, payment_method, status, created_at
+          FROM orders
+         WHERE branch_id = ${branchId}
+           AND ticket_day = (now() AT TIME ZONE 'UTC')::date
+         ORDER BY created_at DESC
+         LIMIT 50
+      `)).rows;
+      res.json({ orders: rows });
+    } catch (err) {
+      console.error('[pos.orders.today] failed:', err);
+      res.status(500).json({ error: 'Failed to load today\'s orders' });
+    }
+  });
+
   // === KedaiPOS Integration Endpoints ===
 
   // KedaiPOS webhook endpoint
