@@ -11,18 +11,22 @@
 // the form.
 // ============================================================
 
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { Link } from "wouter";
 import {
   ArrowLeft,
   CheckCircle2,
+  Clock,
+  History,
   Loader2,
   LogOut,
   MapPin,
   Plus,
   ReceiptText,
   ShieldCheck,
+  User,
+  X,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -77,6 +81,34 @@ interface TodayOrder {
   payment_method: PaymentMethod;
   status: string;
   created_at: string;
+}
+
+interface VehicleSuggestion {
+  id: number;
+  license_plate: string;
+  brand: string | null;
+  model: string | null;
+  color: string | null;
+  type: string | null;
+  last_seen_at: string | null;
+  customer: { id: number; phone: string; name: string } | null;
+}
+interface VehicleHistory {
+  vehicle: VehicleSuggestion;
+  customer: { id: number; phone: string; name: string } | null;
+  total_visits: number;
+  total_spent_cents: number;
+  favourite_branch_id: number | null;
+  recent_orders: Array<{
+    id: string;
+    ticket_code: string;
+    branch_id: number;
+    package_name: string;
+    total_cents: number;
+    payment_method: PaymentMethod;
+    status: string;
+    created_at: string;
+  }>;
 }
 
 interface CreatedOrder {
@@ -140,6 +172,24 @@ function formatTime(iso: string): string {
   });
 }
 
+// "3 days ago", "just now". Compact relative time for the autocomplete +
+// matched-vehicle pill. Falls back to a date for anything older than 30d.
+function formatRelative(iso: string): string {
+  const ms = Date.now() - new Date(iso).getTime();
+  if (ms < 60_000) return "just now";
+  const m = Math.floor(ms / 60_000);
+  if (m < 60) return `${m}m ago`;
+  const h = Math.floor(m / 60);
+  if (h < 24) return `${h}h ago`;
+  const d = Math.floor(h / 24);
+  if (d < 30) return `${d}d ago`;
+  return new Date(iso).toLocaleDateString("en-GB", {
+    day: "numeric",
+    month: "short",
+    timeZone: "Asia/Brunei",
+  });
+}
+
 export default function POS() {
   const { staff, isAuthenticated, isLoading: authLoading, login, logout } = useStaffAuth();
   const queryClient = useQueryClient();
@@ -153,6 +203,21 @@ export default function POS() {
   const [paymentMethod, setPaymentMethod] = useState<PaymentMethod>("cash");
   const [paymentRef, setPaymentRef] = useState<string>("");
   const [itemNotes, setItemNotes] = useState<string>("");
+
+  // Phase 1: vehicle/customer linkage.
+  // - `matchedVehicleId` is set when the cashier picks a suggestion from
+  //   the autocomplete. Cleared when they edit the plate further (so a
+  //   typo correction doesn't accidentally tag the order to the wrong car).
+  // - `customerPhone/Name` are optional. When provided, the server upserts
+  //   a customers row, links it to the vehicle if it has no owner yet,
+  //   and stores the name on the order for receipts.
+  const [matchedVehicleId, setMatchedVehicleId] = useState<number | null>(null);
+  const [vehicleSuggestions, setVehicleSuggestions] = useState<VehicleSuggestion[]>([]);
+  const [showSuggestions, setShowSuggestions] = useState<boolean>(false);
+  const [showCustomerForm, setShowCustomerForm] = useState<boolean>(false);
+  const [customerPhone, setCustomerPhone] = useState<string>("");
+  const [customerName, setCustomerName] = useState<string>("");
+  const plateInputRef = useRef<HTMLInputElement | null>(null);
 
   // Confirmation state
   const [lastOrder, setLastOrder] = useState<CreatedOrder | null>(null);
@@ -229,6 +294,63 @@ export default function POS() {
     plate.trim().length > 0 &&
     branchId !== null;
 
+  // Debounced plate autocomplete. Hits /api/pos/vehicles/search 200ms after
+  // the user pauses typing. Skipped when a suggestion is already matched.
+  useEffect(() => {
+    if (!isAuthenticated) return;
+    const q = plate.trim();
+    if (q.length < 1 || matchedVehicleId !== null) {
+      setVehicleSuggestions([]);
+      return;
+    }
+    const handle = setTimeout(async () => {
+      try {
+        const r = await fetch(
+          `/api/pos/vehicles/search?q=${encodeURIComponent(q)}`,
+          { credentials: "include" },
+        );
+        if (!r.ok) return;
+        const data = (await r.json()) as { vehicles: VehicleSuggestion[] };
+        setVehicleSuggestions(data.vehicles);
+      } catch {
+        /* ignore */
+      }
+    }, 200);
+    return () => clearTimeout(handle);
+  }, [plate, matchedVehicleId, isAuthenticated]);
+
+  // Fetch history for the picked vehicle so the cashier sees prior visits.
+  const { data: vehicleHistory } = useQuery<VehicleHistory>({
+    queryKey: ["/api/pos/vehicles", matchedVehicleId, "history"],
+    enabled: matchedVehicleId !== null,
+    queryFn: async () => {
+      const r = await fetch(
+        `/api/pos/vehicles/${matchedVehicleId}/history`,
+        { credentials: "include" },
+      );
+      if (!r.ok) throw new Error(`${r.status}`);
+      return r.json();
+    },
+  });
+
+  // When picking a suggestion, prefill plate + customer info (if any) so
+  // the cashier doesn't retype it. They can still edit before submitting.
+  const pickVehicle = (v: VehicleSuggestion) => {
+    setPlate(v.license_plate);
+    setMatchedVehicleId(v.id);
+    setShowSuggestions(false);
+    setVehicleSuggestions([]);
+    if (v.customer) {
+      setCustomerPhone(v.customer.phone);
+      setCustomerName(v.customer.name);
+      setShowCustomerForm(true);
+    }
+  };
+
+  const clearMatchedVehicle = () => {
+    setMatchedVehicleId(null);
+  };
+
   const createOrder = useMutation({
     mutationFn: async () => {
       const res = await apiRequest("POST", "/api/pos/orders", {
@@ -240,6 +362,9 @@ export default function POS() {
         payment_ref: paymentRef.trim() || null,
         branch_id: branchId,
         item_notes: itemNotes.trim() || null,
+        vehicle_id: matchedVehicleId,
+        customer_phone: customerPhone.trim() || null,
+        customer_name: customerName.trim() || null,
       });
       return (await res.json()) as { ok: true; order: CreatedOrder };
     },
@@ -271,6 +396,12 @@ export default function POS() {
     setSelectedAddons(new Set());
     setPaymentRef("");
     setItemNotes("");
+    setMatchedVehicleId(null);
+    setVehicleSuggestions([]);
+    setShowSuggestions(false);
+    setCustomerPhone("");
+    setCustomerName("");
+    setShowCustomerForm(false);
     // Keep packageId, vehicleSize, paymentMethod sticky for fast successive orders.
   };
 
@@ -569,19 +700,178 @@ export default function POS() {
                 </CardContent>
               </Card>
 
-              {/* Plate */}
+              {/* Plate + customer */}
               <Card>
                 <CardHeader>
                   <CardTitle className="text-base">License Plate</CardTitle>
                 </CardHeader>
-                <CardContent>
-                  <Input
-                    value={plate}
-                    onChange={(e) => setPlate(e.target.value.toUpperCase())}
-                    placeholder="BB1234"
-                    autoCapitalize="characters"
-                    data-testid="input-plate"
-                  />
+                <CardContent className="space-y-3">
+                  <div className="relative">
+                    <Input
+                      ref={plateInputRef}
+                      value={plate}
+                      onChange={(e) => {
+                        setPlate(e.target.value.toUpperCase());
+                        // Editing the plate clears any prior match so the
+                        // order won't accidentally tag the wrong vehicle.
+                        if (matchedVehicleId !== null) setMatchedVehicleId(null);
+                        setShowSuggestions(true);
+                      }}
+                      onFocus={() => setShowSuggestions(true)}
+                      onBlur={() => {
+                        // Delay so a click on a suggestion still registers.
+                        setTimeout(() => setShowSuggestions(false), 150);
+                      }}
+                      placeholder="BB1234"
+                      autoCapitalize="characters"
+                      autoComplete="off"
+                      data-testid="input-plate"
+                    />
+                    {showSuggestions && vehicleSuggestions.length > 0 && (
+                      <div
+                        className="absolute z-20 mt-1 w-full rounded-md border border-gray-200 bg-white shadow-lg max-h-72 overflow-y-auto"
+                        data-testid="list-vehicle-suggestions"
+                      >
+                        {vehicleSuggestions.map((v) => (
+                          <button
+                            key={v.id}
+                            type="button"
+                            onMouseDown={(e) => e.preventDefault()}
+                            onClick={() => pickVehicle(v)}
+                            className="w-full text-left px-3 py-2 hover:bg-gray-50 border-b border-gray-100 last:border-b-0"
+                            data-testid={`suggestion-vehicle-${v.id}`}
+                          >
+                            <div className="flex items-center justify-between gap-2">
+                              <span className="font-semibold tracking-wide">
+                                {v.license_plate}
+                              </span>
+                              {v.last_seen_at && (
+                                <span className="text-xs text-gray-500 inline-flex items-center gap-1">
+                                  <Clock className="w-3 h-3" />
+                                  {formatRelative(v.last_seen_at)}
+                                </span>
+                              )}
+                            </div>
+                            <div className="text-xs text-gray-600 mt-0.5">
+                              {[v.brand, v.model, v.color].filter(Boolean).join(" · ") || "No details on file"}
+                              {v.customer && (
+                                <span className="ml-2 text-cuci-primary">
+                                  · {v.customer.name}
+                                </span>
+                              )}
+                            </div>
+                          </button>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+
+                  {matchedVehicleId !== null && vehicleHistory && (
+                    <div
+                      className="rounded-md border border-cuci-primary/30 bg-cuci-primary/5 px-3 py-2"
+                      data-testid="card-matched-vehicle"
+                    >
+                      <div className="flex items-start justify-between gap-2">
+                        <div className="text-sm">
+                          <div className="font-semibold text-gray-900">
+                            {[vehicleHistory.vehicle.brand, vehicleHistory.vehicle.model]
+                              .filter(Boolean)
+                              .join(" ") || "Vehicle on file"}
+                            {vehicleHistory.vehicle.color && (
+                              <span className="text-gray-600 font-normal">
+                                {" · "}{vehicleHistory.vehicle.color}
+                              </span>
+                            )}
+                          </div>
+                          <div className="text-xs text-gray-600 mt-1 flex flex-wrap gap-x-3 gap-y-1">
+                            <span className="inline-flex items-center gap-1">
+                              <History className="w-3 h-3" />
+                              {vehicleHistory.total_visits} prior visit{vehicleHistory.total_visits === 1 ? "" : "s"}
+                            </span>
+                            {vehicleHistory.total_visits > 0 && (
+                              <span>
+                                Spent {formatBND(vehicleHistory.total_spent_cents)}
+                              </span>
+                            )}
+                            {vehicleHistory.favourite_branch_id && (
+                              <span className="inline-flex items-center gap-1">
+                                <MapPin className="w-3 h-3" />
+                                {BRANCH_NAME_BY_ID[vehicleHistory.favourite_branch_id] ??
+                                  `Branch ${vehicleHistory.favourite_branch_id}`}
+                              </span>
+                            )}
+                          </div>
+                          {vehicleHistory.recent_orders[0] && (
+                            <div className="text-xs text-gray-500 mt-1">
+                              Last: {vehicleHistory.recent_orders[0].package_name}
+                              {" · "}
+                              {formatBND(vehicleHistory.recent_orders[0].total_cents)}
+                              {" · "}
+                              {formatRelative(vehicleHistory.recent_orders[0].created_at)}
+                            </div>
+                          )}
+                        </div>
+                        <button
+                          type="button"
+                          onClick={clearMatchedVehicle}
+                          className="text-gray-400 hover:text-gray-700 shrink-0"
+                          aria-label="Clear matched vehicle"
+                          data-testid="button-clear-matched-vehicle"
+                        >
+                          <X className="w-4 h-4" />
+                        </button>
+                      </div>
+                    </div>
+                  )}
+
+                  {!showCustomerForm && (
+                    <button
+                      type="button"
+                      onClick={() => setShowCustomerForm(true)}
+                      className="text-xs text-cuci-primary hover:underline inline-flex items-center gap-1"
+                      data-testid="button-show-customer-form"
+                    >
+                      <User className="w-3 h-3" />
+                      + Add customer info (optional)
+                    </button>
+                  )}
+
+                  {showCustomerForm && (
+                    <div className="space-y-2 pt-1 border-t border-gray-100">
+                      <div className="flex items-center justify-between">
+                        <Label className="text-xs text-gray-600">
+                          Customer (optional)
+                        </Label>
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setShowCustomerForm(false);
+                            setCustomerPhone("");
+                            setCustomerName("");
+                          }}
+                          className="text-xs text-gray-400 hover:text-gray-700"
+                          data-testid="button-hide-customer-form"
+                        >
+                          Remove
+                        </button>
+                      </div>
+                      <div className="grid grid-cols-2 gap-2">
+                        <Input
+                          value={customerPhone}
+                          onChange={(e) => setCustomerPhone(e.target.value)}
+                          placeholder="Phone"
+                          inputMode="tel"
+                          data-testid="input-customer-phone"
+                        />
+                        <Input
+                          value={customerName}
+                          onChange={(e) => setCustomerName(e.target.value)}
+                          placeholder="Name"
+                          data-testid="input-customer-name"
+                        />
+                      </div>
+                    </div>
+                  )}
                 </CardContent>
               </Card>
 

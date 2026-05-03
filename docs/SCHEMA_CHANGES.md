@@ -175,6 +175,82 @@ Wait until tomorrow if you're unsure
 
 ## Applied migrations log
 
+### 2026-05-04 — `migrations/manual/2026-05-04_01_pos_customers_vehicles.sql`
+**Author:** agent (Phase 1 of POS_CX feature port)
+**Summary:** Phase 1 of the customer-and-vehicle normalisation work. Adds a
+new `customers` table for POS walk-ins (phone-keyed, no login, optional FK to
+`users` when they later self-register on the trunk app), extends the existing
+`cars` table to also hold orphan + walk-in vehicles, and links `orders` to
+the washed vehicle.
+
+**Schema changes (one logical change in the migration):**
+1. **NEW `customers`** — `id serial pk`, `phone text NOT NULL`, `name text
+   NOT NULL`, `user_id integer NULL FK users(id) ON DELETE SET NULL`, `notes
+   text`, `created_at`, `updated_at` (with BEFORE-UPDATE trigger
+   `customers_set_updated_at`). UNIQUE index on `phone`, regular index on
+   `user_id`.
+2. **EXTEND `cars`** — relaxed `user_id`, `brand`, `model`, `type` to NULL
+   (so POS-side rows that don't yet know brand/model can be inserted; all
+   existing 559 trunk rows already have values, unchanged). Added
+   `customer_id integer NULL FK customers(id) ON DELETE SET NULL`, `color
+   text`, `last_seen_at timestamptz`. New indexes: `cars_customer_id_idx`,
+   `cars_user_id_idx`, and a non-unique functional index
+   `cars_plate_normalized_idx ON UPPER(REGEXP_REPLACE(license_plate,'\s+','','g'))`
+   for plate autocomplete.
+3. **EXTEND `orders`** — added `vehicle_id integer NULL FK cars(id) ON
+   DELETE SET NULL` plus index `orders_vehicle_id_idx`. Existing
+   `orders.customer_id` (FK to `users`) and `orders.customer_name_walkin`
+   columns are unchanged; the POS uses `customer_name_walkin` for the
+   POS-customer name on the receipt and leaves `customer_id` for trunk-user
+   linkage.
+
+**Why no UNIQUE on `cars.license_plate`:** Production has 17 duplicate
+normalised plates today (e.g. `BAT4455` × 3 different users, `BAP2576` vs
+`BAP 2576` formatting splits). A unique constraint would fail. The
+duplicate cleanup is a separate task; for now, lookup uses the functional
+index and picks the most-recently-seen match.
+
+**Trunk-user immutability:** The new POS endpoints + the modified
+`POST /api/pos/orders` insert path NEVER overwrite a non-null `cars.user_id`
+when upserting by plate, and only set `cars.customer_id` when it is
+currently NULL. Trunk vehicle ownership is read-only from the POS surface.
+
+**Idempotency:** `CREATE TABLE IF NOT EXISTS`, `ADD COLUMN IF NOT EXISTS`,
+`CREATE INDEX IF NOT EXISTS`, and `DO $mig$ … IF EXISTS … ALTER COLUMN …
+DROP NOT NULL` blocks. Re-running the file is a no-op.
+
+**Status:** **APPLIED 2026-05-04** to staging Neon (clean DB, 0 rows
+affected) and production Neon (559 cars + 508 users untouched, 6/6
+indexes installed) via `tsx scripts/_apply-2026-05-04-01.ts` (script
+self-deleted post-apply). Verified post-apply: `customers` table present,
+all 4 NOT-NULL relaxations on `cars` succeeded, `orders.vehicle_id`
+present, all 6 indexes created.
+
+**`shared/schema.ts`:** Added `customers` table definition with
+`insertCustomerSchema` + `Customer` / `InsertCustomer` types; relaxed the
+matching NOT NULLs on `cars` to mirror the DB; added `customer_id`,
+`color`, `last_seen_at` columns to `cars`; added `vehicle_id` FK on
+`orders`.
+
+**New endpoints (all `requireStaff`-gated):**
+- `GET /api/pos/customers/lookup?phone=` — customer + their vehicles + total spend
+- `POST /api/pos/customers` — upsert by phone
+- `GET /api/pos/vehicles/search?q=` — debounced plate autocomplete
+- `GET /api/pos/vehicles/:id/history` — visit count, total spent, favourite branch, last 10 orders
+- `POST /api/pos/vehicles` — upsert by normalised plate (never re-binds trunk-owned cars)
+
+`POST /api/pos/orders` extended to accept optional `vehicle_id`,
+`customer_phone`, `customer_name`; resolves/upserts the vehicle and
+customer atomically inside the order create flow and writes
+`orders.vehicle_id` + `orders.customer_name_walkin`.
+
+**Rollback:** Forward-only. To undo, write a new migration that drops
+`orders.vehicle_id`, then the 3 added `cars` columns, then `customers`.
+Re-tightening the NOT NULLs would require backfilling any POS-inserted
+rows first.
+
+
+
 Append-only. Newest at the top.
 
 ### 2026-05-03 — `migrations/manual/2026-05-03_02_pos_sync_alignment.sql`

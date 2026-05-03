@@ -139,6 +139,36 @@ Two auth systems coexist by design during the Week 1–Week 2 cutover:
    E2E: unauth → 401 (was wide open before), owner cookie → 200,
    cashier cookie → 403.
 
+6. **POS customer + vehicle linkage** (Phase 1 of POS_CX feature port,
+   2026-05-04) — A new `customers` table for walk-ins (phone-keyed, no
+   login, optional FK to `users` when they later self-register on the
+   trunk app). The existing `cars` table now also holds orphan +
+   walk-in vehicles: `user_id`/`brand`/`model`/`type` were relaxed to
+   NULL, plus new columns `customer_id` (FK customers), `color`,
+   `last_seen_at`. `orders.vehicle_id` now FK-links each wash to the
+   washed car. Lookup uses a non-unique functional index on
+   `UPPER(REGEXP_REPLACE(license_plate,'\s+','','g'))` — production has
+   17 duplicate normalised plates we can't UNIQUE without a separate
+   dedup pass. **Trunk-user immutability:** the POS surface NEVER
+   overwrites a non-null `cars.user_id`; trunk vehicle ownership is
+   read-only from the cashier flow.
+   New endpoints (all `requireStaff`-gated):
+   `GET /api/pos/customers/lookup?phone=`,
+   `POST /api/pos/customers` (upsert by phone),
+   `GET /api/pos/vehicles/search?q=` (debounced plate autocomplete),
+   `GET /api/pos/vehicles/:id/history` (visit count, total spent,
+   favourite branch, last 10 orders),
+   `POST /api/pos/vehicles` (upsert by normalised plate). Existing
+   `POST /api/pos/orders` extended to accept optional `vehicle_id`,
+   `customer_phone`, `customer_name`; resolves/upserts vehicle +
+   customer atomically and writes `orders.vehicle_id` +
+   `orders.customer_name_walkin`. POS UI (`client/src/pages/pos.tsx`)
+   now has live plate autocomplete with a 200ms debounce, a matched-
+   vehicle pill showing prior visits + favourite branch + last wash, and
+   an optional "+ Add customer info" form. Migration:
+   `migrations/manual/2026-05-04_01_pos_customers_vehicles.sql`,
+   applied to both staging and prod (559 cars + 508 users untouched).
+
 ## External Dependencies
 
 - **UI/Styling**: Radix UI, Tailwind CSS, Framer Motion, Lucide React (icons).

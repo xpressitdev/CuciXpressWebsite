@@ -87,19 +87,47 @@ export const users = pgTable("users", {
 });
 
 // ============================================================
-// CARS — NEW (was missing, exists in LiveQue DB with 559 rows)
+// CARS — exists in LiveQue DB with 559 rows.
+// Phase 1 (2026-05-04_01): relaxed user_id/brand/model/type to NULL
+// so POS walk-in + LPR-orphan vehicles can be inserted, added
+// customer_id (FK to new customers table), color, last_seen_at.
 // ============================================================
 export const cars = pgTable("cars", {
   id: serial("id").primaryKey(),
-  user_id: integer("user_id")
-    .references(() => users.id)
-    .notNull(),
+  user_id: integer("user_id").references(() => users.id),
   license_plate: text("license_plate").notNull(),
-  brand: text("brand").notNull(),
-  model: text("model").notNull(),
-  type: text("type").notNull(),
+  brand: text("brand"),
+  model: text("model"),
+  type: text("type"),
   photo_url: text("photo_url"),
+  // Added 2026-05-04_01:
+  customer_id: integer("customer_id"),         // FK -> customers(id), declared inline below
+  color: text("color"),
+  last_seen_at: timestamp("last_seen_at", { withTimezone: true }),
 });
+
+// ============================================================
+// CUSTOMERS — NEW (Phase 1, 2026-05-04_01)
+// Walk-in customers tracked from the POS, keyed by phone.
+// Optional FK to users(id) when they later self-register on the trunk.
+// ============================================================
+export const customers = pgTable("customers", {
+  id: serial("id").primaryKey(),
+  phone: text("phone").notNull().unique(),
+  name: text("name").notNull(),
+  user_id: integer("user_id").references(() => users.id),
+  notes: text("notes"),
+  created_at: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
+  updated_at: timestamp("updated_at", { withTimezone: true }).defaultNow().notNull(),
+});
+
+export const insertCustomerSchema = createInsertSchema(customers).omit({
+  id: true,
+  created_at: true,
+  updated_at: true,
+});
+export type Customer = typeof customers.$inferSelect;
+export type InsertCustomer = z.infer<typeof insertCustomerSchema>;
 
 // ============================================================
 // BRANCHES — NEW (was missing, exists in LiveQue DB with 5 rows)
@@ -434,6 +462,8 @@ export const orders = pgTable("orders", {
   lane_id: text("lane_id").references(() => lanes.id),
   customer_id: integer("customer_id").references(() => users.id),
   staff_id: text("staff_id").references(() => staff.id),
+  // Added 2026-05-04_01: link to the washed vehicle in `cars`.
+  vehicle_id: integer("vehicle_id").references(() => cars.id),
   plate: text("plate").notNull(),
   package_id: text("package_id"),
   package_name: text("package_name").notNull(),

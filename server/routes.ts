@@ -1633,6 +1633,12 @@ export async function registerRoutes(app: Express): Promise<Server> {
     branch_id: z.number().int().positive(),
     order_notes: z.string().trim().max(500).optional().nullable(),
     item_notes: z.string().trim().max(500).optional().nullable(),
+    // Phase 1 (2026-05-04): vehicle/customer linking. All optional —
+    // when omitted, the server upserts a vehicle by plate and leaves
+    // the customer link empty.
+    vehicle_id: z.number().int().positive().optional().nullable(),
+    customer_phone: z.string().trim().min(4).max(40).optional().nullable(),
+    customer_name: z.string().trim().min(1).max(120).optional().nullable(),
   });
 
   app.post('/api/pos/orders', requireStaff, async (req, res) => {
@@ -1721,7 +1727,87 @@ export async function registerRoutes(app: Express): Promise<Server> {
       const seq = seqRow[0]?.next_seq ?? 1;
       const ticketCode = `T-${String(seq).padStart(3, '0')}`;
 
-      // 5. Insert. `id` is text — generate a random one.
+      // 5. Resolve vehicle + customer (Phase 1).
+      // Strategy:
+      //   a) If client supplied vehicle_id, validate + touch last_seen_at.
+      //   b) Else upsert a car row by normalised plate (orphan if no
+      //      customer_phone). Trunk-owned cars (user_id IS NOT NULL)
+      //      stay bound to their user — we never re-attach.
+      //   c) If customer_phone+name provided, upsert customers row;
+      //      attach to the vehicle ONLY when its customer_id is null.
+      let resolvedVehicleId: number | null = null;
+      let walkinName: string | null = null;
+      const plateUpper = body.plate.toUpperCase();
+      const plateNorm = plateUpper.replace(/\s+/g, '');
+
+      // (c) customer upsert (if phone given)
+      let posCustomerId: number | null = null;
+      if (body.customer_phone && body.customer_name) {
+        const cu = (await db.execute(sql`
+          INSERT INTO customers (phone, name)
+          VALUES (${body.customer_phone}, ${body.customer_name})
+          ON CONFLICT (phone) DO UPDATE
+             SET name = EXCLUDED.name
+          RETURNING id, name
+        `)).rows[0] as any;
+        posCustomerId = cu.id;
+        walkinName = cu.name;
+      } else if (body.customer_name) {
+        walkinName = body.customer_name;
+      }
+
+      // (a) explicit vehicle_id wins
+      if (body.vehicle_id) {
+        const v = (await db.execute(sql`
+          SELECT id, customer_id FROM cars WHERE id = ${body.vehicle_id} LIMIT 1
+        `)).rows as any[];
+        if (v.length === 0) {
+          return res.status(400).json({ error: 'vehicle_not_found' });
+        }
+        resolvedVehicleId = v[0].id;
+        await db.execute(sql`
+          UPDATE cars SET
+            customer_id  = COALESCE(customer_id, ${posCustomerId}),
+            last_seen_at = now()
+           WHERE id = ${resolvedVehicleId}
+        `);
+        if (!walkinName && v[0].customer_id) {
+          const cn = (await db.execute(sql`
+            SELECT name FROM customers WHERE id = ${v[0].customer_id} LIMIT 1
+          `)).rows[0] as any;
+          walkinName = cn?.name ?? null;
+        }
+      } else {
+        // (b) upsert by normalised plate
+        const existing = (await db.execute(sql`
+          SELECT id, user_id, customer_id
+            FROM cars
+           WHERE UPPER(REGEXP_REPLACE(license_plate, '\s+', '', 'g')) = ${plateNorm}
+           ORDER BY (CASE WHEN customer_id = ${posCustomerId ?? -1} THEN 0 ELSE 1 END) ASC,
+                    COALESCE(last_seen_at, 'epoch'::timestamptz) DESC,
+                    id DESC
+           LIMIT 1
+        `)).rows as any[];
+        if (existing.length > 0) {
+          const ex = existing[0];
+          await db.execute(sql`
+            UPDATE cars SET
+              customer_id  = COALESCE(customer_id, ${posCustomerId}),
+              last_seen_at = now()
+             WHERE id = ${ex.id}
+          `);
+          resolvedVehicleId = ex.id;
+        } else {
+          const ins = (await db.execute(sql`
+            INSERT INTO cars (license_plate, customer_id, last_seen_at)
+            VALUES (${plateUpper}, ${posCustomerId ?? null}, now())
+            RETURNING id
+          `)).rows[0] as any;
+          resolvedVehicleId = ins.id;
+        }
+      }
+
+      // 6. Insert order. `id` is text — generate a random one.
       const orderId = `ord_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 8)}`;
 
       await db.execute(sql`
@@ -1731,14 +1817,16 @@ export async function registerRoutes(app: Express): Promise<Server> {
           addons, subtotal_cents, total_cents,
           payment_method, payment_ref,
           ticket_code, status,
-          order_notes, item_notes
+          order_notes, item_notes,
+          vehicle_id, customer_name_walkin
         ) VALUES (
-          ${orderId}, ${effectiveBranchId}, ${staffId}, ${body.plate.toUpperCase()},
+          ${orderId}, ${effectiveBranchId}, ${staffId}, ${plateUpper},
           ${pkg.id}, ${pkg.name}, ${pkg.price_cents},
           ${JSON.stringify(addonSnapshots)}::jsonb, ${subtotal}, ${total},
           ${body.payment_method}, ${body.payment_ref ?? null},
           ${ticketCode}, 'paid',
-          ${body.order_notes ?? null}, ${body.item_notes ?? null}
+          ${body.order_notes ?? null}, ${body.item_notes ?? null},
+          ${resolvedVehicleId}, ${walkinName}
         )
       `);
 
@@ -1792,6 +1880,240 @@ export async function registerRoutes(app: Express): Promise<Server> {
     } catch (err) {
       console.error('[pos.orders.today] failed:', err);
       res.status(500).json({ error: 'Failed to load today\'s orders' });
+    }
+  });
+
+  // ==========================================================================
+  // POS — Customer + vehicle lookup (Phase 1, 2026-05-04)
+  // All endpoints here are staff-gated. Plates are normalised (uppercase,
+  // whitespace stripped) for lookup; the original input is preserved on
+  // insert so receipts match what staff typed.
+  // ==========================================================================
+
+  const normalizePlate = (s: string) => s.toUpperCase().replace(/\s+/g, "");
+
+  // GET /api/pos/customers/lookup?phone=...
+  // Look up a POS walk-in customer by phone, return their vehicles + spend.
+  app.get('/api/pos/customers/lookup', requireStaff, async (req, res) => {
+    const phone = String(req.query.phone ?? '').trim();
+    if (phone.length < 4) {
+      return res.status(400).json({ error: 'phone_required' });
+    }
+    try {
+      const customerRows = (await db.execute(sql`
+        SELECT id, phone, name, user_id, notes, created_at
+          FROM customers WHERE phone = ${phone} LIMIT 1
+      `)).rows as any[];
+      if (customerRows.length === 0) {
+        return res.status(404).json({ error: 'not_found' });
+      }
+      const customer = customerRows[0];
+      const vehicles = (await db.execute(sql`
+        SELECT id, license_plate, brand, model, color, "type", last_seen_at
+          FROM cars WHERE customer_id = ${customer.id}
+         ORDER BY COALESCE(last_seen_at, 'epoch'::timestamptz) DESC, id DESC
+      `)).rows;
+      const stats = (await db.execute(sql`
+        SELECT COUNT(*)::int AS visits,
+               COALESCE(SUM(total_cents), 0)::int AS spent_cents
+          FROM orders
+         WHERE vehicle_id IN (
+           SELECT id FROM cars WHERE customer_id = ${customer.id}
+         )
+      `)).rows[0] as any;
+      res.json({
+        customer,
+        vehicles,
+        total_visits: stats.visits,
+        total_spent_cents: stats.spent_cents,
+      });
+    } catch (err) {
+      console.error('[pos.customers.lookup] failed:', err);
+      res.status(500).json({ error: 'lookup_failed' });
+    }
+  });
+
+  // POST /api/pos/customers — upsert a POS walk-in customer by phone.
+  app.post('/api/pos/customers', requireStaff, async (req, res) => {
+    const schema = z.object({
+      phone: z.string().trim().min(4).max(40),
+      name: z.string().trim().min(1).max(120),
+      notes: z.string().trim().max(500).optional().nullable(),
+    });
+    const parsed = schema.safeParse(req.body);
+    if (!parsed.success) {
+      return res.status(400).json({ error: 'invalid_request', details: parsed.error.flatten() });
+    }
+    const { phone, name, notes } = parsed.data;
+    try {
+      const rows = (await db.execute(sql`
+        INSERT INTO customers (phone, name, notes)
+        VALUES (${phone}, ${name}, ${notes ?? null})
+        ON CONFLICT (phone) DO UPDATE
+           SET name  = EXCLUDED.name,
+               notes = COALESCE(EXCLUDED.notes, customers.notes)
+        RETURNING id, phone, name, user_id, notes, created_at
+      `)).rows;
+      res.status(201).json({ customer: rows[0] });
+    } catch (err) {
+      console.error('[pos.customers.create] failed:', err);
+      res.status(500).json({ error: 'create_failed' });
+    }
+  });
+
+  // GET /api/pos/vehicles/search?q=... — plate autocomplete (case-insensitive,
+  // ignores whitespace). Up to 10 most-recently-seen matches.
+  app.get('/api/pos/vehicles/search', requireStaff, async (req, res) => {
+    const q = String(req.query.q ?? '').trim();
+    if (q.length < 1) return res.json({ vehicles: [] });
+    const norm = normalizePlate(q);
+    try {
+      const rows = (await db.execute(sql`
+        SELECT c.id, c.license_plate, c.brand, c.model, c.color, c."type",
+               c.last_seen_at,
+               cu.id AS customer_id, cu.phone AS customer_phone, cu.name AS customer_name
+          FROM cars c
+          LEFT JOIN customers cu ON cu.id = c.customer_id
+         WHERE UPPER(REGEXP_REPLACE(c.license_plate, '\s+', '', 'g')) LIKE ${norm + '%'}
+         ORDER BY COALESCE(c.last_seen_at, 'epoch'::timestamptz) DESC, c.id DESC
+         LIMIT 10
+      `)).rows.map((r: any) => ({
+        id: r.id,
+        license_plate: r.license_plate,
+        brand: r.brand,
+        model: r.model,
+        color: r.color,
+        type: r.type,
+        last_seen_at: r.last_seen_at,
+        customer: r.customer_id
+          ? { id: r.customer_id, phone: r.customer_phone, name: r.customer_name }
+          : null,
+      }));
+      res.json({ vehicles: rows });
+    } catch (err) {
+      console.error('[pos.vehicles.search] failed:', err);
+      res.status(500).json({ error: 'search_failed' });
+    }
+  });
+
+  // GET /api/pos/vehicles/:id/history — visit stats + last 10 orders.
+  app.get('/api/pos/vehicles/:id/history', requireStaff, async (req, res) => {
+    const id = Number(req.params.id);
+    if (!Number.isFinite(id) || id <= 0) {
+      return res.status(400).json({ error: 'invalid_id' });
+    }
+    try {
+      const vehicleRows = (await db.execute(sql`
+        SELECT c.id, c.license_plate, c.brand, c.model, c.color, c."type", c.last_seen_at,
+               cu.id AS customer_id, cu.phone AS customer_phone, cu.name AS customer_name
+          FROM cars c
+          LEFT JOIN customers cu ON cu.id = c.customer_id
+         WHERE c.id = ${id} LIMIT 1
+      `)).rows as any[];
+      if (vehicleRows.length === 0) return res.status(404).json({ error: 'not_found' });
+      const v = vehicleRows[0];
+      const recent = (await db.execute(sql`
+        SELECT id, ticket_code, branch_id, package_name, total_cents,
+               payment_method, status, created_at
+          FROM orders
+         WHERE vehicle_id = ${id}
+         ORDER BY created_at DESC LIMIT 10
+      `)).rows;
+      const stats = (await db.execute(sql`
+        SELECT COUNT(*)::int AS visits,
+               COALESCE(SUM(total_cents), 0)::int AS spent_cents
+          FROM orders WHERE vehicle_id = ${id}
+      `)).rows[0] as any;
+      const fav = (await db.execute(sql`
+        SELECT branch_id, COUNT(*)::int AS n
+          FROM orders WHERE vehicle_id = ${id}
+         GROUP BY branch_id ORDER BY n DESC LIMIT 1
+      `)).rows[0] as any;
+      res.json({
+        vehicle: {
+          id: v.id, license_plate: v.license_plate, brand: v.brand, model: v.model,
+          color: v.color, type: v.type, last_seen_at: v.last_seen_at,
+        },
+        customer: v.customer_id
+          ? { id: v.customer_id, phone: v.customer_phone, name: v.customer_name }
+          : null,
+        total_visits: stats.visits,
+        total_spent_cents: stats.spent_cents,
+        favourite_branch_id: fav?.branch_id ?? null,
+        recent_orders: recent,
+      });
+    } catch (err) {
+      console.error('[pos.vehicles.history] failed:', err);
+      res.status(500).json({ error: 'history_failed' });
+    }
+  });
+
+  // POST /api/pos/vehicles — upsert by normalised plate.
+  // Trunk-owned cars (cars.user_id IS NOT NULL) are NEVER re-bound to a
+  // different user from the POS surface; we only ever attach a POS
+  // customer_id when it's currently null. This protects trunk semantics.
+  app.post('/api/pos/vehicles', requireStaff, async (req, res) => {
+    const schema = z.object({
+      license_plate: z.string().trim().min(1).max(20),
+      brand: z.string().trim().max(80).optional().nullable(),
+      model: z.string().trim().max(80).optional().nullable(),
+      color: z.string().trim().max(40).optional().nullable(),
+      type: z.string().trim().max(40).optional().nullable(),
+      customer_id: z.number().int().positive().optional().nullable(),
+    });
+    const parsed = schema.safeParse(req.body);
+    if (!parsed.success) {
+      return res.status(400).json({ error: 'invalid_request', details: parsed.error.flatten() });
+    }
+    const { license_plate, brand, model, color, type, customer_id } = parsed.data;
+    const norm = normalizePlate(license_plate);
+    try {
+      // Pick the best existing match — prefer the same customer's car,
+      // else most-recently-seen, else newest id.
+      const existingRows = (await db.execute(sql`
+        SELECT id, user_id, customer_id
+          FROM cars
+         WHERE UPPER(REGEXP_REPLACE(license_plate, '\s+', '', 'g')) = ${norm}
+         ORDER BY (CASE WHEN customer_id = ${customer_id ?? -1} THEN 0 ELSE 1 END) ASC,
+                  COALESCE(last_seen_at, 'epoch'::timestamptz) DESC,
+                  id DESC
+         LIMIT 1
+      `)).rows as any[];
+      if (existingRows.length > 0) {
+        const ex = existingRows[0];
+        // Only set customer_id if currently null. Never override.
+        const newCustomerId = ex.customer_id ?? customer_id ?? null;
+        await db.execute(sql`
+          UPDATE cars SET
+            brand        = COALESCE(${brand ?? null}, brand),
+            model        = COALESCE(${model ?? null}, model),
+            color        = COALESCE(${color ?? null}, color),
+            "type"       = COALESCE(${type ?? null}, "type"),
+            customer_id  = ${newCustomerId},
+            last_seen_at = now()
+           WHERE id = ${ex.id}
+        `);
+        const out = (await db.execute(sql`
+          SELECT id, license_plate, brand, model, color, "type",
+                 customer_id, user_id, last_seen_at
+            FROM cars WHERE id = ${ex.id}
+        `)).rows[0];
+        return res.json({ vehicle: out });
+      }
+      // No match — insert new (orphan if no customer_id).
+      const out = (await db.execute(sql`
+        INSERT INTO cars (license_plate, brand, model, color, "type",
+                          customer_id, last_seen_at)
+        VALUES (${license_plate}, ${brand ?? null}, ${model ?? null},
+                ${color ?? null}, ${type ?? null},
+                ${customer_id ?? null}, now())
+        RETURNING id, license_plate, brand, model, color, "type",
+                  customer_id, user_id, last_seen_at
+      `)).rows[0];
+      res.status(201).json({ vehicle: out });
+    } catch (err) {
+      console.error('[pos.vehicles.upsert] failed:', err);
+      res.status(500).json({ error: 'upsert_failed' });
     }
   });
 
