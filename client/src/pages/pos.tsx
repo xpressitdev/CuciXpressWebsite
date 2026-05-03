@@ -46,7 +46,6 @@ import { useStaffAuth } from "@/hooks/useStaffAuth";
 import { useToast } from "@/hooks/use-toast";
 import { apiRequest } from "@/lib/queryClient";
 
-type VehicleSize = "small" | "medium" | "large" | "xlarge";
 type PaymentMethod =
   | "cash" | "bank_transfer" | "card" | "qr_code"
   | "baiduri_pay" | "quick_pay" | "subscription" | "voucher";
@@ -57,7 +56,7 @@ interface CatalogPackage {
   description: string | null;
   duration_minutes: number | null;
   sort_order: number;
-  prices_by_size: Partial<Record<VehicleSize, number>>;
+  price_cents: number;
 }
 interface CatalogAddon {
   id: string;
@@ -69,7 +68,6 @@ interface CatalogResponse {
   packages: CatalogPackage[];
   addons: CatalogAddon[];
   payment_methods: readonly PaymentMethod[];
-  vehicle_sizes: readonly VehicleSize[];
 }
 
 interface TodayOrder {
@@ -124,13 +122,6 @@ interface CreatedOrder {
   payment_method: PaymentMethod;
   status: string;
 }
-
-const SIZE_LABELS: Record<VehicleSize, string> = {
-  small: "Small",
-  medium: "Medium",
-  large: "Large",
-  xlarge: "XL",
-};
 
 const PAYMENT_LABELS: Record<PaymentMethod, string> = {
   cash: "Cash",
@@ -197,7 +188,6 @@ export default function POS() {
 
   // Form state
   const [packageId, setPackageId] = useState<string>("");
-  const [vehicleSize, setVehicleSize] = useState<VehicleSize>("small");
   const [plate, setPlate] = useState<string>("");
   const [selectedAddons, setSelectedAddons] = useState<Set<string>>(new Set());
   const [paymentMethod, setPaymentMethod] = useState<PaymentMethod>("cash");
@@ -277,7 +267,7 @@ export default function POS() {
     [catalog, packageId],
   );
 
-  const packagePrice = activePackage?.prices_by_size[vehicleSize] ?? null;
+  const packagePrice = activePackage?.price_cents ?? null;
 
   const addonsTotal = useMemo(() => {
     if (!catalog) return 0;
@@ -355,7 +345,6 @@ export default function POS() {
     mutationFn: async () => {
       const res = await apiRequest("POST", "/api/pos/orders", {
         package_id: packageId,
-        vehicle_size: vehicleSize,
         plate: plate.trim(),
         addon_ids: Array.from(selectedAddons),
         payment_method: paymentMethod,
@@ -402,7 +391,7 @@ export default function POS() {
     setCustomerPhone("");
     setCustomerName("");
     setShowCustomerForm(false);
-    // Keep packageId, vehicleSize, paymentMethod sticky for fast successive orders.
+    // Keep packageId, paymentMethod sticky for fast successive orders.
   };
 
   const toggleAddon = (id: string) => {
@@ -663,40 +652,6 @@ export default function POS() {
                       {activePackage.description}
                     </p>
                   )}
-                </CardContent>
-              </Card>
-
-              {/* Vehicle size picker */}
-              <Card>
-                <CardHeader>
-                  <CardTitle className="text-base">Vehicle Size</CardTitle>
-                </CardHeader>
-                <CardContent>
-                  <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
-                    {catalog.vehicle_sizes.map((s) => {
-                      const price = activePackage?.prices_by_size[s];
-                      const isSelected = s === vehicleSize;
-                      return (
-                        <button
-                          key={s}
-                          type="button"
-                          onClick={() => setVehicleSize(s)}
-                          disabled={price === undefined}
-                          data-testid={`button-size-${s}`}
-                          className={`rounded-md border p-3 text-left transition-all
-                            ${isSelected
-                              ? "border-cuci-primary bg-cuci-primary/10 ring-2 ring-cuci-primary"
-                              : "border-gray-200 hover:border-gray-300"}
-                            ${price === undefined ? "opacity-40 cursor-not-allowed" : ""}`}
-                        >
-                          <div className="font-semibold">{SIZE_LABELS[s]}</div>
-                          <div className="text-sm text-gray-600">
-                            {price !== undefined ? formatBND(price) : "—"}
-                          </div>
-                        </button>
-                      );
-                    })}
-                  </div>
                 </CardContent>
               </Card>
 
@@ -972,10 +927,7 @@ export default function POS() {
                   <div className="space-y-1 text-sm">
                     <div className="flex justify-between">
                       <span className="text-gray-600">
-                        {activePackage?.name ?? "—"}{" "}
-                        <span className="text-gray-400">
-                          ({SIZE_LABELS[vehicleSize]})
-                        </span>
+                        {activePackage?.name ?? "—"}
                       </span>
                       <span>
                         {packagePrice !== null

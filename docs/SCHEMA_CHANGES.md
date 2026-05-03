@@ -175,6 +175,66 @@ Wait until tomorrow if you're unsure
 
 ## Applied migrations log
 
+### 2026-05-04 — `migrations/manual/2026-05-04_03_flat_pricing.sql`
+**Author:** agent (Phase 2 prep — flat per-package pricing, BND)
+**Summary:** Cuci Xpress does not distinguish vehicle size when pricing
+washes; same wash, same price for any car. The original schema modelled
+prices as a `(package × vehicle_size × branch_id)` matrix in
+`package_pricing`. This migration replaces that matrix with a single
+`packages.price_cents` column and drops the matrix table outright.
+
+**Canonical catalogue (BND, owner-confirmed 2026-05-04):**
+- `pkg_basic`           — Basic Wash                                B$8.00
+- `pkg_basic_tyre`      — Basic Wash + Tyre Shine                   B$9.00
+- `pkg_basic_wax`       — Basic Wash + Spray Wax                    B$11.00
+- `pkg_basic_tyre_wax`  — Basic Wash + Tyre Shine + Spray Wax       B$12.00
+
+**Steps in a single transaction:**
+1. `ALTER TABLE packages ADD COLUMN IF NOT EXISTS price_cents integer`.
+2. Backfill from `package_pricing` (default-branch row only) when the
+   table still exists, then unconditionally re-set `pkg_basic` to 800
+   cents so a fresh DB without a `package_pricing` history still ends
+   up correct.
+3. Upsert the 3 new combo packages by `id`.
+4. `ALTER TABLE packages ALTER COLUMN price_cents SET NOT NULL`.
+5. `DROP TABLE IF EXISTS package_pricing`.
+
+**Idempotent.** Re-running on a migrated DB: ADD COLUMN is a no-op,
+backfill skips when `package_pricing` is gone, the UPDATE/INSERT use
+`ON CONFLICT DO UPDATE` to converge to the canonical state, NOT NULL
+is already set, and DROP uses `IF EXISTS`.
+
+**Application code changes (same pass):**
+- `shared/schema.ts`: added `price_cents` to `packages`; removed the
+  `packagePricing` table definition, its insert schema, the `VehicleSize`
+  type, and `PackagePricing` / `InsertPackagePricing` types.
+- `server/routes.ts` `GET /api/pos/catalog`: returns `price_cents` per
+  package; dropped the pricing-matrix join, the `prices_by_size`
+  stitching, and the `vehicle_sizes` array in the response.
+- `server/routes.ts` `POST /api/pos/orders`: removed `vehicle_size` from
+  the request schema; price lookup is a plain `SELECT id, name,
+  price_cents FROM packages WHERE id=$1 AND is_active=true`.
+- `client/src/pages/pos.tsx`: removed the `VehicleSize` type, the
+  `SIZE_LABELS` map, the vehicle-size state, the entire vehicle-size
+  picker card, the size suffix in the order summary, and the
+  `vehicle_size` field from the create-order POST body.
+
+**Why no risk to historical orders:** `orders` never had a
+`vehicle_size` column (verified pre-migration), and `orders.package_id`
+is a plain `text` (no FK to `packages`), so the only consumer of
+`package_pricing` was the live POS code path which we updated in the
+same change.
+
+**Status:** **APPLIED 2026-05-04** to staging Neon (1 → 4 packages,
+`package_pricing` dropped, `price_cents` NOT NULL) and production Neon
+(same — 1 → 4 packages, 0 orders affected since prod had 0 orders) via
+`tsx scripts/_apply-2026-05-04-03.ts` (script self-deleted post-apply).
+
+**Rollback:** Forward-only. To undo, recreate `package_pricing` with
+the original schema, re-seed default-branch rows for each package, drop
+`packages.price_cents`. Application code would need to be reverted to
+the size-matrix flow.
+
 ### 2026-05-04 — `migrations/manual/2026-05-04_02_dedup_cars_plate_unique.sql`
 **Author:** agent (Phase 1 follow-up — "Option 1: most recent owner wins")
 **Summary:** One-time dedup of the 16 duplicate normalised-plate groups

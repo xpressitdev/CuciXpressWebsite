@@ -1545,8 +1545,11 @@ export async function registerRoutes(app: Express): Promise<Server> {
   // query and not babysit cache invalidations.
   app.get('/api/pos/catalog', requireStaff, async (_req, res) => {
     try {
+      // Flat per-package pricing in BND cents (2026-05-04_03 dropped
+      // the size×branch pricing matrix — Cuci Xpress prices are uniform
+      // across vehicle sizes).
       const packagesRows = (await db.execute(sql`
-        SELECT id, name, description, duration_minutes, sort_order
+        SELECT id, name, description, duration_minutes, price_cents, sort_order
           FROM packages
          WHERE is_active = true
          ORDER BY sort_order ASC, name ASC
@@ -1555,20 +1558,8 @@ export async function registerRoutes(app: Express): Promise<Server> {
         name: string;
         description: string | null;
         duration_minutes: number | null;
-        sort_order: number;
-      }>;
-
-      // Default (branch_id IS NULL) prices only — branch overrides come
-      // later when we wire per-branch deviations.
-      const pricingRows = (await db.execute(sql`
-        SELECT package_id, vehicle_size, price_cents
-          FROM package_pricing
-         WHERE is_active = true AND branch_id IS NULL
-         ORDER BY package_id ASC, vehicle_size ASC
-      `)).rows as Array<{
-        package_id: string;
-        vehicle_size: 'small' | 'medium' | 'large' | 'xlarge';
         price_cents: number;
+        sort_order: number;
       }>;
 
       const addonsRows = (await db.execute(sql`
@@ -1583,19 +1574,8 @@ export async function registerRoutes(app: Express): Promise<Server> {
         sort_order: number;
       }>;
 
-      // Stitch pricing onto each package as { vehicle_size: price_cents }.
-      const pricingByPkg = new Map<string, Record<string, number>>();
-      for (const r of pricingRows) {
-        const m = pricingByPkg.get(r.package_id) ?? {};
-        m[r.vehicle_size] = r.price_cents;
-        pricingByPkg.set(r.package_id, m);
-      }
-
       res.json({
-        packages: packagesRows.map((p) => ({
-          ...p,
-          prices_by_size: pricingByPkg.get(p.id) ?? {},
-        })),
+        packages: packagesRows,
         addons: addonsRows,
         payment_methods: [
           'cash',
@@ -1607,7 +1587,6 @@ export async function registerRoutes(app: Express): Promise<Server> {
           'subscription',
           'voucher',
         ] as const,
-        vehicle_sizes: ['small', 'medium', 'large', 'xlarge'] as const,
       });
     } catch (err) {
       console.error('[pos.catalog] failed:', err);
@@ -1616,13 +1595,12 @@ export async function registerRoutes(app: Express): Promise<Server> {
   });
 
   // POST /api/pos/orders
-  // Body: { package_id, vehicle_size, plate, addon_ids[], payment_method,
+  // Body: { package_id, plate, addon_ids[], payment_method,
   //         payment_ref?, branch_id, order_notes?, item_notes? }
   // The server authoritatively recomputes the price from the catalog and
   // generates a per-branch-per-day ticket code.
   const posOrderSchema = z.object({
     package_id: z.string().min(1),
-    vehicle_size: z.enum(['small', 'medium', 'large', 'xlarge']),
     plate: z.string().trim().min(1).max(20),
     addon_ids: z.array(z.string().min(1)).default([]),
     payment_method: z.enum([
@@ -1675,16 +1653,12 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
 
     try {
-      // 1. Look up the package + price for the chosen vehicle size.
+      // 1. Look up the package + flat price (2026-05-04_03 — no size).
       const pkgRows = (await db.execute(sql`
-        SELECT p.id, p.name, pp.price_cents
-          FROM packages p
-          JOIN package_pricing pp ON pp.package_id = p.id
-         WHERE p.id = ${body.package_id}
-           AND p.is_active = true
-           AND pp.vehicle_size = ${body.vehicle_size}
-           AND pp.is_active = true
-           AND pp.branch_id IS NULL
+        SELECT id, name, price_cents
+          FROM packages
+         WHERE id = ${body.package_id}
+           AND is_active = true
          LIMIT 1
       `)).rows as Array<{ id: string; name: string; price_cents: number }>;
       if (pkgRows.length === 0) {

@@ -182,6 +182,18 @@ Two auth systems coexist by design during the Week 1–Week 2 cutover:
    the cashier flow trust plate as the canonical vehicle identifier.
    Cars total: 559 → 542.
 
+   **Phase 2 prep (`2026-05-04_03_flat_pricing.sql`):** Cuci Xpress
+   prices are uniform across vehicle sizes (owner-confirmed). Replaced
+   the `(package × vehicle_size × branch)` pricing matrix with a single
+   `packages.price_cents` column (BND); dropped the `package_pricing`
+   table; seeded the 4 canonical packages: Basic Wash B$8, Basic +
+   Tyre Shine B$9, Basic + Spray Wax B$11, Basic + Tyre Shine + Spray
+   Wax B$12. Ripped the vehicle-size selector out of the POS UI, the
+   `vehicle_size` field out of the order-create schema, and the
+   `VehicleSize`/`SIZE_LABELS` plumbing out of the codebase. 0 orders
+   in prod, so no historical data was at risk; `orders` never had a
+   `vehicle_size` column to begin with.
+
 ## External Dependencies
 
 - **UI/Styling**: Radix UI, Tailwind CSS, Framer Motion, Lucide React (icons).
