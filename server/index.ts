@@ -33,8 +33,11 @@ const app = express();
 // hops (would be `true`) — only the platform's edge proxy.
 app.set("trust proxy", 1);
 app.use(cookieParser()); // Add cookie parsing middleware
-app.use(express.json());
-app.use(express.urlencoded({ extended: false }));
+// 10mb limit accommodates Phase 3 LPR uploads (base64 photo of an
+// arriving car ~3-6mb after JPEG encoding × 4/3 base64 overhead). All
+// other endpoints send tiny JSON bodies so the bump has no downside.
+app.use(express.json({ limit: '10mb' }));
+app.use(express.urlencoded({ extended: false, limit: '10mb' }));
 // Attach Lucia session info to every request as `req.lucia`. Read-only —
 // does not 401 on its own. Routes that want to require auth use
 // `requireLuciaUser` from server/auth/middleware.ts. Coexists with the

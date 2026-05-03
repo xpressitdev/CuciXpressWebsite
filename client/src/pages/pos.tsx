@@ -16,6 +16,7 @@ import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { Link } from "wouter";
 import {
   ArrowLeft,
+  Camera,
   CheckCircle2,
   Clock,
   History,
@@ -25,6 +26,7 @@ import {
   Plus,
   ReceiptText,
   ShieldCheck,
+  Upload,
   User,
   X,
 } from "lucide-react";
@@ -397,6 +399,127 @@ export default function POS() {
     setMatchedVehicleId(null);
   };
 
+  // ----- Phase 3: license plate recognition -----
+  // Two hidden file inputs: one with `capture="environment"` opens the
+  // device camera on mobile (and falls back to a file picker on desktop),
+  // the other is a plain gallery/upload picker. Both feed the same handler
+  // so behaviour is identical post-capture.
+  const cameraInputRef = useRef<HTMLInputElement | null>(null);
+  const uploadInputRef = useRef<HTMLInputElement | null>(null);
+  const [lprBusy, setLprBusy] = useState<boolean>(false);
+
+  const fileToBase64 = (file: File): Promise<string> =>
+    new Promise((resolve, reject) => {
+      const r = new FileReader();
+      r.onerror = () => reject(new Error("file_read_failed"));
+      r.onload = () => {
+        const out = String(r.result ?? "");
+        // Strip the "data:<mime>;base64," prefix the server also strips.
+        const i = out.indexOf(",");
+        resolve(i >= 0 ? out.slice(i + 1) : out);
+      };
+      r.readAsDataURL(file);
+    });
+
+  const recognizePlate = async (file: File) => {
+    if (branchId === null) {
+      toast({
+        title: "Pick a branch first",
+        description: "Choose a branch before scanning a plate.",
+        variant: "destructive",
+      });
+      return;
+    }
+    if (!file.type.startsWith("image/")) {
+      toast({ title: "Not an image", variant: "destructive" });
+      return;
+    }
+    if (file.size > 8 * 1024 * 1024) {
+      toast({
+        title: "Image too large",
+        description: "Please use a photo under 8MB.",
+        variant: "destructive",
+      });
+      return;
+    }
+    setLprBusy(true);
+    try {
+      const base64 = await fileToBase64(file);
+      const r = await fetch("/api/pos/lpr/recognize", {
+        method: "POST",
+        credentials: "include",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          image_base64: base64,
+          image_mime: file.type,
+          branch_id: branchId,
+        }),
+      });
+      if (!r.ok) {
+        const j = await r.json().catch(() => ({}));
+        if (r.status === 503) {
+          toast({
+            title: "Plate scanner unavailable",
+            description: "Please type the plate by hand.",
+            variant: "destructive",
+          });
+        } else {
+          toast({
+            title: "Couldn't read plate",
+            description: j.error ?? `Error ${r.status}`,
+            variant: "destructive",
+          });
+        }
+        return;
+      }
+      const data = (await r.json()) as {
+        recognized_plate: string | null;
+        confidence: number | null;
+        vehicle: VehicleSuggestion | null;
+      };
+      if (!data.recognized_plate) {
+        toast({
+          title: "No plate detected",
+          description: "Try a clearer photo, or type the plate.",
+          variant: "destructive",
+        });
+        return;
+      }
+      // Auto-fill, and auto-pick the vehicle if there's an exact match
+      // on file. Staff can still edit the plate or clear the match.
+      if (data.vehicle) {
+        pickVehicle(data.vehicle);
+        const pct = data.confidence !== null ? ` (${Math.round(data.confidence * 100)}%)` : "";
+        toast({
+          title: `Matched ${data.vehicle.license_plate}${pct}`,
+          description: data.vehicle.customer
+            ? `${data.vehicle.customer.name} — please confirm`
+            : "No customer on file — please confirm",
+        });
+      } else {
+        setPlate(data.recognized_plate);
+        setMatchedVehicleId(null);
+        const pct = data.confidence !== null ? ` (${Math.round(data.confidence * 100)}%)` : "";
+        toast({
+          title: `Read ${data.recognized_plate}${pct}`,
+          description: "New vehicle — please confirm and add details.",
+        });
+      }
+    } catch (err) {
+      console.error("[lpr] failed:", err);
+      toast({
+        title: "Plate scanner failed",
+        description: "Please type the plate by hand.",
+        variant: "destructive",
+      });
+    } finally {
+      setLprBusy(false);
+      // Reset file inputs so picking the same file twice still fires onChange.
+      if (cameraInputRef.current) cameraInputRef.current.value = "";
+      if (uploadInputRef.current) uploadInputRef.current.value = "";
+    }
+  };
+
   const createOrder = useMutation({
     mutationFn: async () => {
       const res = await apiRequest("POST", "/api/pos/orders", {
@@ -727,6 +850,62 @@ export default function POS() {
                   <CardTitle className="text-base">License Plate</CardTitle>
                 </CardHeader>
                 <CardContent className="space-y-3">
+                  {/* Hidden inputs for camera + gallery. The Camera button
+                      uses capture="environment" so mobile opens the back
+                      camera; on desktop both fall back to a file picker. */}
+                  <input
+                    ref={cameraInputRef}
+                    type="file"
+                    accept="image/*"
+                    capture="environment"
+                    className="hidden"
+                    onChange={(e) => {
+                      const f = e.target.files?.[0];
+                      if (f) recognizePlate(f);
+                    }}
+                    data-testid="input-lpr-camera"
+                  />
+                  <input
+                    ref={uploadInputRef}
+                    type="file"
+                    accept="image/*"
+                    className="hidden"
+                    onChange={(e) => {
+                      const f = e.target.files?.[0];
+                      if (f) recognizePlate(f);
+                    }}
+                    data-testid="input-lpr-upload"
+                  />
+                  <div className="flex gap-2">
+                    <Button
+                      type="button"
+                      variant="outline"
+                      size="sm"
+                      disabled={lprBusy || branchId === null}
+                      onClick={() => cameraInputRef.current?.click()}
+                      className="flex-1"
+                      data-testid="button-lpr-camera"
+                    >
+                      {lprBusy ? (
+                        <Loader2 className="w-4 h-4 mr-1 animate-spin" />
+                      ) : (
+                        <Camera className="w-4 h-4 mr-1" />
+                      )}
+                      {lprBusy ? "Reading…" : "Camera"}
+                    </Button>
+                    <Button
+                      type="button"
+                      variant="outline"
+                      size="sm"
+                      disabled={lprBusy || branchId === null}
+                      onClick={() => uploadInputRef.current?.click()}
+                      className="flex-1"
+                      data-testid="button-lpr-upload"
+                    >
+                      <Upload className="w-4 h-4 mr-1" />
+                      Upload
+                    </Button>
+                  </div>
                   <div className="relative">
                     <Input
                       ref={plateInputRef}

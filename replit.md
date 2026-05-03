@@ -239,3 +239,27 @@ Two auth systems coexist by design during the Week 1–Week 2 cutover:
    ones; the order-summary discount line label adapts to match.
    Migration applied to staging and prod the same day; 0 memberships
    rows existed at the time, so nothing to backfill.
+
+   **Phase 3 — license plate recognition (`2026-05-04_06_lpr_attempts.sql`):**
+   Added automatic plate reading at the POS. Two new buttons sit above
+   the plate input — Camera (uses `capture="environment"` so mobile
+   opens the back camera) and Upload (gallery/file picker). Both feed
+   one handler that base64-encodes the photo and POSTs it to
+   `/api/pos/lpr/recognize`, which forwards to Google Gemini 2.5 Flash
+   with a Brunei-plate prompt and `responseMimeType: 'application/json'`
+   for structured `{plate, confidence}` output. The server normalises
+   the plate (UPPER, no whitespace), looks up `cars` for an exact
+   match, and returns the matched vehicle if any. POS auto-picks
+   the vehicle on match (plate + customer prefill, vehicle history +
+   membership badge load), or just fills the plate text on a new car.
+   Staff can always edit/clear afterwards — autofill never locks them
+   in. Fails soft: Gemini errors return 503 `lpr_unavailable` and the
+   cashier keeps typing by hand; no order flow ever blocks on LPR.
+   New table `lpr_attempts` logs every call (image bytes + raw Gemini
+   response + matched vehicle) for 30 days so the owner can audit
+   false positives; retention is enforced by a lazy DELETE sweep on
+   each call (same pattern as Phase 2.1's expiry sweep — no cron).
+   Body parser limit bumped to 10mb in server/index.ts to fit ~3-6mb
+   base64 photos. Branch authorisation matches POST /api/pos/orders.
+   Required new env: `GEMINI_API_KEY` (any tier works, paid recommended
+   for higher quota). Migration applied to staging and prod 2026-05-04.

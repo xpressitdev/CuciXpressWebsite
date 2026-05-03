@@ -648,3 +648,38 @@ Locations:
 
 The partial filter is highly selective — touches at most a handful of
 rows per request, costs nothing on a cold table. No cron job needed.
+
+---
+
+## 2026-05-04_06 — `lpr_attempts` (Phase 3 LPR audit log)
+
+New table backing automatic license plate recognition on POS. Staff
+snap a photo of the arriving car (camera or gallery), the server
+forwards it to Gemini 2.5 Flash, and we log every attempt for 30 days
+so the owner can audit false positives.
+
+**Columns:**
+- `id text PK` — `lpr_<base36>_<rand>`
+- `staff_id text → staff(id)`
+- `branch_id integer → branches(id)`
+- `recognized_plate text` (NULL if Gemini saw nothing)
+- `confidence numeric(4,3)` (0-1, NULL if model didn't return one)
+- `matched_vehicle_id integer → cars(id)` (NULL when no row matched)
+- `raw_response text` — Gemini's full reply, for debugging
+- `image_bytes bytea` — the captured photo (cleared at 30 days)
+- `image_mime text`, `image_size_bytes integer`
+- `created_at timestamptz default now()`
+
+**Constraints:** `confidence ∈ [0,1] OR NULL`, `image_size_bytes > 0`.
+**Indexes:** `created_at`, `(branch_id, created_at DESC)`,
+`(staff_id, created_at DESC)`.
+
+**Retention:** 30-day lazy DELETE sweep runs on every recognize call
+(non-fatal if it fails). Mirrors the membership-expiry pattern.
+
+**Endpoint:** `POST /api/pos/lpr/recognize` body
+`{ image_base64, image_mime, branch_id }` — fails soft to 503
+`lpr_unavailable` on Gemini error so cashier can keep typing plates
+by hand. Branch authorisation matches `POST /api/pos/orders`.
+
+Applied to staging + prod 2026-05-04.

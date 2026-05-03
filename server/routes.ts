@@ -2099,6 +2099,197 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
+  // POST /api/pos/lpr/recognize — Phase 3 license plate recognition.
+  //
+  // Staff snaps a photo at the gate (or uploads one) and we forward it
+  // to Google Gemini Vision, asking for a Brunei plate string + a 0-1
+  // confidence. We then look up `cars` for an exact match on the
+  // normalised plate so the POS can auto-pick the vehicle and customer.
+  //
+  // Every attempt is logged to `lpr_attempts` (with the raw image bytes)
+  // for 30 days so the owner can audit false positives. A lazy DELETE
+  // sweep handles retention — no cron needed, mirrors the membership
+  // expiry pattern from Phase 2.1.
+  //
+  // Fails soft: any Gemini error returns 503 `lpr_unavailable` and the
+  // cashier can still type the plate by hand. Never throws into the
+  // order flow.
+  //
+  // Body: { image_base64, image_mime, branch_id }
+  app.post('/api/pos/lpr/recognize', requireStaff, async (req, res) => {
+    const VALID_BRANCH_IDS = [1, 2, 3, 4, 5];
+    const schema = z.object({
+      // ~15MB cap on the base64 string itself = ~11MB raw bytes; the
+      // post-decode check below tightens this to 8MB raw.
+      image_base64: z.string().min(100).max(15_000_000),
+      image_mime: z.string().regex(/^image\/(jpeg|jpg|png|webp|heic|heif)$/i),
+      branch_id: z.number().int().positive(),
+    });
+    const parsed = schema.safeParse(req.body);
+    if (!parsed.success) {
+      return res.status(400).json({ error: 'invalid_request', detail: parsed.error.flatten() });
+    }
+    const body = parsed.data;
+    const staffUser = req.staff!.user as any;
+    const staffId = staffUser.id as string;
+    const staffRole = staffUser.role as 'owner' | 'manager' | 'lane' | 'cashier';
+    const staffBranchId = staffUser.branchId as number | null;
+
+    // Same branch authorisation rules as POST /api/pos/orders.
+    let effectiveBranchId: number;
+    if (staffRole === 'owner' || staffRole === 'manager') {
+      if (!VALID_BRANCH_IDS.includes(body.branch_id)) {
+        return res.status(400).json({ error: 'invalid_branch_id' });
+      }
+      effectiveBranchId = body.branch_id;
+    } else {
+      if (staffBranchId == null) {
+        return res.status(403).json({ error: 'staff_no_branch' });
+      }
+      if (body.branch_id !== staffBranchId) {
+        return res.status(403).json({ error: 'branch_mismatch' });
+      }
+      effectiveBranchId = staffBranchId;
+    }
+
+    // Strip any data URL prefix the client may have left on, then decode.
+    const b64 = body.image_base64.replace(/^data:[^,]+,/, '');
+    let imageBuf: Buffer;
+    try {
+      imageBuf = Buffer.from(b64, 'base64');
+    } catch {
+      return res.status(400).json({ error: 'invalid_base64' });
+    }
+    if (imageBuf.length === 0 || imageBuf.length > 8 * 1024 * 1024) {
+      return res.status(400).json({ error: 'image_size_out_of_range' });
+    }
+
+    // Lazy 30-day retention sweep. Cheap (indexed on created_at). Runs
+    // outside any transaction so a partial failure here can't leave
+    // orphan rows; we just log and continue.
+    try {
+      await db.execute(sql`
+        DELETE FROM lpr_attempts
+         WHERE created_at < now() - interval '30 days'
+      `);
+    } catch (err) {
+      console.error('[pos.lpr.recognize] retention sweep failed:', err);
+    }
+
+    const apiKey = process.env.GEMINI_API_KEY;
+    if (!apiKey) {
+      return res.status(503).json({ error: 'lpr_unavailable', detail: 'gemini_not_configured' });
+    }
+
+    let recognizedPlate: string | null = null;
+    let confidence: number | null = null;
+    let rawResponse: string | null = null;
+    try {
+      const { GoogleGenAI } = await import('@google/genai');
+      const ai = new GoogleGenAI({ apiKey });
+      const result = await ai.models.generateContent({
+        model: 'gemini-2.5-flash',
+        contents: [
+          {
+            role: 'user',
+            parts: [
+              { inlineData: { data: b64, mimeType: body.image_mime } },
+              {
+                text: [
+                  'You are a Brunei license plate reader.',
+                  'Extract the plate visible in the photo as plain UPPERCASE letters and digits, no spaces or dashes.',
+                  'Brunei plates look like "BB1234", "DAA1234", "KB1234", "LCC1234", etc.',
+                  'If you cannot see a plate clearly, set "plate" to null.',
+                  'Reply ONLY with JSON in this exact shape: {"plate": "BB1234", "confidence": 0.92}.',
+                  'confidence is your 0-1 certainty.',
+                ].join(' '),
+              },
+            ],
+          },
+        ],
+        config: {
+          responseMimeType: 'application/json',
+          temperature: 0,
+        },
+      });
+      rawResponse = (result.text ?? '').trim();
+      try {
+        const parsedJson = JSON.parse(rawResponse);
+        if (typeof parsedJson.plate === 'string' && parsedJson.plate.trim().length > 0) {
+          recognizedPlate = normalizePlate(parsedJson.plate);
+        }
+        if (typeof parsedJson.confidence === 'number') {
+          confidence = Math.max(0, Math.min(1, parsedJson.confidence));
+        }
+      } catch {
+        // Gemini returned something that wasn't JSON — try to salvage
+        // a plate-shaped substring before giving up.
+        const m = rawResponse.match(/[A-Z]{1,4}\s*\d{1,5}/i);
+        if (m) recognizedPlate = normalizePlate(m[0]);
+      }
+    } catch (err: any) {
+      console.error('[pos.lpr.recognize] gemini failed:', err?.message ?? err);
+      return res.status(503).json({ error: 'lpr_unavailable', detail: 'gemini_call_failed' });
+    }
+
+    // Look up an exact match in `cars`. Prefix matching here is a bad
+    // idea — auto-selecting the wrong vehicle is worse than no match.
+    let matchedVehicle: any = null;
+    if (recognizedPlate) {
+      try {
+        const rows = (await db.execute(sql`
+          SELECT c.id, c.license_plate, c.brand, c.model, c.color, c."type",
+                 c.last_seen_at,
+                 cu.id AS customer_id, cu.phone AS customer_phone, cu.name AS customer_name
+            FROM cars c
+            LEFT JOIN customers cu ON cu.id = c.customer_id
+           WHERE UPPER(REGEXP_REPLACE(c.license_plate, '\s+', '', 'g')) = ${recognizedPlate}
+           LIMIT 1
+        `)).rows as any[];
+        if (rows.length > 0) {
+          const r = rows[0];
+          matchedVehicle = {
+            id: r.id,
+            license_plate: r.license_plate,
+            brand: r.brand,
+            model: r.model,
+            color: r.color,
+            type: r.type,
+            last_seen_at: r.last_seen_at,
+            customer: r.customer_id
+              ? { id: r.customer_id, phone: r.customer_phone, name: r.customer_name }
+              : null,
+          };
+        }
+      } catch (err) {
+        console.error('[pos.lpr.recognize] match lookup failed:', err);
+      }
+    }
+
+    // Audit insert. Non-fatal — never let logging break the response
+    // staff are waiting on. Worst case we lose one audit row.
+    try {
+      const attemptId = `lpr_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 8)}`;
+      await db.execute(sql`
+        INSERT INTO lpr_attempts (
+          id, staff_id, branch_id, recognized_plate, confidence,
+          matched_vehicle_id, raw_response, image_bytes, image_mime, image_size_bytes
+        ) VALUES (
+          ${attemptId}, ${staffId}, ${effectiveBranchId}, ${recognizedPlate}, ${confidence},
+          ${matchedVehicle?.id ?? null}, ${rawResponse}, ${imageBuf}, ${body.image_mime}, ${imageBuf.length}
+        )
+      `);
+    } catch (err) {
+      console.error('[pos.lpr.recognize] audit insert failed:', err);
+    }
+
+    return res.json({
+      recognized_plate: recognizedPlate,
+      confidence,
+      vehicle: matchedVehicle,
+    });
+  });
+
   // GET /api/pos/vehicles/:id/history — visit stats + last 10 orders.
   app.get('/api/pos/vehicles/:id/history', requireStaff, async (req, res) => {
     const id = Number(req.params.id);
