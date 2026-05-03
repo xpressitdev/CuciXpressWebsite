@@ -2339,6 +2339,185 @@ export async function registerRoutes(app: Express): Promise<Server> {
     res.json({ ok: true });
   });
 
+  // ===================================================================
+  // Customer phone-OTP login (Phase 6B). Two-step:
+  //   /login/start  → sendOtp(purpose='login') with phone as identifier
+  //   /login/verify → verifyOtp + find-or-create (users, customers) +
+  //                   mint Lucia cx_session cookie
+  //
+  // The legacy `users` table demands non-null email and password even
+  // for phone-only customers. We synthesise both: an unguessable random
+  // password (never used because OTP is the only path) and an email of
+  // the form `phone-<digits>@cucixpress.local` (only displayed if the
+  // user later hooks up Google or staff edits it). The customer never
+  // sees these.
+  // ===================================================================
+  const normalisePhone = (s: string) => s.trim().replace(/\s+/g, '');
+  const phoneStartSchema = z.object({ phone: z.string().min(7).max(20) });
+  const phoneVerifySchema = z.object({
+    phone: z.string().min(7).max(20),
+    code: z.string().regex(/^\d{6}$/),
+    name: z.string().min(1).max(100).optional(),
+  });
+
+  app.post('/api/auth/customer/login/start', async (req, res) => {
+    const parsed = phoneStartSchema.safeParse(req.body);
+    if (!parsed.success) {
+      return res.status(400).json({ ok: false, reason: 'invalid_request' });
+    }
+    const phone = normalisePhone(parsed.data.phone);
+    if (!phone) {
+      return res.status(400).json({ ok: false, reason: 'invalid_request' });
+    }
+    const result = await sendOtp({ identifier: phone, purpose: 'login', ip: req.ip ?? null });
+    if (!result.ok) {
+      return res.status(400).json(result);
+    }
+    res.json({ ok: true, expiresAt: result.expiresAt, ttlSeconds: OTP_CONSTANTS.TTL_SECONDS });
+  });
+
+  app.post('/api/auth/customer/login/verify', async (req, res) => {
+    const parsed = phoneVerifySchema.safeParse(req.body);
+    if (!parsed.success) {
+      return res.status(400).json({ ok: false, reason: 'invalid_request' });
+    }
+    const phone = normalisePhone(parsed.data.phone);
+    if (!phone) {
+      return res.status(400).json({ ok: false, reason: 'invalid_request' });
+    }
+
+    const verify = await verifyOtp({
+      identifier: phone,
+      purpose: 'login',
+      code: parsed.data.code,
+      ip: req.ip ?? null,
+    });
+    if (!verify.ok) {
+      const status = verify.reason === 'too_many_attempts' ? 429 : 400;
+      return res.status(status).json(verify);
+    }
+
+    try {
+      // 1) Existing customer with linked user → just use it.
+      const cust = (await db.execute(sql`
+        SELECT id, user_id, name FROM customers WHERE phone = ${phone} LIMIT 1
+      `)).rows[0] as { id: number; user_id: number | null; name: string } | undefined;
+
+      let userId: number;
+      if (cust && cust.user_id) {
+        userId = cust.user_id;
+      } else {
+        // 2) An existing users row may already carry this phone (e.g. a
+        // previous Google sign-in where the customer typed their phone).
+        const userByPhone = (await db.execute(sql`
+          SELECT id FROM users WHERE phone_number = ${phone} LIMIT 1
+        `)).rows[0] as { id: number } | undefined;
+
+        if (userByPhone) {
+          userId = userByPhone.id;
+        } else {
+          // 3) Brand-new sign-up. Synthesise the legacy required fields.
+          const fakeEmail = `phone-${phone}@cucixpress.local`;
+          const fakePass = crypto.randomUUID() + crypto.randomUUID();
+          const rawName = (parsed.data.name ?? cust?.name ?? `Customer ${phone.slice(-4)}`).trim();
+          const [first, ...rest] = rawName.split(/\s+/);
+          const last = rest.join(' ').trim() || ' ';
+          const inserted = (await db.execute(sql`
+            INSERT INTO users (first_name, last_name, email, password, phone_number)
+            VALUES (${first || 'Customer'}, ${last}, ${fakeEmail}, ${fakePass}, ${phone})
+            RETURNING id
+          `)).rows[0] as { id: number };
+          userId = inserted.id;
+        }
+
+        // Ensure a customers row exists and is linked.
+        if (cust) {
+          await db.execute(sql`UPDATE customers SET user_id = ${userId} WHERE id = ${cust.id}`);
+        } else {
+          const newName = (parsed.data.name ?? `Customer ${phone.slice(-4)}`).trim();
+          await db.execute(sql`
+            INSERT INTO customers (phone, name, user_id)
+            VALUES (${phone}, ${newName}, ${userId})
+            ON CONFLICT (phone) DO UPDATE SET user_id = EXCLUDED.user_id
+          `);
+        }
+      }
+
+      const session = await lucia.createSession(String(userId), {});
+      const cookie = lucia.createSessionCookie(session.id);
+      res.appendHeader('Set-Cookie', cookie.serialize());
+      res.json({ ok: true, userId });
+    } catch (err) {
+      console.error('[customer-login] failed', err);
+      res.status(500).json({ ok: false, reason: 'server_error' });
+    }
+  });
+
+  // ---- Customer dashboard endpoints (Lucia-protected) ---------------
+  app.get('/api/customer/me', requireLuciaUser, async (req, res) => {
+    const userId = Number(req.lucia!.user!.id);
+    const profile = (await db.execute(sql`
+      SELECT u.id, u.first_name, u.last_name, u.phone_number, u.email,
+             c.id AS customer_id, c.name AS customer_name, c.phone AS customer_phone
+      FROM users u
+      LEFT JOIN customers c ON c.user_id = u.id
+      WHERE u.id = ${userId}
+      LIMIT 1
+    `)).rows[0] as any;
+    if (!profile) return res.status(404).json({ error: 'not_found' });
+
+    const stats = (await db.execute(sql`
+      SELECT
+        (SELECT COUNT(*)::int FROM orders WHERE customer_id = ${userId} AND status = 'done') AS total_done,
+        (SELECT COALESCE(SUM(total_cents),0)::int FROM orders
+           WHERE customer_id = ${userId} AND status IN ('done','paid','washing','queued')) AS total_spent_cents,
+        (SELECT COALESCE(SUM(remaining_washes),0)::int FROM memberships m
+           JOIN customers cu ON cu.id = m.customer_id
+           WHERE cu.user_id = ${userId} AND m.status = 'active') AS remaining_washes
+    `)).rows[0] as any;
+    res.json({ profile, stats });
+  });
+
+  app.get('/api/customer/orders', requireLuciaUser, async (req, res) => {
+    const userId = Number(req.lucia!.user!.id);
+    const rows = (await db.execute(sql`
+      SELECT o.id, o.branch_id, b.name AS branch_name, o.plate, o.package_name,
+             o.total_cents, o.status, o.created_at, o.completed_at, o.payment_method
+      FROM orders o
+      LEFT JOIN branches b ON b.id = o.branch_id
+      WHERE o.customer_id = ${userId}
+      ORDER BY o.created_at DESC
+      LIMIT 50
+    `)).rows;
+    res.json({ orders: rows });
+  });
+
+  app.get('/api/customer/memberships', requireLuciaUser, async (req, res) => {
+    const userId = Number(req.lucia!.user!.id);
+    const rows = (await db.execute(sql`
+      SELECT m.id, m.kind, m.total_washes, m.remaining_washes, m.status, m.expires_at,
+             m.created_at, m.price_cents, b.name AS sold_at_branch_name
+      FROM memberships m
+      JOIN customers c ON c.id = m.customer_id
+      LEFT JOIN branches b ON b.id = m.sold_at_branch_id
+      WHERE c.user_id = ${userId}
+      ORDER BY m.created_at DESC
+    `)).rows;
+    res.json({ memberships: rows });
+  });
+
+  app.get('/api/customer/cars', requireLuciaUser, async (req, res) => {
+    const userId = Number(req.lucia!.user!.id);
+    const rows = (await db.execute(sql`
+      SELECT id, license_plate, brand, model, color, last_seen_at
+      FROM cars
+      WHERE user_id = ${userId}
+         OR customer_id = (SELECT id FROM customers WHERE user_id = ${userId} LIMIT 1)
+      ORDER BY last_seen_at DESC NULLS LAST, id DESC
+    `)).rows;
+    res.json({ cars: rows });
+  });
+
   // === Google OAuth (Task 1.5) ============================================
   // Authorization-code flow with PKCE via the `arctic` library. Mints a
   // Lucia session on success — replacing the legacy JWT for Google sign-in.

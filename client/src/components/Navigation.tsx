@@ -1,12 +1,19 @@
 import { useState, useEffect } from "react";
 import { motion } from "framer-motion";
-import { Menu, X } from "lucide-react";
+import { Menu, X, User } from "lucide-react";
 import { Link, useLocation } from "wouter";
+import { useQuery } from "@tanstack/react-query";
 
 export default function Navigation() {
   const [isScrolled, setIsScrolled] = useState(false);
   const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false);
   const [location] = useLocation();
+  // Cheap whoami check so we can swap the "Sign in" pill to "My account"
+  // when a customer Lucia session is present. Always 200, never throws.
+  const { data: who } = useQuery<{ authenticated: boolean }>({
+    queryKey: ["/api/auth/whoami"],
+  });
+  const isLoggedIn = !!who?.authenticated;
 
   useEffect(() => {
     const handleScroll = () => {
@@ -83,11 +90,28 @@ export default function Navigation() {
               ))}
               <Link
                 href="/queue"
-                className="bg-cuci-primary hover:bg-cuci-primary-dark text-white px-6 py-2 rounded-full text-sm font-medium transition-colors"
+                className="text-gray-700 hover:text-cuci-primary px-3 py-2 text-sm font-medium transition-colors"
                 data-testid="link-nav-live-queue"
               >
                 Live Queue
               </Link>
+              {isLoggedIn ? (
+                <Link
+                  href="/dashboard"
+                  className="bg-cuci-primary hover:bg-cuci-primary-dark text-white px-5 py-2 rounded-full text-sm font-medium transition-colors inline-flex items-center gap-1"
+                  data-testid="link-nav-dashboard"
+                >
+                  <User className="w-4 h-4" /> My account
+                </Link>
+              ) : (
+                <Link
+                  href="/login"
+                  className="bg-cuci-primary hover:bg-cuci-primary-dark text-white px-6 py-2 rounded-full text-sm font-medium transition-colors"
+                  data-testid="link-nav-signin"
+                >
+                  Sign in
+                </Link>
+              )}
             </div>
           </div>
 
@@ -128,11 +152,30 @@ export default function Navigation() {
             <Link
               href="/queue"
               onClick={() => setIsMobileMenuOpen(false)}
-              className="block bg-cuci-primary hover:bg-cuci-primary-dark text-white px-6 py-2 rounded-full text-base font-medium transition-colors mx-3 my-2 text-center w-auto"
+              className="block px-3 py-2 text-base font-medium text-gray-700 hover:text-cuci-primary transition-colors w-full text-left"
               data-testid="link-nav-live-queue-mobile"
             >
               Live Queue
             </Link>
+            {isLoggedIn ? (
+              <Link
+                href="/dashboard"
+                onClick={() => setIsMobileMenuOpen(false)}
+                className="block bg-cuci-primary hover:bg-cuci-primary-dark text-white px-6 py-2 rounded-full text-base font-medium transition-colors mx-3 my-2 text-center w-auto"
+                data-testid="link-nav-dashboard-mobile"
+              >
+                My account
+              </Link>
+            ) : (
+              <Link
+                href="/login"
+                onClick={() => setIsMobileMenuOpen(false)}
+                className="block bg-cuci-primary hover:bg-cuci-primary-dark text-white px-6 py-2 rounded-full text-base font-medium transition-colors mx-3 my-2 text-center w-auto"
+                data-testid="link-nav-signin-mobile"
+              >
+                Sign in
+              </Link>
+            )}
           </div>
         </motion.div>
       )}

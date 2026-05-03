@@ -6,6 +6,8 @@ import { TooltipProvider } from "@/components/ui/tooltip";
 import { useEffect } from "react";
 import Home from "@/pages/home";
 import QueuePage from "@/pages/queue";
+import LoginPage from "@/pages/login";
+import DashboardPage from "@/pages/dashboard";
 import Pricing from "@/pages/pricing";
 import Subscriptions from "@/pages/subscriptions";
 import Checkout from "@/pages/checkout";
@@ -29,6 +31,8 @@ function Router() {
     <Switch>
       <Route path="/" component={Home} />
       <Route path="/queue" component={QueuePage} />
+      <Route path="/login" component={LoginPage} />
+      <Route path="/dashboard" component={DashboardPage} />
       <Route path="/pricing" component={Pricing} />
       <Route path="/subscriptions" component={Subscriptions} />
       <Route path="/checkout" component={Checkout} />

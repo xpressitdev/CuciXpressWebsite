@@ -337,3 +337,12 @@ Two auth systems coexist by design during the Week 1–Week 2 cutover:
    - `<LiveQueueWidget>` on the home page, sandwiched between Hero and Stats — compact card with per-branch wait bars, "today · N washed" pill, and a "Shortest wait" suggestion linking to `/queue`.
    
    The Navigation "Live-Queue" pill (desktop + mobile) was switched from the external `cuci-xpress.com` link to the internal `/queue` route. Functional version only — visual revamp deferred to Phase 7 along with the rest of the landing redesign.
+
+   **Phase 6B — Customer phone-OTP login + dashboard.** Shipped:
+   - `POST /api/auth/customer/login/start` (sends 6-digit code via existing `sendOtp(purpose='login')`; dev-mocked to console + `/tmp/last_otp.json`).
+   - `POST /api/auth/customer/login/verify` — verifies the code, find-or-creates a `(users, customers)` pair (looking up by `customers.phone`, then `users.phone_number`, then synthesising a placeholder email/password the customer never sees), and mints a Lucia `cx_session` cookie.
+   - Lucia-protected reads: `GET /api/customer/me`, `/api/customer/orders`, `/api/customer/memberships`, `/api/customer/cars`.
+   - New `/login` page (phone → 6-digit code form) and `/dashboard` page (greeting, 3 KPI tiles for washes done / total spent / washes remaining, active memberships, saved vehicles, last 50 orders). Logout reuses the existing `/api/auth/lucia/logout`.
+   - Navigation pill swaps between "Sign in" (anonymous) and "My account" (logged-in) based on `/api/auth/whoami`. "Live Queue" demoted to a regular nav link to make room.
+   
+   Known limitation: OTP delivery is still dev-mocked. The code is printed in the workflow log and saved to `/tmp/last_otp.json`. Wiring real WhatsApp Business API delivery is queued for the integrations phase — until then, production calls to `sendOtp` will throw rather than silently drop.
