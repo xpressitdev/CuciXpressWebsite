@@ -518,6 +518,11 @@ export const memberships = pgTable("memberships", {
   id: text("id").primaryKey(),
   customer_id: integer("customer_id").references(() => customers.id).notNull(),
   vehicle_id: integer("vehicle_id").references(() => cars.id),
+  // kind='pack' (Phase 2): N prepaid washes, decrements per redemption.
+  // kind='unlimited' (Phase 2.1): time-bound, expires_at required, no
+  //   wash count gating — staff just check the expiry. total_washes /
+  //   remaining_washes are stored as 0 for unlimited rows.
+  kind: text("kind").default("pack").notNull(),
   total_washes: integer("total_washes").notNull(),
   remaining_washes: integer("remaining_washes").notNull(),
   price_cents: integer("price_cents").notNull(),

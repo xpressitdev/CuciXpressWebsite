@@ -74,6 +74,7 @@ interface ActiveMembership {
   id: string;
   customer_id: number;
   vehicle_id: number | null;
+  kind: "pack" | "unlimited";
   total_washes: number;
   remaining_washes: number;
   price_cents: number;
@@ -836,7 +837,25 @@ export default function POS() {
                               data-testid="badge-active-membership"
                             >
                               <ShieldCheck className="w-3 h-3" />
-                              Wash pack: {activeMembership.remaining_washes}/{activeMembership.total_washes} left
+                              {activeMembership.kind === "unlimited" ? (
+                                <>
+                                  Unlimited
+                                  {activeMembership.expires_at && (
+                                    <span className="text-emerald-700/80">
+                                      {" "}· until{" "}
+                                      {new Date(activeMembership.expires_at).toLocaleDateString("en-GB", {
+                                        day: "numeric",
+                                        month: "short",
+                                        timeZone: "Asia/Brunei",
+                                      })}
+                                    </span>
+                                  )}
+                                </>
+                              ) : (
+                                <>
+                                  Wash pack: {activeMembership.remaining_washes}/{activeMembership.total_washes} left
+                                </>
+                              )}
                               {activeMembership.vehicle_id !== null && (
                                 <span className="text-emerald-700/70 font-normal">
                                   · this car
@@ -1030,7 +1049,11 @@ export default function POS() {
                       className="flex justify-between text-sm text-emerald-700 font-medium"
                       data-testid="row-summary-membership-discount"
                     >
-                      <span>Wash pack redemption</span>
+                      <span>
+                        {activeMembership?.kind === "unlimited"
+                          ? "Unlimited pass"
+                          : "Wash pack redemption"}
+                      </span>
                       <span>−{formatBND(discount)}</span>
                     </div>
                   )}

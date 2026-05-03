@@ -577,3 +577,49 @@ Submit is blocked when subscription is selected without an active pack.
 full subtotal, including addons. Future refinement (per-line discount,
 addon-only-cash-charge) can layer in once the Owner has feedback from
 real cashier use.
+
+---
+
+## 2026-05-04 — Phase 2.1: membership kind (pack vs unlimited)
+
+**Migration:** `migrations/manual/2026-05-04_05_membership_kind.sql`
+**Applied to:** staging ✓, prod ✓ (same day).
+
+**What changed (plain English):** Cuci Xpress also sells an "unlimited
+washes for 1 month" product alongside the prepaid wash-pack. Same
+table, but the gate is *time* (expires_at) instead of *count*
+(remaining_washes). Added a `kind` column ∈ {'pack', 'unlimited'} so
+both shapes coexist on `memberships`.
+
+**Schema delta:**
+- `memberships.kind text NOT NULL DEFAULT 'pack'`
+- Dropped: `memberships_total_positive` (replaced by kind-aware checks)
+- Added: `memberships_kind_valid` — `kind IN ('pack','unlimited')`
+- Added: `memberships_pack_has_washes` — packs must have `total_washes > 0`
+- Added: `memberships_unlimited_has_expiry` — unlimited rows must have `expires_at IS NOT NULL`
+
+For unlimited rows, `total_washes` and `remaining_washes` are stored
+as 0 (the columns are unused for that kind; the existing
+`remaining_le_total` and `remaining_nonneg` checks still hold).
+
+**Server logic:**
+- Active lookup (`GET /api/pos/memberships/active`): condition is now
+  `(kind = 'unlimited' OR remaining_washes > 0)` — unlimited bypasses
+  the count gate, expiry filter still applies to both kinds.
+- Redemption (`POST /api/pos/orders` subscription branch):
+  - Pack: existing flow — must have washes left, decrement, flip to
+    'exhausted' at zero.
+  - Unlimited: skip the count check and skip the decrement. Only the
+    redemption row is written; status stays 'active' until `expires_at`
+    passes (server-side rejection on next attempt). No background cron
+    needed for Phase 2.1.
+- Sell (`POST /api/pos/memberships`): now accepts `kind`. Schema-level
+  refinements enforce that packs send `total_washes > 0` and unlimited
+  rows send `expires_at`.
+
+**UI:**
+- The green pill in the matched-vehicle card now reads "Unlimited ·
+  until 12 Sep" for unlimited memberships and "Wash pack: 7/10 left"
+  for packs.
+- The order summary discount line says "Unlimited pass" or "Wash pack
+  redemption" depending on which kind covered the order.

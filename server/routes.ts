@@ -1802,7 +1802,12 @@ export async function registerRoutes(app: Express): Promise<Server> {
         //   - belongs to the resolved customer
         //   - if pinned to a vehicle, that vehicle matches this order's car
         //   - if expires_at set, hasn't expired
-        let redeemMembership: { id: string; remaining: number; total: number } | null = null;
+        let redeemMembership: {
+          id: string;
+          kind: 'pack' | 'unlimited';
+          remaining: number;
+          total: number;
+        } | null = null;
         let discountCents = 0;
         let chargedTotal = subtotal;
         if (body.payment_method === 'subscription') {
@@ -1813,12 +1818,13 @@ export async function registerRoutes(app: Express): Promise<Server> {
             throw new PosOrderError(400, 'membership_needs_customer');
           }
           const mRows = (await tx.execute(sql`
-            SELECT id, customer_id, vehicle_id, total_washes, remaining_washes, status, expires_at
+            SELECT id, customer_id, vehicle_id, kind, total_washes, remaining_washes, status, expires_at
               FROM memberships
              WHERE id = ${body.membership_id}
              FOR UPDATE
           `)).rows as Array<{
             id: string; customer_id: number; vehicle_id: number | null;
+            kind: 'pack' | 'unlimited';
             total_washes: number; remaining_washes: number;
             status: string; expires_at: string | null;
           }>;
@@ -1826,18 +1832,24 @@ export async function registerRoutes(app: Express): Promise<Server> {
           const m = mRows[0];
           if (m.customer_id !== posCustomerId) throw new PosOrderError(403, 'membership_wrong_customer');
           if (m.status !== 'active') throw new PosOrderError(409, 'membership_not_active');
-          if (m.remaining_washes <= 0) throw new PosOrderError(409, 'membership_exhausted');
           if (m.expires_at && new Date(m.expires_at) < new Date()) {
             throw new PosOrderError(409, 'membership_expired');
           }
           if (m.vehicle_id != null && m.vehicle_id !== resolvedVehicleId) {
             throw new PosOrderError(409, 'membership_wrong_vehicle');
           }
-          redeemMembership = { id: m.id, remaining: m.remaining_washes, total: m.total_washes };
-          // Pack covers the package portion (the wash itself). Addons are
-          // not included and remain payable in cash/whatever — but to keep
-          // Phase 2 simple, the whole subtotal (incl. addons) is treated
-          // as covered. Owner can refine later if desired.
+          // Kind-specific gating:
+          //   * pack      → must have washes left; decrement after redeem.
+          //   * unlimited → time-bound only; no count check, no decrement.
+          if (m.kind === 'pack' && m.remaining_washes <= 0) {
+            throw new PosOrderError(409, 'membership_exhausted');
+          }
+          redeemMembership = {
+            id: m.id, kind: m.kind,
+            remaining: m.remaining_washes, total: m.total_washes,
+          };
+          // Pack covers the full subtotal (incl. addons) — same Phase 2
+          // simplification as before; applies to both kinds.
           discountCents = subtotal;
           chargedTotal = 0;
         }
@@ -1864,20 +1876,26 @@ export async function registerRoutes(app: Express): Promise<Server> {
           )
         `);
 
-        // 8. Record redemption + decrement remaining washes.
+        // 8. Record redemption. For 'pack' kind we also decrement and
+        //    flip status at zero; for 'unlimited' the audit row alone
+        //    is the trail (no count, no status change — expiry handles
+        //    end-of-life via a future cron or just the next redemption
+        //    attempt rejecting on expires_at).
         if (redeemMembership) {
           const redemptionId = `red_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 8)}`;
           await tx.execute(sql`
             INSERT INTO membership_redemptions (id, membership_id, order_id, staff_id)
             VALUES (${redemptionId}, ${redeemMembership.id}, ${orderId}, ${staffId})
           `);
-          const newRemaining = redeemMembership.remaining - 1;
-          await tx.execute(sql`
-            UPDATE memberships
-               SET remaining_washes = ${newRemaining},
-                   status = ${newRemaining === 0 ? 'exhausted' : 'active'}
-             WHERE id = ${redeemMembership.id}
-          `);
+          if (redeemMembership.kind === 'pack') {
+            const newRemaining = redeemMembership.remaining - 1;
+            await tx.execute(sql`
+              UPDATE memberships
+                 SET remaining_washes = ${newRemaining},
+                     status = ${newRemaining === 0 ? 'exhausted' : 'active'}
+               WHERE id = ${redeemMembership.id}
+            `);
+          }
         }
 
         return {
@@ -1904,7 +1922,11 @@ export async function registerRoutes(app: Express): Promise<Server> {
           membership: result.redeemMembership
             ? {
                 id: result.redeemMembership.id,
-                remaining_washes: result.redeemMembership.remaining - 1,
+                kind: result.redeemMembership.kind,
+                remaining_washes:
+                  result.redeemMembership.kind === 'pack'
+                    ? result.redeemMembership.remaining - 1
+                    : result.redeemMembership.remaining,
                 total_washes: result.redeemMembership.total,
               }
             : null,
@@ -2134,13 +2156,17 @@ export async function registerRoutes(app: Express): Promise<Server> {
       return res.status(400).json({ error: 'customer_id required' });
     }
     try {
+      // 'pack' kind requires remaining_washes > 0; 'unlimited' kind
+      // bypasses the count gate (it always has remaining=0 by design)
+      // and is gated by expires_at instead. Either way the row must be
+      // status='active' and not expired.
       const rows = (await db.execute(sql`
-        SELECT id, customer_id, vehicle_id, total_washes, remaining_washes,
+        SELECT id, customer_id, vehicle_id, kind, total_washes, remaining_washes,
                price_cents, status, expires_at, created_at
           FROM memberships
          WHERE customer_id = ${customerId}
            AND status = 'active'
-           AND remaining_washes > 0
+           AND (kind = 'unlimited' OR remaining_washes > 0)
            AND (expires_at IS NULL OR expires_at > now())
            AND (
              vehicle_id IS NULL
@@ -2160,11 +2186,20 @@ export async function registerRoutes(app: Express): Promise<Server> {
   const sellMembershipSchema = z.object({
     customer_id: z.number().int().positive(),
     vehicle_id: z.number().int().positive().optional().nullable(),
-    total_washes: z.number().int().positive().max(1000),
+    // 'pack' = N prepaid washes; total_washes required.
+    // 'unlimited' = time-bound; expires_at required.
+    kind: z.enum(['pack', 'unlimited']).default('pack'),
+    total_washes: z.number().int().nonnegative().max(1000).optional(),
     price_cents: z.number().int().nonnegative().max(1_000_000),
     expires_at: z.string().datetime().optional().nullable(),
     branch_id: z.number().int().positive(),
-  });
+  }).refine(
+    d => d.kind !== 'pack' || (d.total_washes != null && d.total_washes > 0),
+    { message: 'pack_requires_total_washes', path: ['total_washes'] },
+  ).refine(
+    d => d.kind !== 'unlimited' || !!d.expires_at,
+    { message: 'unlimited_requires_expires_at', path: ['expires_at'] },
+  );
   app.post('/api/pos/memberships', requireStaff, async (req, res) => {
     const parsed = sellMembershipSchema.safeParse(req.body);
     if (!parsed.success) {
@@ -2205,18 +2240,21 @@ export async function registerRoutes(app: Express): Promise<Server> {
         }
       }
 
+      // Unlimited rows store total/remaining as 0 — those columns are
+      // unused for kind='unlimited' (the CHECK constraint allows it).
+      const totalWashes = body.kind === 'pack' ? body.total_washes! : 0;
       const membershipId = `mem_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 8)}`;
       const row = (await db.execute(sql`
         INSERT INTO memberships (
-          id, customer_id, vehicle_id, total_washes, remaining_washes,
+          id, customer_id, vehicle_id, kind, total_washes, remaining_washes,
           price_cents, status, expires_at, sold_by_staff_id, sold_at_branch_id
         ) VALUES (
           ${membershipId}, ${body.customer_id}, ${body.vehicle_id ?? null},
-          ${body.total_washes}, ${body.total_washes},
+          ${body.kind}, ${totalWashes}, ${totalWashes},
           ${body.price_cents}, 'active', ${body.expires_at ?? null},
           ${staffId}, ${effectiveBranchId}
         )
-        RETURNING id, customer_id, vehicle_id, total_washes, remaining_washes,
+        RETURNING id, customer_id, vehicle_id, kind, total_washes, remaining_washes,
                   price_cents, status, expires_at, created_at
       `)).rows[0];
       res.status(201).json({ ok: true, membership: row });

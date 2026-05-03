@@ -223,3 +223,19 @@ Two auth systems coexist by design during the Week 1–Week 2 cutover:
    green discount line in the order summary and drops the total to B$0.
    Migration applied to staging and prod the same day; 0 subscriptions
    rows lost (the stub had never been populated).
+
+   **Phase 2.1 — unlimited memberships (`2026-05-04_05_membership_kind.sql`):**
+   Added a `kind` column to `memberships` (default 'pack') so the
+   table also models "unlimited washes for 1 month" passes. New
+   CHECK constraints: packs must have `total_washes > 0`, unlimited
+   rows must have `expires_at` set. Server-side redemption flow now
+   branches on kind: packs decrement and flip to 'exhausted' at zero
+   as before; unlimited skips the count check and the decrement,
+   relying only on `expires_at` to gate eligibility (so a single
+   month-pass redeems many washes without depleting). The active-
+   memberships lookup includes unlimited rows where the count would
+   otherwise be zero. POS UI badge now shows "Unlimited · until 12
+   Sep" for time-bound passes and "Wash pack: 7/10 left" for prepaid
+   ones; the order-summary discount line label adapts to match.
+   Migration applied to staging and prod the same day; 0 memberships
+   rows existed at the time, so nothing to backfill.
