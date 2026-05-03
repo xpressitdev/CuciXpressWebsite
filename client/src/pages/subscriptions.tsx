@@ -96,73 +96,82 @@ export default function Subscriptions() {
   };
 
   return (
-    <div className="min-h-screen bg-gray-50">
+    <div className="min-h-screen">
       <Navigation />
-      <main className="pt-20 pb-16">
-        {/* Hero Section */}
-        <section className="py-20 bg-gradient-to-br from-cuci-primary/5 to-cuci-secondary/5">
+      <main className="cuci-page-bg pt-20 pb-16">
+        {/* Hero — eyebrow + duotone headline mirrors /queue & /login. */}
+        <section className="py-20">
           <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 text-center">
             <motion.div
               initial={{ opacity: 0, y: 30 }}
               animate={{ opacity: 1, y: 0 }}
               transition={{ duration: 0.6 }}
             >
-              <h1 className="text-4xl md:text-6xl font-bold text-gray-900 mb-6">
-                Car Wash <span className="text-cuci-primary">Subscriptions</span>
+              <div className="cuci-eyebrow mb-4">Memberships · Coming soon</div>
+              <h1 className="text-4xl md:text-6xl font-extrabold tracking-tight text-gray-900 mb-6">
+                Wash as much<br />as you <span className="text-cuci-primary">drive</span>
+                <span className="text-cuci-secondary">.</span>
               </h1>
-              <p className="text-xl text-gray-600 mb-8 max-w-3xl mx-auto">
-                Perfect for everyday drivers, families, and businesses! Choose from our exterior wash subscription plans 
-                designed to keep your vehicles clean and presentable all month long.
+              <p className="text-xl text-gray-600 mb-8 max-w-3xl mx-auto leading-relaxed">
+                One flat monthly fee. Drive in any branch, any time. Rain re-wash on us — designed for Brunei's everyday drivers, families and fleets.
               </p>
             </motion.div>
           </div>
         </section>
 
         {/* Subscription Section */}
-        <section className="py-20 bg-white">
+        <section className="pb-20">
           <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
-            {/* Not Yet Live Banner */}
+            {/* Not Yet Live Banner — brutalist card, gradient backdrop. */}
             <motion.div
               initial={{ opacity: 0, y: 20 }}
               whileInView={{ opacity: 1, y: 0 }}
               transition={{ duration: 0.6 }}
               viewport={{ once: true }}
-              className="text-center mb-8"
+              className="text-center mb-12 max-w-3xl mx-auto"
             >
-              <div className="bg-gradient-to-r from-cuci-primary/10 to-cuci-secondary/10 rounded-2xl p-8 border-2 border-dashed border-cuci-primary/30">
-                <h3 className="text-3xl font-bold text-cuci-primary mb-4">Subscription Service: Coming Soon!</h3>
-                <p className="text-lg text-gray-600 mb-6 max-w-2xl mx-auto">
-                  We're finalizing our exterior wash subscription plans designed specifically for Brunei's climate. 
-                  Sign up below to be the first to know when these packages launch!
+              <div
+                className="cuci-card p-8 md:p-10"
+                style={{
+                  background:
+                    "linear-gradient(135deg, hsl(257, 74%, 97%) 0%, hsl(36, 100%, 96%) 100%)",
+                }}
+              >
+                <div className="cuci-eyebrow mb-3">Join the waitlist</div>
+                <h3 className="text-3xl font-extrabold tracking-tight text-gray-900 mb-4">
+                  We're <span className="text-cuci-primary">almost ready</span>.
+                </h3>
+                <p className="text-base text-gray-600 mb-6 max-w-xl mx-auto leading-relaxed">
+                  We're finalising our exterior-wash subscription plans for Brunei's climate. Drop your email — we'll ping you the moment they go live.
                 </p>
-                <form onSubmit={handleSubscriptionSubmit} className="flex flex-col sm:flex-row gap-4 justify-center items-center max-w-lg mx-auto mb-6">
-                  <input 
-                    type="email" 
+                <form onSubmit={handleSubscriptionSubmit} className="flex flex-col sm:flex-row gap-3 justify-center items-stretch max-w-md mx-auto mb-5">
+                  <input
+                    type="email"
                     value={email}
                     onChange={(e) => setEmail(e.target.value)}
-                    placeholder="Enter your email address"
+                    placeholder="you@email.com"
                     required
                     disabled={subscriptionMutation.isPending}
-                    className="flex-1 px-6 py-3 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-cuci-primary focus:border-transparent disabled:opacity-50 text-lg"
+                    className="flex-1 px-4 py-3 border-2 border-black rounded-lg bg-white focus:outline-none focus:ring-2 focus:ring-cuci-primary disabled:opacity-50 text-base"
                   />
-                  <button 
+                  <button
                     type="submit"
                     disabled={subscriptionMutation.isPending}
-                    className="bg-cuci-primary hover:bg-cuci-primary/90 text-white px-8 py-3 rounded-lg font-semibold transition-colors whitespace-nowrap disabled:opacity-50 text-lg"
+                    className="cuci-cta bg-cuci-primary text-white px-6 py-3 rounded-lg whitespace-nowrap disabled:opacity-50 text-base"
                   >
-                    {subscriptionMutation.isPending ? 'Signing Up...' : 'Notify Me'}
+                    {subscriptionMutation.isPending ? 'Signing up…' : 'Notify me →'}
                   </button>
                 </form>
-                
+
                 <button
                   onClick={() => setShowPlannedPackages(!showPlannedPackages)}
-                  className="flex items-center gap-2 text-cuci-primary hover:text-cuci-primary-dark font-semibold transition-colors mx-auto text-lg"
+                  className="inline-flex items-center gap-2 text-cuci-primary hover:text-cuci-primary-dark font-bold transition-colors mx-auto text-sm"
                 >
-                  {showPlannedPackages ? "Hide" : "Preview"} Packages
+                  {showPlannedPackages ? "Hide" : "Preview"} planned packages
                   {showPlannedPackages ? (
-                    <ChevronUp className="w-5 h-5" />
+                    <ChevronUp className="w-4 h-4" />
                   ) : (
-                    <ChevronDown className="w-5 h-5" />
+                    <ChevronDown className="w-4 h-4" />
                   )}
                 </button>
               </div>
@@ -191,49 +200,42 @@ export default function Subscriptions() {
               viewport={{ once: true }}
               className="text-center mt-16"
             >
-              <h3 className="text-2xl font-bold text-gray-900 mb-4">Why Choose Our Subscription Service?</h3>
-              <div className="grid md:grid-cols-3 gap-8 max-w-4xl mx-auto mb-8">
-                <div className="text-center">
-                  <div className="w-16 h-16 bg-cuci-primary/10 rounded-full flex items-center justify-center mx-auto mb-4">
-                    <span className="text-2xl">💧</span>
+              <div className="cuci-eyebrow mb-3">Why subscribe</div>
+              <h3 className="text-3xl font-extrabold tracking-tight text-gray-900 mb-10">
+                Three reasons our regulars never go back.
+              </h3>
+              <div className="grid md:grid-cols-3 gap-5 max-w-5xl mx-auto mb-10">
+                {[
+                  { emoji: '💧', title: 'Consistent care', body: 'Regular cleaning keeps your car looking sharp every week.', accent: 'bg-cuci-primary/10' },
+                  { emoji: '💰', title: 'Cost savings', body: 'Pays for itself after 5 washes vs. drive-in pricing.', accent: 'bg-cuci-secondary/15' },
+                  { emoji: '⏰', title: 'Convenience', body: 'Set it once. Drive in any branch, any time. No appointments.', accent: 'bg-green-100' },
+                ].map((b) => (
+                  <div key={b.title} className="cuci-kpi text-left">
+                    <div className={`w-12 h-12 rounded-full border-2 border-black ${b.accent} flex items-center justify-center mb-4`}>
+                      <span className="text-2xl">{b.emoji}</span>
+                    </div>
+                    <h4 className="font-extrabold text-gray-900 mb-1.5 text-lg">{b.title}</h4>
+                    <p className="text-gray-600 text-sm leading-relaxed">{b.body}</p>
                   </div>
-                  <h4 className="font-semibold text-gray-900 mb-2">Consistent Care</h4>
-                  <p className="text-gray-600">Regular cleaning schedule keeps your car looking its best</p>
-                </div>
-                <div className="text-center">
-                  <div className="w-16 h-16 bg-cuci-secondary/10 rounded-full flex items-center justify-center mx-auto mb-4">
-                    <span className="text-2xl">💰</span>
-                  </div>
-                  <h4 className="font-semibold text-gray-900 mb-2">Cost Savings</h4>
-                  <p className="text-gray-600">Save money compared to individual wash visits</p>
-                </div>
-                <div className="text-center">
-                  <div className="w-16 h-16 bg-green-100 rounded-full flex items-center justify-center mx-auto mb-4">
-                    <span className="text-2xl">⏰</span>
-                  </div>
-                  <h4 className="font-semibold text-gray-900 mb-2">Convenience</h4>
-                  <p className="text-gray-600">Set it and forget it - we'll take care of everything</p>
-                </div>
+                ))}
               </div>
-              
-              <p className="text-gray-600 mb-8 text-lg">
-                All plans include our satisfaction guarantee and flexible cancellation policy.
+
+              <p className="text-gray-600 mb-8 text-base">
+                All plans include our rain re-wash guarantee and flexible cancellation.
               </p>
-              
-              <div className="flex flex-col sm:flex-row gap-4 justify-center">
+
+              <div className="flex flex-col sm:flex-row gap-3 justify-center">
                 <motion.button
-                  whileHover={{ scale: 1.05 }}
-                  whileTap={{ scale: 0.95 }}
+                  whileTap={{ scale: 0.97 }}
                   onClick={() => {
                     window.scrollTo({ top: 0, behavior: 'smooth' });
                   }}
-                  className="bg-cuci-primary hover:bg-cuci-primary-dark text-white px-8 py-3 rounded-full font-semibold transition-all shadow-lg"
+                  className="cuci-cta bg-cuci-primary text-white px-7 py-3 rounded-full"
                 >
-                  Sign Up for Updates
+                  Sign up for updates
                 </motion.button>
                 <motion.button
-                  whileHover={{ scale: 1.05 }}
-                  whileTap={{ scale: 0.95 }}
+                  whileTap={{ scale: 0.97 }}
                   onClick={() => {
                     window.location.href = '/';
                     setTimeout(() => {
@@ -243,9 +245,9 @@ export default function Subscriptions() {
                       }
                     }, 100);
                   }}
-                  className="border-2 border-cuci-secondary text-cuci-secondary hover:bg-cuci-secondary hover:text-white px-8 py-3 rounded-full font-semibold transition-all"
+                  className="cuci-cta bg-white text-gray-900 px-7 py-3 rounded-full"
                 >
-                  Find Our Locations
+                  Find our locations
                 </motion.button>
               </div>
             </motion.div>
