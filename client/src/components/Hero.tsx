@@ -28,10 +28,25 @@ export default function Hero() {
             transition={{ duration: 0.8 }}
             className="text-center lg:text-left"
           >
-            <h1 className="text-4xl md:text-6xl font-bold text-gray-900 leading-tight mb-6">
+            <h1 className="text-4xl md:text-6xl font-black tracking-tight text-gray-900 leading-[1.05] mb-6">
               We've cleaned over{" "}
-              <span className="text-cuci-primary">120,000</span> cars.
-              <span className="block text-cuci-secondary">
+              <span
+                className="bg-clip-text text-transparent"
+                style={{
+                  backgroundImage:
+                    "linear-gradient(to right, hsl(257, 74%, 66%), hsl(36, 100%, 50%))",
+                }}
+              >
+                120,000
+              </span>{" "}
+              cars.
+              <span
+                className="block bg-clip-text text-transparent"
+                style={{
+                  backgroundImage:
+                    "linear-gradient(to right, hsl(257, 74%, 66%), hsl(36, 100%, 50%))",
+                }}
+              >
                 And we're just getting started.
               </span>
             </h1>
