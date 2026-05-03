@@ -101,7 +101,7 @@ export default function LoginPage() {
   };
 
   return (
-    <div className="min-h-screen bg-gray-50">
+    <div className="cuci-page-bg">
       <Navigation />
       <main className="max-w-md mx-auto px-4 sm:px-6 lg:px-8 pt-24 pb-16">
         <Link
@@ -109,18 +109,25 @@ export default function LoginPage() {
           className="text-sm text-gray-500 hover:text-cuci-primary inline-flex items-center gap-1 mb-4"
           data-testid="link-login-back"
         >
-          <ArrowLeft className="w-4 h-4" /> Back
+          <ArrowLeft className="w-4 h-4" /> Back to home
         </Link>
-        <div className="bg-white rounded-2xl border-2 border-black shadow-[4px_4px_0px_0px_rgba(0,0,0,0.9)] p-6 md:p-8">
-          <h1 className="text-2xl font-bold text-gray-900 mb-1">Sign in</h1>
-          <p className="text-sm text-gray-500 mb-6">
-            Enter your phone number and we'll send you a one-time code.
-          </p>
 
+        <div className="text-center mb-5">
+          <p className="cuci-eyebrow">Customer · CuciXpress</p>
+          <h1 className="text-3xl md:text-4xl font-black text-gray-900 mt-1">
+            Welcome <span className="text-cuci-primary">back</span>
+          </h1>
+          <p className="text-sm text-gray-600 mt-2">
+            Sign in with your phone number to see your washes, memberships
+            and saved vehicles.
+          </p>
+        </div>
+
+        <div className="cuci-card p-6 md:p-7">
           {step === "phone" ? (
-            <div className="space-y-3">
+            <div className="space-y-4">
               <div className="space-y-1">
-                <label className="text-xs text-gray-600 flex items-center gap-1">
+                <label className="cuci-eyebrow flex items-center gap-1">
                   <Phone className="w-3 h-3" /> Phone number
                 </label>
                 <Input
@@ -129,53 +136,63 @@ export default function LoginPage() {
                   placeholder="+673 7XX XXXX"
                   inputMode="tel"
                   autoFocus
+                  className="border-2 border-black focus-visible:ring-cuci-primary text-base"
                   data-testid="input-login-phone"
                 />
               </div>
               <div className="space-y-1">
-                <label className="text-xs text-gray-600">Name (optional, first time only)</label>
+                <label className="cuci-eyebrow">
+                  Name <span className="text-gray-400 normal-case font-normal">(optional, first time only)</span>
+                </label>
                 <Input
                   value={name}
                   onChange={(e) => setName(e.target.value)}
                   placeholder="Your name"
+                  className="border-2 border-black focus-visible:ring-cuci-primary"
                   data-testid="input-login-name"
                 />
               </div>
               <Button
                 onClick={sendCode}
                 disabled={busy || !phone.trim()}
-                className="w-full bg-cuci-primary hover:bg-cuci-primary-dark"
+                className="cuci-cta w-full bg-cuci-primary hover:bg-cuci-primary-dark text-white text-base py-6 disabled:opacity-60 disabled:translate-x-0 disabled:translate-y-0"
                 data-testid="button-login-send-code"
               >
-                {busy ? <Loader2 className="w-4 h-4 animate-spin" /> : "Send code"}
+                {busy ? <Loader2 className="w-5 h-5 animate-spin" /> : "Send 6-digit code →"}
               </Button>
+              <p className="text-[11px] text-gray-400 text-center pt-1">
+                We'll send a one-time code. No password to remember.
+              </p>
             </div>
           ) : (
-            <div className="space-y-3">
-              <p className="text-sm text-gray-700">
-                Code sent to <span className="font-semibold">{phone}</span>.
-              </p>
+            <div className="space-y-4">
+              <div className="rounded-lg bg-cuci-primary/5 border border-cuci-primary/20 p-3 text-center">
+                <p className="text-sm text-gray-700">
+                  Code sent to{" "}
+                  <span className="font-bold text-cuci-primary">{phone}</span>
+                </p>
+              </div>
               <div className="space-y-1">
-                <label className="text-xs text-gray-600 flex items-center gap-1">
+                <label className="cuci-eyebrow flex items-center gap-1">
                   <KeyRound className="w-3 h-3" /> 6-digit code
                 </label>
                 <Input
                   value={code}
                   onChange={(e) => setCode(e.target.value.replace(/\D/g, "").slice(0, 6))}
-                  placeholder="123456"
+                  placeholder="••••••"
                   inputMode="numeric"
                   autoFocus
-                  className="tracking-[0.5em] text-center text-lg font-mono"
+                  className="border-2 border-black focus-visible:ring-cuci-primary tracking-[0.6em] text-center text-2xl font-mono py-6"
                   data-testid="input-login-code"
                 />
               </div>
               <Button
                 onClick={verifyCode}
                 disabled={busy || code.length !== 6}
-                className="w-full bg-cuci-primary hover:bg-cuci-primary-dark"
+                className="cuci-cta w-full bg-cuci-primary hover:bg-cuci-primary-dark text-white text-base py-6 disabled:opacity-60 disabled:translate-x-0 disabled:translate-y-0"
                 data-testid="button-login-verify"
               >
-                {busy ? <Loader2 className="w-4 h-4 animate-spin" /> : "Verify & sign in"}
+                {busy ? <Loader2 className="w-5 h-5 animate-spin" /> : "Verify & sign in"}
               </Button>
               <button
                 type="button"
@@ -186,7 +203,7 @@ export default function LoginPage() {
                 className="w-full text-sm text-gray-500 hover:text-cuci-primary"
                 data-testid="button-login-back-to-phone"
               >
-                Use a different number
+                ← Use a different number
               </button>
             </div>
           )}

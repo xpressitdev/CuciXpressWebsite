@@ -1,7 +1,7 @@
 import { useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { Link } from "wouter";
-import { Sparkles, ArrowLeft, Activity } from "lucide-react";
+import { Sparkles, ArrowLeft, Car, Clock, CheckCircle2, Activity } from "lucide-react";
 import Navigation from "@/components/Navigation";
 import Footer from "@/components/Footer";
 
@@ -44,46 +44,78 @@ export default function QueuePage() {
     [],
     { hour: "2-digit", minute: "2-digit" },
   );
+  const totalToday = branches.reduce((s, b) => s + b.today_total, 0);
+  const totalQueued = branches.reduce((s, b) => s + b.queued_count, 0);
+  const totalWashing = branches.reduce((s, b) => s + b.washing_count, 0);
 
   return (
-    <div className="min-h-screen bg-gray-50">
+    <div className="cuci-page-bg">
       <Navigation />
       <main className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 pt-24 pb-16">
-        <div className="flex items-start justify-between mb-6 flex-wrap gap-3">
+        <Link
+          href="/"
+          className="text-sm text-gray-500 hover:text-cuci-primary inline-flex items-center gap-1 mb-3"
+          data-testid="link-queue-back"
+        >
+          <ArrowLeft className="w-4 h-4" /> Back to home
+        </Link>
+
+        <div className="flex items-end justify-between mb-6 flex-wrap gap-3">
           <div>
-            <Link
-              href="/"
-              className="text-sm text-gray-500 hover:text-cuci-primary inline-flex items-center gap-1 mb-2"
-              data-testid="link-queue-back"
-            >
-              <ArrowLeft className="w-4 h-4" /> Back
-            </Link>
-            <p className="text-xs uppercase tracking-wider text-gray-500 font-semibold">
-              CuciXpress · Live
-            </p>
-            <h1 className="text-2xl md:text-3xl font-bold text-gray-900">
-              Queue across all branches
+            <p className="cuci-eyebrow">CuciXpress · Live Network</p>
+            <h1 className="text-3xl md:text-5xl font-black text-gray-900 leading-tight mt-1">
+              Queue across all{" "}
+              <span className="text-cuci-primary">branches</span>
             </h1>
+            <p className="text-sm md:text-base text-gray-600 mt-2 max-w-xl">
+              Real-time look at every Cuci Xpress lane. Pick the shortest
+              wait and drive in.
+            </p>
           </div>
-          <span className="inline-flex items-center gap-2 bg-emerald-50 text-emerald-700 px-3 py-1.5 rounded-full text-sm font-medium">
-            <Activity className="w-4 h-4" />
-            Live · {time}
+          <span
+            className="inline-flex items-center gap-2 bg-white border-2 border-black rounded-full px-4 py-2 text-sm font-bold shadow-[3px_3px_0px_0px_rgba(0,0,0,0.9)]"
+            data-testid="badge-queue-live"
+          >
+            <span className="cuci-live-dot" /> LIVE · {time}
           </span>
         </div>
 
-        {isLoading && <p className="text-sm text-gray-500">Loading live queue…</p>}
+        {/* Top-line KPI strip */}
+        <div className="grid grid-cols-3 gap-3 mb-6">
+          <NetworkKpi
+            icon={<Car className="w-5 h-5 text-cuci-primary" />}
+            label="In queue now"
+            value={totalQueued}
+          />
+          <NetworkKpi
+            icon={<Activity className="w-5 h-5 text-cuci-secondary" />}
+            label="Currently washing"
+            value={totalWashing}
+          />
+          <NetworkKpi
+            icon={<CheckCircle2 className="w-5 h-5 text-emerald-600" />}
+            label="Washed today"
+            value={totalToday}
+          />
+        </div>
+
+        {isLoading && (
+          <div className="cuci-card p-6">
+            <p className="text-sm text-gray-500">Loading live queue…</p>
+          </div>
+        )}
 
         {!isLoading && branches.length === 0 && (
-          <p className="text-sm text-gray-500">No branches configured yet.</p>
+          <div className="cuci-card p-6">
+            <p className="text-sm text-gray-500">No branches configured yet.</p>
+          </div>
         )}
 
         {!isLoading && branches.length > 0 && (
-          <div className="grid lg:grid-cols-[280px_1fr] gap-6">
+          <div className="grid lg:grid-cols-[300px_1fr] gap-5">
             {/* Branch list */}
             <div className="space-y-2">
-              <p className="text-xs uppercase tracking-wider text-gray-500 font-semibold mb-1">
-                Choose a branch
-              </p>
+              <p className="cuci-eyebrow mb-1">Choose a branch</p>
               {branches.map((b) => {
                 const active = selected?.id === b.id;
                 const quiet = b.queued_count === 0;
@@ -100,21 +132,21 @@ export default function QueuePage() {
                     key={b.id}
                     onClick={() => setSelectedId(b.id)}
                     data-testid={`button-queue-branch-${b.id}`}
-                    className={`w-full text-left p-3 rounded-lg border-2 transition ${
+                    className={`w-full text-left p-3 rounded-xl border-2 transition-all duration-150 ${
                       active
-                        ? "border-cuci-primary bg-cuci-primary/5"
-                        : "border-gray-200 bg-white hover:border-gray-300"
+                        ? "border-black bg-white shadow-[3px_3px_0px_0px_rgba(0,0,0,0.9)]"
+                        : "border-gray-200 bg-white/70 hover:border-black hover:bg-white"
                     }`}
                   >
                     <div className="flex justify-between items-baseline gap-2">
                       <span
-                        className={`font-semibold truncate ${
+                        className={`font-bold truncate ${
                           active ? "text-cuci-primary" : "text-gray-900"
                         }`}
                       >
                         {shortBranchName(b.name)}
                       </span>
-                      <span className={`text-sm font-bold ${waitColor}`}>
+                      <span className={`text-sm font-black ${waitColor}`}>
                         {b.is_open ? fmtWait(b.est_wait_minutes) : "Closed"}
                       </span>
                     </div>
@@ -136,6 +168,27 @@ export default function QueuePage() {
   );
 }
 
+function NetworkKpi({
+  icon,
+  label,
+  value,
+}: {
+  icon: React.ReactNode;
+  label: string;
+  value: number;
+}) {
+  return (
+    <div className="cuci-kpi" data-testid={`kpi-net-${label.toLowerCase().replace(/\s+/g, "-")}`}>
+      <div className="flex items-center gap-2 cuci-eyebrow">
+        {icon}
+        <span className="hidden sm:inline">{label}</span>
+        <span className="sm:hidden">{label.split(" ")[0]}</span>
+      </div>
+      <p className="text-2xl md:text-3xl font-black text-gray-900 mt-1">{value}</p>
+    </div>
+  );
+}
+
 function BranchDetail({ branch }: { branch: QueueBranch }) {
   type LaneCar = QueueCar & { kind: "washing" | "queued"; label: string };
   const lane: LaneCar[] = [
@@ -148,48 +201,68 @@ function BranchDetail({ branch }: { branch: QueueBranch }) {
   ];
 
   return (
-    <div className="bg-white rounded-xl border-2 border-black shadow-[4px_4px_0px_0px_rgba(0,0,0,0.9)] p-5 md:p-6 space-y-5">
-      <div>
-        <p className="text-xs uppercase tracking-wider text-cuci-primary font-semibold">
-          {branch.is_open ? "Open" : "Closed"}
-        </p>
-        <h2 className="text-2xl md:text-3xl font-bold text-gray-900">{branch.name}</h2>
-        {branch.location && (
-          <p className="text-sm text-gray-500">{branch.location}</p>
+    <div className="cuci-card p-5 md:p-7 space-y-5">
+      <div className="flex items-start justify-between gap-3 flex-wrap">
+        <div>
+          <p
+            className={`cuci-eyebrow ${
+              branch.is_open ? "text-cuci-primary" : "text-gray-400"
+            }`}
+          >
+            {branch.is_open ? "● Open now" : "Closed"}
+          </p>
+          <h2 className="text-2xl md:text-3xl font-black text-gray-900 mt-1">
+            {branch.name}
+          </h2>
+          {branch.location && (
+            <p className="text-sm text-gray-500 mt-1">{branch.location}</p>
+          )}
+        </div>
+        {branch.is_open && (
+          <div className="text-right">
+            <p className="cuci-eyebrow">Est. wait</p>
+            <p className="text-3xl md:text-4xl font-black text-cuci-secondary">
+              {fmtWait(branch.est_wait_minutes)}
+            </p>
+          </div>
         )}
       </div>
 
-      <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
-        <KpiTile label="Cars in queue" value={String(branch.queued_count)} />
-        <KpiTile
-          label="Estimated wait"
-          value={branch.is_open ? fmtWait(branch.est_wait_minutes) : "—"}
-          accent
-        />
-        <KpiTile label="Washing now" value={String(branch.washing_count)} />
-        <KpiTile label="Today total" value={String(branch.today_total)} />
+      <div className="grid grid-cols-3 gap-2 md:gap-3">
+        <BranchKpi label="In queue" value={String(branch.queued_count)} />
+        <BranchKpi label="Washing" value={String(branch.washing_count)} accent />
+        <BranchKpi label="Today" value={String(branch.today_total)} />
       </div>
 
       <div>
-        <p className="text-xs uppercase tracking-wider text-gray-500 font-semibold mb-2">
-          Wash lane · live
-        </p>
+        <div className="flex items-center justify-between mb-2">
+          <p className="cuci-eyebrow inline-flex items-center gap-1.5">
+            <Clock className="w-3 h-3" /> Wash lane · live
+          </p>
+          {lane.length > 0 && (
+            <p className="text-xs text-gray-500">
+              {lane.length} car{lane.length === 1 ? "" : "s"} in lane
+            </p>
+          )}
+        </div>
         {lane.length === 0 ? (
-          <div className="rounded-lg bg-emerald-50 border border-emerald-200 p-6 text-center">
-            <Sparkles className="w-6 h-6 text-emerald-600 mx-auto mb-2" />
-            <p className="font-semibold text-emerald-800">
+          <div className="rounded-xl bg-emerald-50 border-2 border-emerald-200 p-6 text-center">
+            <Sparkles className="w-7 h-7 text-emerald-600 mx-auto mb-2" />
+            <p className="font-bold text-emerald-800">
               {branch.is_open
                 ? "This branch is quiet right now."
                 : "This branch is currently closed."}
             </p>
             {branch.is_open && (
-              <p className="text-sm text-emerald-700">Drive straight in — no waiting.</p>
+              <p className="text-sm text-emerald-700 mt-1">
+                Drive straight in — no waiting.
+              </p>
             )}
           </div>
         ) : (
-          <div className="bg-gray-900 rounded-lg p-4 overflow-x-auto">
+          <div className="rounded-xl border-2 border-black bg-gradient-to-br from-gray-900 to-gray-800 p-4 overflow-x-auto shadow-[3px_3px_0px_0px_rgba(0,0,0,0.9)]">
             <div className="flex gap-3 min-w-max items-stretch text-xs">
-              <div className="flex items-center text-gray-500 px-2 font-semibold">
+              <div className="flex items-center text-gray-400 px-2 font-bold tracking-wider">
                 ENTRY →
               </div>
               {lane.map((car, i) => (
@@ -198,20 +271,20 @@ function BranchDetail({ branch }: { branch: QueueBranch }) {
                   data-testid={`lane-car-${i}`}
                   className={`px-3 py-2 rounded-md border-2 min-w-[150px] ${
                     car.kind === "washing"
-                      ? "border-cuci-primary bg-cuci-primary/30 text-white"
+                      ? "border-cuci-secondary bg-cuci-primary/40 text-white shadow-[2px_2px_0px_0px_rgba(255,255,255,0.15)]"
                       : "border-gray-700 bg-gray-800 text-gray-200"
                   }`}
                 >
-                  <p className="text-[10px] uppercase tracking-wider opacity-80">
+                  <p className="text-[10px] uppercase tracking-wider opacity-80 font-bold">
                     {car.label}
                   </p>
-                  <p className="font-bold text-sm">{car.plate}</p>
+                  <p className="font-black text-sm">{car.plate}</p>
                   <p className="text-[10px] opacity-80 truncate max-w-[130px]">
                     {car.package_name}
                   </p>
                 </div>
               ))}
-              <div className="flex items-center text-gray-500 px-2 font-semibold">
+              <div className="flex items-center text-gray-400 px-2 font-bold tracking-wider">
                 → EXIT
               </div>
             </div>
@@ -222,7 +295,7 @@ function BranchDetail({ branch }: { branch: QueueBranch }) {
   );
 }
 
-function KpiTile({
+function BranchKpi({
   label,
   value,
   accent,
@@ -232,12 +305,10 @@ function KpiTile({
   accent?: boolean;
 }) {
   return (
-    <div className="rounded-lg border border-gray-200 p-3">
-      <p className="text-[10px] uppercase tracking-wider text-gray-500 font-semibold">
-        {label}
-      </p>
+    <div className="rounded-lg border border-gray-200 bg-white p-3">
+      <p className="cuci-eyebrow">{label}</p>
       <p
-        className={`text-2xl font-bold mt-1 ${
+        className={`text-2xl md:text-3xl font-black mt-1 ${
           accent ? "text-cuci-secondary" : "text-gray-900"
         }`}
       >

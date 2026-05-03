@@ -72,12 +72,12 @@ interface CarRow {
 }
 
 const STATUS_STYLES: Record<string, string> = {
-  done: "border-emerald-200 text-emerald-700 bg-emerald-50",
-  washing: "border-blue-200 text-blue-700 bg-blue-50",
-  paid: "border-amber-200 text-amber-700 bg-amber-50",
-  queued: "border-amber-200 text-amber-700 bg-amber-50",
-  voided: "border-gray-200 text-gray-500 bg-gray-50",
-  refunded: "border-red-200 text-red-700 bg-red-50",
+  done: "border-emerald-300 text-emerald-700 bg-emerald-50",
+  washing: "border-blue-300 text-blue-700 bg-blue-50",
+  paid: "border-amber-300 text-amber-700 bg-amber-50",
+  queued: "border-amber-300 text-amber-700 bg-amber-50",
+  voided: "border-gray-300 text-gray-500 bg-gray-50",
+  refunded: "border-red-300 text-red-700 bg-red-50",
 };
 
 export default function DashboardPage() {
@@ -127,7 +127,7 @@ export default function DashboardPage() {
 
   if (whoLoading || !who?.authenticated || !me) {
     return (
-      <div className="min-h-screen bg-gray-50">
+      <div className="cuci-page-bg">
         <Navigation />
         <main className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 pt-24 pb-16">
           <p className="text-sm text-gray-500">Loading your dashboard…</p>
@@ -145,21 +145,21 @@ export default function DashboardPage() {
     `${me.profile.first_name} ${me.profile.last_name}`.trim() ||
     me.profile.customer_name ||
     "Customer";
+  const firstName = fullName.split(" ")[0];
 
   return (
-    <div className="min-h-screen bg-gray-50">
+    <div className="cuci-page-bg">
       <Navigation />
       <main className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 pt-24 pb-16 space-y-6">
         {/* Header */}
         <div className="flex items-start justify-between flex-wrap gap-3">
           <div>
-            <p className="text-xs uppercase tracking-wider text-gray-500 font-semibold">
-              My account
-            </p>
-            <h1 className="text-2xl md:text-3xl font-bold text-gray-900">
-              Hi, {fullName.split(" ")[0]}
+            <p className="cuci-eyebrow">My account · CuciXpress</p>
+            <h1 className="text-3xl md:text-5xl font-black text-gray-900 leading-tight mt-1">
+              Hi, <span className="text-cuci-primary">{firstName}</span>
+              <span className="text-cuci-secondary">.</span>
             </h1>
-            <p className="text-sm text-gray-500">
+            <p className="text-sm text-gray-500 mt-2">
               {me.profile.phone_number ?? me.profile.customer_phone ?? me.profile.email}
             </p>
           </div>
@@ -167,6 +167,7 @@ export default function DashboardPage() {
             variant="outline"
             onClick={() => logout.mutate()}
             disabled={logout.isPending}
+            className="border-2 border-black hover:bg-gray-50"
             data-testid="button-dashboard-logout"
           >
             {logout.isPending ? (
@@ -194,11 +195,12 @@ export default function DashboardPage() {
             icon={<Sparkles className="w-5 h-5 text-cuci-secondary" />}
             label="Washes remaining"
             value={String(me.stats.remaining_washes)}
+            accent
           />
         </div>
 
         {/* Active memberships */}
-        <Card title="Active memberships" icon={<Sparkles className="w-4 h-4" />}>
+        <Card title="Active memberships" icon={<Sparkles className="w-4 h-4 text-cuci-secondary" />}>
           {activeMemberships.length === 0 ? (
             <Empty>You don't have an active membership yet.</Empty>
           ) : (
@@ -206,11 +208,11 @@ export default function DashboardPage() {
               {activeMemberships.map((m) => (
                 <div
                   key={m.id}
-                  className="flex items-center justify-between border border-gray-200 rounded-lg p-3"
+                  className="flex items-center justify-between border-2 border-black rounded-xl p-3 bg-gradient-to-r from-cuci-primary/5 to-cuci-secondary/5"
                   data-testid={`row-membership-${m.id}`}
                 >
                   <div>
-                    <p className="font-semibold text-gray-900">
+                    <p className="font-bold text-gray-900">
                       {m.kind === "unlimited" ? "Unlimited washes" : `${m.total_washes}-wash pack`}
                     </p>
                     <p className="text-xs text-gray-500">
@@ -220,9 +222,11 @@ export default function DashboardPage() {
                   </div>
                   <div className="text-right">
                     {m.kind === "unlimited" ? (
-                      <Badge className="bg-cuci-secondary text-white">Unlimited</Badge>
+                      <Badge className="bg-cuci-secondary text-white border-2 border-black font-bold">
+                        Unlimited
+                      </Badge>
                     ) : (
-                      <p className="text-lg font-bold text-cuci-primary">
+                      <p className="text-2xl font-black text-cuci-primary">
                         {m.remaining_washes}
                         <span className="text-xs text-gray-500 font-normal">
                           {" "}
@@ -238,7 +242,7 @@ export default function DashboardPage() {
         </Card>
 
         {/* Vehicles */}
-        <Card title="My vehicles" icon={<Car className="w-4 h-4" />}>
+        <Card title="My vehicles" icon={<Car className="w-4 h-4 text-cuci-primary" />}>
           {cars.length === 0 ? (
             <Empty>No vehicles linked yet — they'll show up after your first wash.</Empty>
           ) : (
@@ -246,10 +250,10 @@ export default function DashboardPage() {
               {cars.map((c) => (
                 <div
                   key={c.id}
-                  className="border border-gray-200 rounded-lg p-3"
+                  className="border-2 border-gray-200 hover:border-black rounded-xl p-3 transition-colors bg-white"
                   data-testid={`row-car-${c.id}`}
                 >
-                  <p className="font-bold text-gray-900">{c.license_plate}</p>
+                  <p className="font-black text-gray-900 tracking-wide">{c.license_plate}</p>
                   <p className="text-xs text-gray-500">
                     {[c.brand, c.model, c.color].filter(Boolean).join(" · ") || "—"}
                   </p>
@@ -266,46 +270,46 @@ export default function DashboardPage() {
         </Card>
 
         {/* History */}
-        <Card title="Recent washes" icon={<History className="w-4 h-4" />}>
+        <Card title="Recent washes" icon={<History className="w-4 h-4 text-gray-700" />}>
           {orders.length === 0 ? (
             <Empty>No washes on your account yet.</Empty>
           ) : (
-            <div className="overflow-x-auto">
+            <div className="overflow-x-auto -mx-5 md:mx-0">
               <table className="w-full text-sm">
                 <thead>
-                  <tr className="text-left text-xs uppercase tracking-wider text-gray-500">
-                    <th className="py-2 pr-3">Date</th>
-                    <th className="py-2 pr-3">Branch</th>
-                    <th className="py-2 pr-3">Plate</th>
-                    <th className="py-2 pr-3">Package</th>
-                    <th className="py-2 pr-3">Status</th>
-                    <th className="py-2 pr-3 text-right">Total</th>
+                  <tr className="text-left cuci-eyebrow border-b-2 border-black">
+                    <th className="py-2 px-3">Date</th>
+                    <th className="py-2 px-3">Branch</th>
+                    <th className="py-2 px-3">Plate</th>
+                    <th className="py-2 px-3">Package</th>
+                    <th className="py-2 px-3">Status</th>
+                    <th className="py-2 px-3 text-right">Total</th>
                   </tr>
                 </thead>
                 <tbody>
                   {orders.map((o) => (
                     <tr
                       key={o.id}
-                      className="border-t border-gray-100"
+                      className="border-b border-gray-100 hover:bg-cuci-primary/5 transition-colors"
                       data-testid={`row-order-${o.id}`}
                     >
-                      <td className="py-2 pr-3 whitespace-nowrap">
+                      <td className="py-2.5 px-3 whitespace-nowrap">
                         {new Date(o.created_at).toLocaleDateString()}
                       </td>
-                      <td className="py-2 pr-3">{o.branch_name ?? "—"}</td>
-                      <td className="py-2 pr-3 font-mono">{o.plate}</td>
-                      <td className="py-2 pr-3 truncate max-w-[200px]">
+                      <td className="py-2.5 px-3">{o.branch_name ?? "—"}</td>
+                      <td className="py-2.5 px-3 font-mono font-bold">{o.plate}</td>
+                      <td className="py-2.5 px-3 truncate max-w-[200px]">
                         {o.package_name}
                       </td>
-                      <td className="py-2 pr-3">
+                      <td className="py-2.5 px-3">
                         <Badge
                           variant="outline"
-                          className={STATUS_STYLES[o.status] ?? ""}
+                          className={`font-bold ${STATUS_STYLES[o.status] ?? ""}`}
                         >
                           {o.status}
                         </Badge>
                       </td>
-                      <td className="py-2 pr-3 text-right font-medium">
+                      <td className="py-2.5 px-3 text-right font-bold">
                         {formatBND(o.total_cents)}
                       </td>
                     </tr>
@@ -325,17 +329,25 @@ function KpiTile({
   icon,
   label,
   value,
+  accent,
 }: {
   icon: React.ReactNode;
   label: string;
   value: string;
+  accent?: boolean;
 }) {
   return (
-    <div className="rounded-lg border border-gray-200 bg-white p-4">
-      <div className="flex items-center gap-2 text-xs uppercase tracking-wider text-gray-500 font-semibold">
+    <div className="cuci-kpi" data-testid={`kpi-${label.toLowerCase().replace(/\s+/g, "-")}`}>
+      <div className="flex items-center gap-2 cuci-eyebrow">
         {icon} {label}
       </div>
-      <p className="text-2xl font-bold text-gray-900 mt-1">{value}</p>
+      <p
+        className={`text-2xl md:text-3xl font-black mt-1 ${
+          accent ? "text-cuci-secondary" : "text-gray-900"
+        }`}
+      >
+        {value}
+      </p>
     </div>
   );
 }
@@ -350,10 +362,10 @@ function Card({
   children: React.ReactNode;
 }) {
   return (
-    <section className="bg-white rounded-xl border border-gray-200 p-5">
-      <div className="flex items-center gap-2 mb-3">
+    <section className="cuci-card p-5 md:p-6">
+      <div className="flex items-center gap-2 mb-4 pb-3 border-b border-gray-100">
         {icon}
-        <h2 className="font-semibold text-gray-900">{title}</h2>
+        <h2 className="font-bold text-gray-900 text-lg">{title}</h2>
       </div>
       {children}
     </section>
@@ -361,5 +373,9 @@ function Card({
 }
 
 function Empty({ children }: { children: React.ReactNode }) {
-  return <p className="text-sm text-gray-500">{children}</p>;
+  return (
+    <div className="rounded-lg bg-gray-50 border border-dashed border-gray-300 p-5 text-center">
+      <p className="text-sm text-gray-500">{children}</p>
+    </div>
+  );
 }

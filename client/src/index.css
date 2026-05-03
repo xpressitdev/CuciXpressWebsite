@@ -107,3 +107,93 @@ html {
   backdrop-filter: blur(10px);
   -webkit-backdrop-filter: blur(10px);
 }
+
+/* ============================================================
+   Phase 7 — Shared design tokens.
+   The Hero established the brand's neo-brutalist look (purple+orange
+   gradient backdrop, 2px black border, 4px offset shadow). These
+   utility classes let queue/login/dashboard inherit it without
+   re-declaring the same magic numbers across files.
+   ============================================================ */
+
+/* Page shell — soft purple→orange wash, mirrors the Hero. */
+.cuci-page-bg {
+  min-height: 100vh;
+  background:
+    radial-gradient(ellipse at top left, hsl(257, 74%, 96%) 0%, transparent 55%),
+    radial-gradient(ellipse at top right, hsl(36, 100%, 95%) 0%, transparent 55%),
+    hsl(0, 0%, 99%);
+}
+
+/* Neo-brutalist white card — bold border + offset shadow. */
+.cuci-card {
+  @apply bg-white rounded-2xl border-2 border-black;
+  box-shadow: 4px 4px 0px 0px rgba(0, 0, 0, 0.9);
+}
+
+/* Subtler card for dense lists where a hard shadow on every row
+   would be overwhelming. */
+.cuci-card-soft {
+  @apply bg-white rounded-xl border border-gray-200;
+}
+
+/* KPI tile — same brutalist language, smaller shadow so a row of
+   them doesn't feel over-the-top. */
+.cuci-kpi {
+  @apply bg-white rounded-xl border-2 border-black p-4;
+  box-shadow: 3px 3px 0px 0px rgba(0, 0, 0, 0.9);
+  transition: transform 120ms ease, box-shadow 120ms ease;
+}
+.cuci-kpi:hover {
+  transform: translate(-1px, -1px);
+  box-shadow: 4px 4px 0px 0px rgba(0, 0, 0, 0.9);
+}
+
+/* Section eyebrow — uppercase tracking label that sits above
+   page/section headings. */
+.cuci-eyebrow {
+  @apply text-xs uppercase tracking-wider font-semibold text-gray-500;
+}
+
+/* Live indicator — pulsing dot used by queue + dashboard headers. */
+.cuci-live-dot {
+  position: relative;
+  display: inline-flex;
+  width: 0.5rem;
+  height: 0.5rem;
+}
+.cuci-live-dot::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  border-radius: 9999px;
+  background: hsl(142, 71%, 45%);
+  opacity: 0.75;
+  animation: cuci-ping 1.5s cubic-bezier(0, 0, 0.2, 1) infinite;
+}
+.cuci-live-dot::after {
+  content: "";
+  position: relative;
+  width: 0.5rem;
+  height: 0.5rem;
+  border-radius: 9999px;
+  background: hsl(142, 71%, 36%);
+}
+@keyframes cuci-ping {
+  75%, 100% { transform: scale(2); opacity: 0; }
+}
+
+/* Press-down interaction shared by all CTA buttons in the
+   neo-brutalist style. Pair with the existing inline shadow. */
+.cuci-cta {
+  @apply border-2 border-black font-bold transition-all duration-150;
+  box-shadow: 4px 4px 0px 0px rgba(0, 0, 0, 0.9);
+}
+.cuci-cta:hover {
+  transform: translate(-1px, -1px);
+  box-shadow: 5px 5px 0px 0px rgba(0, 0, 0, 0.9);
+}
+.cuci-cta:active {
+  transform: translate(2px, 2px);
+  box-shadow: 1px 1px 0px 0px rgba(0, 0, 0, 0.9);
+}
