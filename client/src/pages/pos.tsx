@@ -409,12 +409,14 @@ export default function POS() {
   // proper modal. Subscription orders DO NOT credit the wash back.
   const refundOrder = useMutation({
     mutationFn: async (vars: { orderId: string; reason: string | null }) => {
+      // apiRequest returns the raw Response (it only does the
+      // HTTP throw); parse the JSON body ourselves.
       const res = await apiRequest(
         "POST",
         `/api/pos/orders/${vars.orderId}/refund`,
         { reason: vars.reason },
       );
-      return res as { ok: true; order: TodayOrder };
+      return (await res.json()) as { ok: true; order: TodayOrder };
     },
     onSuccess: (data) => {
       queryClient.invalidateQueries({

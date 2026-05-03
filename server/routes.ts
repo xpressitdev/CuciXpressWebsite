@@ -388,6 +388,237 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
+  // ============================================================
+  // ADMIN — Phase 5a Owner Dashboard + Order Report (2026-05-04)
+  // Owner/manager only. Read-only aggregations over orders +
+  // customers + staff. All time math runs in Asia/Brunei (UTC+8).
+  // ============================================================
+
+  // GET /api/admin/dashboard?branch_id=N|all&date=YYYY-MM-DD
+  // Returns 12 KPI tiles + 24-hour sales/refund breakdown.
+  app.get('/api/admin/dashboard', requireStaff, requireStaffRole('owner', 'manager'), async (req, res) => {
+    const branchParam = String(req.query.branch_id ?? 'all').trim();
+    const branchId =
+      branchParam === '' || branchParam === 'all' ? null : Number(branchParam);
+    if (branchId !== null && (!Number.isFinite(branchId) || branchId <= 0)) {
+      return res.status(400).json({ error: 'invalid_branch_id' });
+    }
+    const dateParam = String(req.query.date ?? '').trim();
+    const validDate = /^\d{4}-\d{2}-\d{2}$/.test(dateParam) ? dateParam : null;
+
+    try {
+      const branches = (await db.execute(sql`
+        SELECT id, name, location FROM branches ORDER BY name
+      `)).rows;
+
+      const dateRow = (await db.execute(
+        validDate
+          ? sql`SELECT ${validDate}::date AS d`
+          : sql`SELECT (now() AT TIME ZONE 'Asia/Brunei')::date AS d`,
+      )).rows[0] as { d: string };
+      const targetDate = dateRow.d;
+
+      const branchFilter = branchId !== null ? sql`AND branch_id = ${branchId}` : sql``;
+
+      const tilesRow = (await db.execute(sql`
+        WITH day_orders AS (
+          SELECT *
+            FROM orders
+           WHERE ticket_day = ${targetDate}::date
+             ${branchFilter}
+        ),
+        paid AS (SELECT * FROM day_orders WHERE status <> 'refunded'),
+        ref  AS (SELECT * FROM day_orders WHERE status =  'refunded')
+        SELECT
+          (SELECT COUNT(*)::int FROM day_orders)                                              AS today_transactions,
+          (SELECT COALESCE(SUM(total_cents),0)::bigint FROM paid)                             AS today_sales_cents,
+          (SELECT COUNT(*)::int FROM ref)                                                     AS today_refund_count,
+          (SELECT COALESCE(SUM(total_cents),0)::bigint FROM ref)                              AS today_refund_total_cents,
+          (SELECT COALESCE(SUM(1 + COALESCE(jsonb_array_length(addons),0)),0)::int FROM paid) AS today_items_sold,
+          (SELECT COUNT(DISTINCT staff_id)::int   FROM day_orders WHERE staff_id IS NOT NULL)   AS today_active_staff,
+          (SELECT COUNT(DISTINCT vehicle_id)::int FROM day_orders WHERE vehicle_id IS NOT NULL) AS today_active_customers,
+          (SELECT COUNT(*)::int FROM staff WHERE is_active = true)                            AS total_staff,
+          (SELECT COUNT(*)::int FROM customers)                                               AS total_customers
+      `)).rows[0] as any;
+
+      const hourly = (await db.execute(sql`
+        SELECT EXTRACT(HOUR FROM (created_at AT TIME ZONE 'Asia/Brunei'))::int AS hour,
+               COALESCE(SUM(CASE WHEN status <> 'refunded' THEN total_cents ELSE 0 END), 0)::bigint AS sales_cents,
+               COALESCE(SUM(CASE WHEN status =  'refunded' THEN total_cents ELSE 0 END), 0)::bigint AS refund_cents
+          FROM orders
+         WHERE ticket_day = ${targetDate}::date
+           ${branchFilter}
+         GROUP BY 1
+         ORDER BY 1
+      `)).rows as Array<{ hour: number; sales_cents: string | number; refund_cents: string | number }>;
+
+      const hourlyMap = new Map<number, { sales_cents: number; refund_cents: number }>();
+      for (const row of hourly) {
+        hourlyMap.set(Number(row.hour), {
+          sales_cents: Number(row.sales_cents),
+          refund_cents: Number(row.refund_cents),
+        });
+      }
+      const hourlyFull = Array.from({ length: 24 }, (_, h) => ({
+        hour: h,
+        sales_cents: hourlyMap.get(h)?.sales_cents ?? 0,
+        refund_cents: hourlyMap.get(h)?.refund_cents ?? 0,
+      }));
+
+      const tx = Number(tilesRow.today_transactions ?? 0);
+      const sales = Number(tilesRow.today_sales_cents ?? 0);
+      const refundCount = Number(tilesRow.today_refund_count ?? 0);
+      const refundTotal = Number(tilesRow.today_refund_total_cents ?? 0);
+
+      res.json({
+        filter: { branch_id: branchId, date: targetDate },
+        branches,
+        tiles: {
+          today_transactions: tx,
+          today_sales_cents: sales,
+          today_avg_sales_cents: tx > 0 ? Math.round(sales / tx) : 0,
+          today_items_sold: Number(tilesRow.today_items_sold ?? 0),
+          today_refund_count: refundCount,
+          today_refund_total_cents: refundTotal,
+          today_avg_refund_cents: refundCount > 0 ? Math.round(refundTotal / refundCount) : 0,
+          today_net_sales_cents: sales,
+          today_active_staff: Number(tilesRow.today_active_staff ?? 0),
+          today_active_customers: Number(tilesRow.today_active_customers ?? 0),
+          total_staff: Number(tilesRow.total_staff ?? 0),
+          total_customers: Number(tilesRow.total_customers ?? 0),
+        },
+        hourly: hourlyFull,
+      });
+    } catch (err) {
+      console.error('[admin.dashboard] failed:', err);
+      res.status(500).json({ error: 'dashboard_failed' });
+    }
+  });
+
+  // GET /api/admin/reports/orders
+  //   ?branch_id=N|all
+  //   &from=YYYY-MM-DD&to=YYYY-MM-DD     (default: today, both)
+  //   &payment_method=cash|...|all
+  //   &staff_id=text|all
+  //   &search=ticket_code|plate|customer_name (>=2 chars)
+  //   &page=1&per_page=50                (10..200)
+  app.get('/api/admin/reports/orders', requireStaff, requireStaffRole('owner', 'manager'), async (req, res) => {
+    const branchParam = String(req.query.branch_id ?? 'all').trim();
+    const branchId =
+      branchParam === '' || branchParam === 'all' ? null : Number(branchParam);
+    if (branchId !== null && (!Number.isFinite(branchId) || branchId <= 0)) {
+      return res.status(400).json({ error: 'invalid_branch_id' });
+    }
+
+    const isDate = (s: string) => /^\d{4}-\d{2}-\d{2}$/.test(s);
+    const fromParam = String(req.query.from ?? '').trim();
+    const toParam = String(req.query.to ?? '').trim();
+
+    const paymentMethod = String(req.query.payment_method ?? 'all').trim();
+    const staffParam = String(req.query.staff_id ?? 'all').trim();
+    const search = String(req.query.search ?? '').trim();
+
+    const page = Math.max(1, Number(req.query.page ?? 1) || 1);
+    const perPage = Math.min(200, Math.max(10, Number(req.query.per_page ?? 50) || 50));
+    const offset = (page - 1) * perPage;
+
+    try {
+      const todayRow = (await db.execute(
+        sql`SELECT (now() AT TIME ZONE 'Asia/Brunei')::date AS d`,
+      )).rows[0] as { d: string };
+      const from = isDate(fromParam) ? fromParam : todayRow.d;
+      const to = isDate(toParam) ? toParam : from;
+
+      const branchFilter = branchId !== null ? sql`AND o.branch_id = ${branchId}` : sql``;
+      const pmFilter =
+        paymentMethod !== '' && paymentMethod !== 'all'
+          ? sql`AND o.payment_method = ${paymentMethod}`
+          : sql``;
+      const staffFilter =
+        staffParam !== '' && staffParam !== 'all'
+          ? sql`AND o.staff_id = ${staffParam}`
+          : sql``;
+      const searchFilter =
+        search.length >= 2
+          ? sql`AND (o.ticket_code ILIKE ${'%' + search + '%'}
+                  OR o.plate       ILIKE ${'%' + search + '%'}
+                  OR COALESCE(o.customer_name_walkin,'') ILIKE ${'%' + search + '%'})`
+          : sql``;
+
+      const totals = (await db.execute(sql`
+        SELECT
+          COUNT(*)::int                                                                                AS transactions,
+          COALESCE(SUM(CASE WHEN o.status <> 'refunded' THEN o.total_cents ELSE 0 END),0)::bigint      AS sales_cents,
+          COUNT(*) FILTER (WHERE o.status = 'refunded')::int                                           AS refund_count,
+          COALESCE(SUM(CASE WHEN o.status =  'refunded' THEN o.total_cents ELSE 0 END),0)::bigint      AS refund_total_cents,
+          COALESCE(SUM(CASE WHEN o.status <> 'refunded' THEN 1 + COALESCE(jsonb_array_length(o.addons),0) ELSE 0 END),0)::int AS items_sold
+          FROM orders o
+         WHERE o.ticket_day BETWEEN ${from}::date AND ${to}::date
+           ${branchFilter} ${pmFilter} ${staffFilter} ${searchFilter}
+      `)).rows[0] as any;
+
+      const countRow = (await db.execute(sql`
+        SELECT COUNT(*)::int AS n
+          FROM orders o
+         WHERE o.ticket_day BETWEEN ${from}::date AND ${to}::date
+           ${branchFilter} ${pmFilter} ${staffFilter} ${searchFilter}
+      `)).rows[0] as { n: number };
+
+      const rows = (await db.execute(sql`
+        SELECT o.id, o.ticket_code, o.plate, o.ticket_day, o.created_at,
+               o.payment_method, o.package_name, o.total_cents, o.paid_amount_cents,
+               o.change_cents, o.status, o.refunded_at, o.refund_reason,
+               o.customer_name_walkin, o.original_receipt_no, o.kedaipos_pos_name,
+               o.branch_id, b.name AS branch_name,
+               o.staff_id, s.name AS staff_name
+          FROM orders o
+          LEFT JOIN branches b ON b.id = o.branch_id
+          LEFT JOIN staff    s ON s.id = o.staff_id
+         WHERE o.ticket_day BETWEEN ${from}::date AND ${to}::date
+           ${branchFilter} ${pmFilter} ${staffFilter} ${searchFilter}
+         ORDER BY o.created_at DESC
+         LIMIT ${perPage} OFFSET ${offset}
+      `)).rows;
+
+      const branches = (await db.execute(
+        sql`SELECT id, name FROM branches ORDER BY name`,
+      )).rows;
+      const staffList = (await db.execute(sql`
+        SELECT id, name, role, branch_id FROM staff
+         WHERE is_active = true ORDER BY name
+      `)).rows;
+
+      const txCount = Number(totals.transactions ?? 0);
+      const refCount = Number(totals.refund_count ?? 0);
+      const sales = Number(totals.sales_cents ?? 0);
+      const refundTotal = Number(totals.refund_total_cents ?? 0);
+      const paidCount = Math.max(1, txCount - refCount);
+
+      res.json({
+        filter: { branch_id: branchId, from, to, payment_method: paymentMethod, staff_id: staffParam, search },
+        branches,
+        staff: staffList,
+        totals: {
+          transactions: txCount,
+          sales_cents: sales,
+          refund_count: refCount,
+          refund_total_cents: refundTotal,
+          net_sales_cents: sales,
+          items_sold: Number(totals.items_sold ?? 0),
+          avg_sales_cents: txCount - refCount > 0 ? Math.round(sales / paidCount) : 0,
+          avg_refund_cents: refCount > 0 ? Math.round(refundTotal / refCount) : 0,
+        },
+        page,
+        per_page: perPage,
+        total_count: countRow.n,
+        rows,
+      });
+    } catch (err) {
+      console.error('[admin.reports.orders] failed:', err);
+      res.status(500).json({ error: 'report_failed' });
+    }
+  });
+
   // Test Google API key endpoint
   app.get("/api/test-google-api", async (req, res) => {
     try {

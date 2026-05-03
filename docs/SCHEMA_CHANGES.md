@@ -715,3 +715,33 @@ After refund, the row shows strike-through ticket code, red −B$X.XX,
 and a "Refunded" badge with the reason underneath if provided.
 
 Applied to staging + prod 2026-05-04.
+
+---
+
+## Phase 5a — Owner Dashboard + Order Report (no schema change)
+
+Read-only admin endpoints over the existing tables. **No migration.**
+
+- `GET /api/admin/dashboard?branch_id=N|all&date=YYYY-MM-DD`
+  Returns 12 KPI tiles (today's transactions, sales, avg sales, items
+  sold, refund count, total refunds, avg refund, net sales, active
+  staff today, active customers today, total staff, total customers)
+  + a 24-hour `[{hour, sales_cents, refund_cents}]` array for the
+  hourly area chart. All time math runs in Asia/Brunei (UTC+8).
+
+- `GET /api/admin/reports/orders` with filters:
+  `branch_id`, `from`, `to` (ticket_day range, default = today),
+  `payment_method`, `staff_id`, `search` (>=2 chars on ticket_code /
+  plate / customer_name_walkin), `page`, `per_page` (10..200).
+  Returns aggregates (transactions, net_sales, refunds, items_sold,
+  averages) plus paginated rows joined to `branches` + `staff`.
+
+Both endpoints require `requireStaff` + `requireStaffRole('owner','manager')`.
+
+Surfaced in `/admin` as two new tabs: **Dashboard** (default) and
+**Order Report**, sitting alongside the existing Collaborations and
+Subscriptions tabs.
+
+Phase 4 follow-up: fixed `refundOrder` mutation in `pos.tsx` —
+`apiRequest` returns the raw `Response`, so we now `await res.json()`
+inside the mutation to actually consume the body.

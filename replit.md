@@ -285,3 +285,28 @@ Two auth systems coexist by design during the Week 1–Week 2 cutover:
    if provided. Confirm + reason flow uses the browser confirm/
    prompt for v1 — Phase 7 visual refresh will replace with a
    proper modal. Migration applied to staging and prod 2026-05-04.
+
+   **Phase 5a — Owner Dashboard + Order Report (no migration):**
+   Two new admin endpoints over the existing tables:
+   `GET /api/admin/dashboard` returns 12 KPI tiles (today's
+   transactions, sales, avg, items sold, refund count, total
+   refunds, avg refund, net sales, active staff today, active
+   customers today, total staff, total customers — owner skipped
+   cost/profit since packages have no cost field) plus a 24-hour
+   sales/refund array for the hourly chart. `GET /api/admin/reports/
+   orders` returns filtered (branch, date range, payment method,
+   staff, free-text search) paginated orders with totals. All time
+   math runs in Asia/Brunei (UTC+8). Both endpoints are owner/
+   manager only via requireStaffRole. The existing `/admin` page
+   gained two new tabs at the top — Dashboard (default) and Order
+   Report — alongside the original Collaborations and Subscriptions
+   tabs. Dashboard tiles are tinted in the KedaiPOS pill style
+   (green/blue/violet/pink/amber); the hourly chart uses recharts
+   with a sky-blue sales area and red refund overlay. Order Report
+   uses a 6-field filter grid + summary tiles + a paginated
+   table; refunded rows render strike-through ticket / negative red
+   total / Refunded badge to match the POS feed treatment. Also
+   fixed a Phase 4 leftover: `refundOrder` mutation in `pos.tsx`
+   was casting the raw Response to the parsed shape; it now does
+   `await res.json()` so the success toast actually reads
+   `data.order.ticket_code`.

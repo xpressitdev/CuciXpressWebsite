@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useMemo, useState } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import Navigation from "@/components/Navigation";
 import Footer from "@/components/Footer";
@@ -8,12 +8,52 @@ import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Separator } from "@/components/ui/separator";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
-import { ArrowLeft, Eye, Mail, Phone, Building, MessageSquare, Calendar, LogOut, Users, ShieldCheck } from "lucide-react";
+import { Input } from "@/components/ui/input";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
+import {
+  Table,
+  TableBody,
+  TableCell,
+  TableHead,
+  TableHeader,
+  TableRow,
+} from "@/components/ui/table";
+import {
+  ArrowLeft,
+  Eye,
+  Mail,
+  Phone,
+  Building,
+  MessageSquare,
+  Calendar,
+  LogOut,
+  Users,
+  ShieldCheck,
+  BarChart3,
+  ClipboardList,
+  RefreshCw,
+  Search,
+} from "lucide-react";
 import { Link } from "wouter";
 import { motion } from "framer-motion";
 import { apiRequest } from "@/lib/queryClient";
 import { useStaffAuth } from "@/hooks/useStaffAuth";
 import type { CollaborationSubmission, SubscriptionSignup } from "@shared/schema";
+import {
+  AreaChart,
+  Area,
+  XAxis,
+  YAxis,
+  CartesianGrid,
+  Tooltip as RTooltip,
+  ResponsiveContainer,
+} from "recharts";
 
 interface CollaborationsResponse {
   submissions: CollaborationSubmission[];
@@ -23,19 +63,32 @@ interface SubscriptionsResponse {
   signups: SubscriptionSignup[];
 }
 
+const formatBND = (cents: number) =>
+  `B$${(cents / 100).toLocaleString("en-US", {
+    minimumFractionDigits: 2,
+    maximumFractionDigits: 2,
+  })}`;
+
+const todayBNT = () => {
+  // Asia/Brunei is UTC+8 with no DST. Compute the date in that
+  // zone without dragging in date-fns-tz.
+  const ms = Date.now() + 8 * 60 * 60 * 1000;
+  return new Date(ms).toISOString().slice(0, 10);
+};
+
 export default function Admin() {
   const { staff, isAuthenticated, isLoading: authLoading, login, logout } = useStaffAuth();
   const queryClient = useQueryClient();
   const [selectedSubmission, setSelectedSubmission] = useState<CollaborationSubmission | null>(null);
 
-  const { data: collaborationsData, isLoading: collaborationsLoading, error: collaborationsError } = useQuery<CollaborationsResponse>({
+  const { data: collaborationsData, error: collaborationsError } = useQuery<CollaborationsResponse>({
     queryKey: ['/api/admin/collaborations'],
-    enabled: isAuthenticated, // Only run query when authenticated
+    enabled: isAuthenticated,
   });
 
-  const { data: subscriptionsData, isLoading: subscriptionsLoading, error: subscriptionsError } = useQuery<SubscriptionsResponse>({
+  const { data: subscriptionsData, error: subscriptionsError } = useQuery<SubscriptionsResponse>({
     queryKey: ['/api/admin/subscriptions'],
-    enabled: isAuthenticated, // Only run query when authenticated
+    enabled: isAuthenticated,
   });
 
   const markAsReadMutation = useMutation({
@@ -51,7 +104,6 @@ export default function Admin() {
 
   const handleMarkAsRead = (id: number) => {
     markAsReadMutation.mutate(id);
-    // Also update selected submission state
     if (selectedSubmission?.id === id) {
       setSelectedSubmission({ ...selectedSubmission, isRead: true });
     }
@@ -109,39 +161,9 @@ export default function Admin() {
     );
   }
 
-  if (collaborationsLoading || subscriptionsLoading) {
-    return (
-      <div className="min-h-screen bg-gray-50">
-        <Navigation />
-        <main className="pt-20 pb-16">
-          <div className="max-w-6xl mx-auto px-4 sm:px-6 lg:px-8">
-            <div className="flex items-center justify-center py-12">
-              <div className="text-center">
-                <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-cuci-primary mx-auto mb-4"></div>
-                <p className="text-gray-600">Loading dashboard...</p>
-              </div>
-            </div>
-          </div>
-        </main>
-        <Footer />
-      </div>
-    );
-  }
-
   if (collaborationsError || subscriptionsError) {
-    return (
-      <div className="min-h-screen bg-gray-50">
-        <Navigation />
-        <main className="pt-20 pb-16">
-          <div className="max-w-6xl mx-auto px-4 sm:px-6 lg:px-8">
-            <div className="text-center py-12">
-              <p className="text-red-600">Error loading dashboard. Please try again.</p>
-            </div>
-          </div>
-        </main>
-        <Footer />
-      </div>
-    );
+    // Tabs that don't depend on these queries should still work; we
+    // show a non-blocking inline error inside their own panels below.
   }
 
   const submissions = collaborationsData?.submissions || [];
@@ -164,7 +186,7 @@ export default function Admin() {
               <div>
                 <h1 className="text-3xl font-bold text-gray-900">Admin Dashboard</h1>
                 <p className="text-gray-600 mt-2">
-                  Manage collaboration requests and subscription signups
+                  Sales overview, order reports, and signup management.
                 </p>
                 {staff && (
                   <div className="mt-3 inline-flex items-center gap-2 text-sm text-gray-700 bg-cuci-primary/5 border border-cuci-primary/20 rounded-full px-3 py-1">
@@ -187,8 +209,16 @@ export default function Admin() {
             </div>
           </div>
 
-          <Tabs defaultValue="collaborations" className="w-full">
-            <TabsList className="grid w-full grid-cols-2">
+          <Tabs defaultValue="dashboard" className="w-full">
+            <TabsList className="grid w-full grid-cols-2 md:grid-cols-4">
+              <TabsTrigger value="dashboard" className="flex items-center gap-2" data-testid="tab-dashboard">
+                <BarChart3 className="w-4 h-4" />
+                Dashboard
+              </TabsTrigger>
+              <TabsTrigger value="orders" className="flex items-center gap-2" data-testid="tab-orders-report">
+                <ClipboardList className="w-4 h-4" />
+                Order Report
+              </TabsTrigger>
               <TabsTrigger value="collaborations" className="flex items-center gap-2">
                 <MessageSquare className="w-4 h-4" />
                 Collaborations
@@ -204,6 +234,14 @@ export default function Admin() {
               </TabsTrigger>
             </TabsList>
 
+            <TabsContent value="dashboard" className="mt-6">
+              <DashboardTab />
+            </TabsContent>
+
+            <TabsContent value="orders" className="mt-6">
+              <OrdersReportTab />
+            </TabsContent>
+
             <TabsContent value="collaborations" className="mt-6">
               {submissions.length === 0 ? (
                 <Card>
@@ -215,7 +253,6 @@ export default function Admin() {
                 </Card>
               ) : (
                 <div className="grid lg:grid-cols-3 gap-6">
-                  {/* Submissions List */}
                   <div className="lg:col-span-2 space-y-4">
                     {submissions.map((submission, index) => (
                       <motion.div
@@ -224,10 +261,10 @@ export default function Admin() {
                         animate={{ opacity: 1, y: 0 }}
                         transition={{ delay: index * 0.1 }}
                       >
-                        <Card 
+                        <Card
                           className={`cursor-pointer transition-all duration-200 hover:shadow-md ${
-                            selectedSubmission?.id === submission.id 
-                              ? 'ring-2 ring-cuci-primary border-cuci-primary' 
+                            selectedSubmission?.id === submission.id
+                              ? 'ring-2 ring-cuci-primary border-cuci-primary'
                               : 'hover:border-gray-300'
                           } ${
                             !submission.isRead ? 'bg-blue-50 border-blue-200' : ''
@@ -275,7 +312,6 @@ export default function Admin() {
                     ))}
                   </div>
 
-                  {/* Submission Details */}
                   <div className="lg:col-span-1">
                     {selectedSubmission ? (
                       <Card className="sticky top-6">
@@ -293,7 +329,7 @@ export default function Admin() {
                             <div className="space-y-2 text-sm">
                               <div className="flex items-center text-gray-600">
                                 <Mail className="w-4 h-4 mr-2" />
-                                <a 
+                                <a
                                   href={`mailto:${selectedSubmission.email}`}
                                   className="text-cuci-primary hover:underline"
                                 >
@@ -303,7 +339,7 @@ export default function Admin() {
                               {selectedSubmission.phone && (
                                 <div className="flex items-center text-gray-600">
                                   <Phone className="w-4 h-4 mr-2" />
-                                  <a 
+                                  <a
                                     href={`tel:${selectedSubmission.phone}`}
                                     className="text-cuci-primary hover:underline"
                                   >
@@ -385,7 +421,7 @@ export default function Admin() {
                               </div>
                               <div>
                                 <p className="font-medium text-gray-900">
-                                  <a 
+                                  <a
                                     href={`mailto:${signup.email}`}
                                     className="text-cuci-primary hover:text-cuci-primary-dark"
                                   >
@@ -413,6 +449,489 @@ export default function Admin() {
         </div>
       </main>
       <Footer />
+    </div>
+  );
+}
+
+// =====================================================================
+// Phase 5a — Dashboard tab
+// Mirrors the KedaiPOS "Today's Overall By Vendor" screen: 12 KPI tiles
+// + an hourly sales/refund area chart. Branch + date are picker-driven;
+// "All branches" is the default for owners.
+// =====================================================================
+
+interface DashboardResponse {
+  filter: { branch_id: number | null; date: string };
+  branches: Array<{ id: number; name: string; location: string }>;
+  tiles: {
+    today_transactions: number;
+    today_sales_cents: number;
+    today_avg_sales_cents: number;
+    today_items_sold: number;
+    today_refund_count: number;
+    today_refund_total_cents: number;
+    today_avg_refund_cents: number;
+    today_net_sales_cents: number;
+    today_active_staff: number;
+    today_active_customers: number;
+    total_staff: number;
+    total_customers: number;
+  };
+  hourly: Array<{ hour: number; sales_cents: number; refund_cents: number }>;
+}
+
+function DashboardTab() {
+  const [branchId, setBranchId] = useState<string>("all");
+  const [date, setDate] = useState<string>(todayBNT());
+
+  const { data, isLoading, isFetching, error, refetch } = useQuery<DashboardResponse>({
+    queryKey: ["/api/admin/dashboard", branchId, date],
+    queryFn: async () => {
+      const url = `/api/admin/dashboard?branch_id=${encodeURIComponent(branchId)}&date=${encodeURIComponent(date)}`;
+      const res = await fetch(url, { credentials: "include" });
+      if (!res.ok) throw new Error("dashboard_failed");
+      return res.json();
+    },
+  });
+
+  const tiles = data?.tiles;
+  const branches = data?.branches ?? [];
+
+  const tileDefs: Array<{
+    label: string;
+    value: string;
+    tone: "green" | "blue" | "purple" | "pink" | "amber";
+    testId: string;
+  }> = useMemo(() => {
+    if (!tiles) return [];
+    return [
+      { label: "Today's Transactions",     value: String(tiles.today_transactions),                  tone: "green",  testId: "tile-tx" },
+      { label: "Today's Sales",            value: formatBND(tiles.today_sales_cents),                tone: "blue",   testId: "tile-sales" },
+      { label: "Today's Average Sales",    value: formatBND(tiles.today_avg_sales_cents),            tone: "purple", testId: "tile-avg" },
+      { label: "Today's Items Sold",       value: String(tiles.today_items_sold),                    tone: "green",  testId: "tile-items" },
+      { label: "Refund Transactions",      value: String(tiles.today_refund_count),                  tone: "amber",  testId: "tile-refund-count" },
+      { label: "Total Refunds",            value: formatBND(tiles.today_refund_total_cents),         tone: "blue",   testId: "tile-refund-total" },
+      { label: "Average Refund",           value: formatBND(tiles.today_avg_refund_cents),           tone: "pink",   testId: "tile-refund-avg" },
+      { label: "Net Sales",                value: formatBND(tiles.today_net_sales_cents),            tone: "blue",   testId: "tile-net" },
+      { label: "Active Staff Today",       value: String(tiles.today_active_staff),                  tone: "purple", testId: "tile-staff-today" },
+      { label: "Active Customers Today",   value: String(tiles.today_active_customers),              tone: "pink",   testId: "tile-cust-today" },
+      { label: "Total Staff",              value: String(tiles.total_staff),                         tone: "green",  testId: "tile-staff-total" },
+      { label: "Total Customers",          value: String(tiles.total_customers),                     tone: "pink",   testId: "tile-cust-total" },
+    ];
+  }, [tiles]);
+
+  const toneClass: Record<string, string> = {
+    green: "bg-emerald-50 text-emerald-700 ring-emerald-200",
+    blue: "bg-sky-50 text-sky-700 ring-sky-200",
+    purple: "bg-violet-50 text-violet-700 ring-violet-200",
+    pink: "bg-pink-50 text-pink-700 ring-pink-200",
+    amber: "bg-amber-50 text-amber-800 ring-amber-200",
+  };
+
+  const chartData = (data?.hourly ?? []).map((h) => ({
+    hour: `${String(h.hour).padStart(2, "0")}:00`,
+    sales: h.sales_cents / 100,
+    refunds: h.refund_cents / 100,
+  }));
+
+  return (
+    <div className="space-y-6">
+      <Card>
+        <CardHeader>
+          <CardTitle className="text-base flex items-center justify-between flex-wrap gap-3">
+            <span>Today's Overall By Branch</span>
+            <div className="flex items-center gap-2 flex-wrap">
+              <div className="w-44">
+                <Select value={branchId} onValueChange={setBranchId}>
+                  <SelectTrigger data-testid="select-dashboard-branch">
+                    <SelectValue placeholder="All branches" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="all">All branches</SelectItem>
+                    {branches.map((b) => (
+                      <SelectItem key={b.id} value={String(b.id)}>{b.name}</SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
+              <Input
+                type="date"
+                value={date}
+                onChange={(e) => setDate(e.target.value)}
+                className="w-40"
+                data-testid="input-dashboard-date"
+              />
+              <Button
+                variant="outline"
+                size="icon"
+                onClick={() => refetch()}
+                disabled={isFetching}
+                data-testid="button-dashboard-refresh"
+              >
+                <RefreshCw className={`w-4 h-4 ${isFetching ? "animate-spin" : ""}`} />
+              </Button>
+            </div>
+          </CardTitle>
+        </CardHeader>
+        <CardContent>
+          {error ? (
+            <p className="text-sm text-red-600 py-4">Failed to load dashboard.</p>
+          ) : isLoading ? (
+            <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-3">
+              {Array.from({ length: 12 }).map((_, i) => (
+                <div key={i} className="h-24 rounded-lg bg-gray-100 animate-pulse" />
+              ))}
+            </div>
+          ) : (
+            <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-3">
+              {tileDefs.map((t) => (
+                <div
+                  key={t.label}
+                  className="rounded-lg border p-4 flex flex-col gap-2"
+                  data-testid={t.testId}
+                >
+                  <span className="text-xs text-gray-600">{t.label}</span>
+                  <span
+                    className={`inline-flex w-fit items-center rounded-full px-3 py-1 text-sm font-semibold ring-1 ${toneClass[t.tone]}`}
+                  >
+                    {t.value}
+                  </span>
+                </div>
+              ))}
+            </div>
+          )}
+        </CardContent>
+      </Card>
+
+      <Card>
+        <CardHeader>
+          <CardTitle className="text-base">Hourly Sales</CardTitle>
+        </CardHeader>
+        <CardContent>
+          {chartData.length === 0 ? (
+            <p className="text-sm text-gray-500 py-4">No data.</p>
+          ) : (
+            <div className="h-64 w-full">
+              <ResponsiveContainer width="100%" height="100%">
+                <AreaChart data={chartData} margin={{ left: 0, right: 8, top: 8, bottom: 0 }}>
+                  <defs>
+                    <linearGradient id="salesGrad" x1="0" y1="0" x2="0" y2="1">
+                      <stop offset="0%" stopColor="#0ea5e9" stopOpacity={0.4} />
+                      <stop offset="100%" stopColor="#0ea5e9" stopOpacity={0.02} />
+                    </linearGradient>
+                    <linearGradient id="refundGrad" x1="0" y1="0" x2="0" y2="1">
+                      <stop offset="0%" stopColor="#ef4444" stopOpacity={0.3} />
+                      <stop offset="100%" stopColor="#ef4444" stopOpacity={0.02} />
+                    </linearGradient>
+                  </defs>
+                  <CartesianGrid strokeDasharray="3 3" stroke="#e5e7eb" />
+                  <XAxis dataKey="hour" tick={{ fontSize: 11 }} interval={1} />
+                  <YAxis tick={{ fontSize: 11 }} tickFormatter={(v: number) => `B$${v.toFixed(0)}`} />
+                  <RTooltip
+                    formatter={(v: number, name) => [`B$${Number(v).toFixed(2)}`, name === "sales" ? "Sales" : "Refunds"]}
+                    labelFormatter={(l) => `Hour ${l}`}
+                  />
+                  <Area type="monotone" dataKey="sales" stroke="#0ea5e9" fill="url(#salesGrad)" strokeWidth={2} />
+                  <Area type="monotone" dataKey="refunds" stroke="#ef4444" fill="url(#refundGrad)" strokeWidth={1.5} />
+                </AreaChart>
+              </ResponsiveContainer>
+            </div>
+          )}
+        </CardContent>
+      </Card>
+    </div>
+  );
+}
+
+// =====================================================================
+// Phase 5a — Order Report tab
+// Date range, branch, payment method, staff, and free-text search.
+// Top tiles summarise the filtered window; bottom table is paginated.
+// =====================================================================
+
+interface OrdersReportResponse {
+  filter: {
+    branch_id: number | null; from: string; to: string;
+    payment_method: string; staff_id: string; search: string;
+  };
+  branches: Array<{ id: number; name: string }>;
+  staff: Array<{ id: string; name: string; role: string; branch_id: number | null }>;
+  totals: {
+    transactions: number; sales_cents: number; refund_count: number;
+    refund_total_cents: number; net_sales_cents: number; items_sold: number;
+    avg_sales_cents: number; avg_refund_cents: number;
+  };
+  page: number; per_page: number; total_count: number;
+  rows: Array<{
+    id: string; ticket_code: string; plate: string;
+    ticket_day: string; created_at: string;
+    payment_method: string; package_name: string;
+    total_cents: number; paid_amount_cents: number | null;
+    change_cents: number | null; status: string;
+    refunded_at: string | null; refund_reason: string | null;
+    customer_name_walkin: string | null;
+    branch_id: number; branch_name: string | null;
+    staff_id: string | null; staff_name: string | null;
+    kedaipos_pos_name: string | null;
+  }>;
+}
+
+const paymentMethodLabels: Record<string, string> = {
+  cash: "Cash",
+  bank_transfer: "Bank Transfer",
+  card: "Card",
+  qr_code: "QR",
+  baiduri_pay: "Baiduri Pay",
+  voucher: "Voucher",
+  subscription: "Subscription",
+};
+
+function OrdersReportTab() {
+  const today = todayBNT();
+  const [branchId, setBranchId] = useState<string>("all");
+  const [from, setFrom] = useState<string>(today);
+  const [to, setTo] = useState<string>(today);
+  const [paymentMethod, setPaymentMethod] = useState<string>("all");
+  const [staffId, setStaffId] = useState<string>("all");
+  const [search, setSearch] = useState<string>("");
+  const [page, setPage] = useState<number>(1);
+
+  // Active query string is recomputed only when "Search" is clicked or
+  // a non-text filter changes. Reset page to 1 on any filter change.
+  const queryParams = useMemo(() => {
+    const sp = new URLSearchParams();
+    sp.set("branch_id", branchId);
+    sp.set("from", from);
+    sp.set("to", to);
+    sp.set("payment_method", paymentMethod);
+    sp.set("staff_id", staffId);
+    if (search.trim().length >= 2) sp.set("search", search.trim());
+    sp.set("page", String(page));
+    sp.set("per_page", "50");
+    return sp.toString();
+  }, [branchId, from, to, paymentMethod, staffId, search, page]);
+
+  const { data, isLoading, isFetching, error, refetch } = useQuery<OrdersReportResponse>({
+    queryKey: ["/api/admin/reports/orders", queryParams],
+    queryFn: async () => {
+      const res = await fetch(`/api/admin/reports/orders?${queryParams}`, { credentials: "include" });
+      if (!res.ok) throw new Error("report_failed");
+      return res.json();
+    },
+  });
+
+  const branches = data?.branches ?? [];
+  const staffList = data?.staff ?? [];
+  const totals = data?.totals;
+  const rows = data?.rows ?? [];
+
+  const totalPages = data ? Math.max(1, Math.ceil(data.total_count / data.per_page)) : 1;
+
+  const onApplyFilters = () => {
+    setPage(1);
+    refetch();
+  };
+
+  const onReset = () => {
+    setBranchId("all");
+    setFrom(today);
+    setTo(today);
+    setPaymentMethod("all");
+    setStaffId("all");
+    setSearch("");
+    setPage(1);
+  };
+
+  const summary: Array<{ label: string; value: string; testId: string }> = totals
+    ? [
+        { label: "Transactions",       value: String(totals.transactions),              testId: "report-tile-tx" },
+        { label: "Net Sales",          value: formatBND(totals.net_sales_cents),        testId: "report-tile-net" },
+        { label: "Average Sales",      value: formatBND(totals.avg_sales_cents),        testId: "report-tile-avg" },
+        { label: "Refund Transactions", value: String(totals.refund_count),             testId: "report-tile-refund-count" },
+        { label: "Total Refunds",      value: formatBND(totals.refund_total_cents),     testId: "report-tile-refund-total" },
+        { label: "Average Refund",     value: formatBND(totals.avg_refund_cents),       testId: "report-tile-refund-avg" },
+        { label: "Items Sold",         value: String(totals.items_sold),                testId: "report-tile-items" },
+        { label: "Net Revenue",        value: formatBND(totals.sales_cents - totals.refund_total_cents), testId: "report-tile-revenue" },
+      ]
+    : [];
+
+  return (
+    <div className="space-y-6">
+      <Card>
+        <CardHeader>
+          <CardTitle className="text-base">Filter</CardTitle>
+        </CardHeader>
+        <CardContent>
+          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3">
+            <div className="space-y-1">
+              <label className="text-xs text-gray-600">Date From</label>
+              <Input type="date" value={from} onChange={(e) => { setFrom(e.target.value); setPage(1); }} data-testid="input-report-from" />
+            </div>
+            <div className="space-y-1">
+              <label className="text-xs text-gray-600">Date To</label>
+              <Input type="date" value={to} onChange={(e) => { setTo(e.target.value); setPage(1); }} data-testid="input-report-to" />
+            </div>
+            <div className="space-y-1">
+              <label className="text-xs text-gray-600">Branch</label>
+              <Select value={branchId} onValueChange={(v) => { setBranchId(v); setPage(1); }}>
+                <SelectTrigger data-testid="select-report-branch"><SelectValue /></SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="all">All branches</SelectItem>
+                  {branches.map((b) => <SelectItem key={b.id} value={String(b.id)}>{b.name}</SelectItem>)}
+                </SelectContent>
+              </Select>
+            </div>
+            <div className="space-y-1">
+              <label className="text-xs text-gray-600">Payment Method</label>
+              <Select value={paymentMethod} onValueChange={(v) => { setPaymentMethod(v); setPage(1); }}>
+                <SelectTrigger data-testid="select-report-payment"><SelectValue /></SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="all">All</SelectItem>
+                  {Object.entries(paymentMethodLabels).map(([k, l]) => (
+                    <SelectItem key={k} value={k}>{l}</SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
+            <div className="space-y-1">
+              <label className="text-xs text-gray-600">Staff</label>
+              <Select value={staffId} onValueChange={(v) => { setStaffId(v); setPage(1); }}>
+                <SelectTrigger data-testid="select-report-staff"><SelectValue /></SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="all">All staff</SelectItem>
+                  {staffList.map((s) => (
+                    <SelectItem key={s.id} value={s.id}>{s.name} ({s.role})</SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
+            <div className="space-y-1">
+              <label className="text-xs text-gray-600">Search (ticket / plate / name)</label>
+              <Input
+                placeholder="e.g. 76-12345 or BAK9007"
+                value={search}
+                onChange={(e) => setSearch(e.target.value)}
+                onKeyDown={(e) => { if (e.key === "Enter") onApplyFilters(); }}
+                data-testid="input-report-search"
+              />
+            </div>
+          </div>
+          <div className="flex gap-2 mt-4">
+            <Button onClick={onApplyFilters} disabled={isFetching} data-testid="button-report-search">
+              <Search className="w-4 h-4 mr-1" />
+              Search
+            </Button>
+            <Button variant="outline" onClick={onReset} data-testid="button-report-reset">Reset</Button>
+          </div>
+        </CardContent>
+      </Card>
+
+      <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+        {isLoading || !totals
+          ? Array.from({ length: 8 }).map((_, i) => (
+              <div key={i} className="h-20 rounded-lg bg-gray-100 animate-pulse" />
+            ))
+          : summary.map((s) => (
+              <div key={s.label} className="rounded-lg border p-3" data-testid={s.testId}>
+                <div className="text-xs text-gray-600">{s.label}</div>
+                <div className="font-semibold text-gray-900 mt-1">{s.value}</div>
+              </div>
+            ))}
+      </div>
+
+      <Card>
+        <CardHeader>
+          <CardTitle className="text-base flex items-center justify-between">
+            <span>List of Orders {data && <span className="text-sm font-normal text-gray-500">({data.total_count.toLocaleString()})</span>}</span>
+            {isFetching && <RefreshCw className="w-4 h-4 animate-spin text-gray-400" />}
+          </CardTitle>
+        </CardHeader>
+        <CardContent>
+          {error ? (
+            <p className="text-sm text-red-600 py-4">Failed to load report.</p>
+          ) : rows.length === 0 && !isLoading ? (
+            <p className="text-sm text-gray-500 py-4 text-center">No orders match these filters.</p>
+          ) : (
+            <div className="overflow-x-auto">
+              <Table>
+                <TableHeader>
+                  <TableRow>
+                    <TableHead>Date</TableHead>
+                    <TableHead>Branch</TableHead>
+                    <TableHead>Ticket</TableHead>
+                    <TableHead>Plate</TableHead>
+                    <TableHead>Customer</TableHead>
+                    <TableHead>Package</TableHead>
+                    <TableHead>Payment</TableHead>
+                    <TableHead>Staff</TableHead>
+                    <TableHead className="text-right">Total</TableHead>
+                    <TableHead>Status</TableHead>
+                  </TableRow>
+                </TableHeader>
+                <TableBody>
+                  {rows.map((r) => {
+                    const isRefunded = r.status === "refunded";
+                    const dt = new Date(r.created_at);
+                    const dateStr = dt.toLocaleString("en-GB", {
+                      day: "2-digit", month: "short", year: "numeric",
+                      hour: "2-digit", minute: "2-digit",
+                      timeZone: "Asia/Brunei",
+                    });
+                    return (
+                      <TableRow key={r.id} data-testid={`row-report-${r.id}`} className={isRefunded ? "opacity-70" : ""}>
+                        <TableCell className="text-xs whitespace-nowrap">{dateStr}</TableCell>
+                        <TableCell className="text-xs">{r.branch_name ?? r.branch_id}</TableCell>
+                        <TableCell className={`font-mono text-xs ${isRefunded ? "line-through" : ""}`}>{r.ticket_code}</TableCell>
+                        <TableCell className="font-mono text-xs">{r.plate}</TableCell>
+                        <TableCell className="text-xs truncate max-w-[140px]">{r.customer_name_walkin ?? "—"}</TableCell>
+                        <TableCell className="text-xs truncate max-w-[160px]">{r.package_name}</TableCell>
+                        <TableCell className="text-xs">{paymentMethodLabels[r.payment_method] ?? r.payment_method}</TableCell>
+                        <TableCell className="text-xs">{r.staff_name ?? "—"}</TableCell>
+                        <TableCell className={`text-right text-xs font-medium ${isRefunded ? "text-red-600" : ""}`}>
+                          {isRefunded ? "−" : ""}{formatBND(r.total_cents)}
+                        </TableCell>
+                        <TableCell>
+                          {isRefunded ? (
+                            <Badge variant="destructive" className="text-xs">Refunded</Badge>
+                          ) : (
+                            <Badge variant="outline" className="text-xs capitalize">{r.status}</Badge>
+                          )}
+                        </TableCell>
+                      </TableRow>
+                    );
+                  })}
+                </TableBody>
+              </Table>
+            </div>
+          )}
+
+          {data && data.total_count > data.per_page && (
+            <div className="flex items-center justify-between mt-4">
+              <span className="text-xs text-gray-600">
+                Page {data.page} of {totalPages} · {data.total_count.toLocaleString()} orders
+              </span>
+              <div className="flex gap-2">
+                <Button
+                  variant="outline" size="sm"
+                  disabled={page <= 1 || isFetching}
+                  onClick={() => setPage((p) => Math.max(1, p - 1))}
+                  data-testid="button-report-prev"
+                >
+                  Previous
+                </Button>
+                <Button
+                  variant="outline" size="sm"
+                  disabled={page >= totalPages || isFetching}
+                  onClick={() => setPage((p) => p + 1)}
+                  data-testid="button-report-next"
+                >
+                  Next
+                </Button>
+              </div>
+            </div>
+          )}
+        </CardContent>
+      </Card>
     </div>
   );
 }
