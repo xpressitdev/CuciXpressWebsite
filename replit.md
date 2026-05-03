@@ -263,3 +263,25 @@ Two auth systems coexist by design during the Week 1–Week 2 cutover:
    base64 photos. Branch authorisation matches POST /api/pos/orders.
    Required new env: `GEMINI_API_KEY` (any tier works, paid recommended
    for higher quota). Migration applied to staging and prod 2026-05-04.
+
+   **Phase 4 — full-order refunds (`2026-05-04_07_order_refunds.sql`):**
+   Added a refund flow on the POS Today feed. Owner decisions: any
+   staff can refund (no manager PIN gate), full order only (no
+   partials), and subscription/membership refunds DO NOT credit the
+   wash back to the pack — the redemption stays consumed and only
+   the order line is voided for reporting. `orders` gains three
+   columns: `refunded_at`, `refunded_by_staff_id` (FK to staff),
+   `refund_reason` (optional free-text). `orders_status_check` was
+   replaced to allow a new 'refunded' status value, and a paired
+   `orders_refund_fields_consistent` CHECK ensures the refund audit
+   columns are populated together when status='refunded' and NULL
+   otherwise. New endpoint POST /api/pos/orders/:id/refund runs in
+   a txn with FOR UPDATE so two cashiers can't double-refund the
+   same row; lane/cashier accounts are limited to their own branch
+   (mirrors POST /api/pos/orders). Each row in the POS Today feed
+   gets a small "Refund" button; after refund the row shows the
+   ticket code with strike-through, the total in red prefixed with
+   "−", a "Refunded" destructive badge, and the reason underneath
+   if provided. Confirm + reason flow uses the browser confirm/
+   prompt for v1 — Phase 7 visual refresh will replace with a
+   proper modal. Migration applied to staging and prod 2026-05-04.

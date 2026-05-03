@@ -94,6 +94,9 @@ interface TodayOrder {
   payment_method: PaymentMethod;
   status: string;
   created_at: string;
+  // Phase 4 — populated when status='refunded'.
+  refunded_at?: string | null;
+  refund_reason?: string | null;
 }
 
 interface VehicleSuggestion {
@@ -397,6 +400,61 @@ export default function POS() {
 
   const clearMatchedVehicle = () => {
     setMatchedVehicleId(null);
+  };
+
+  // ----- Phase 4: full-order refund -----
+  // Any staff can refund (per owner decision). Confirm + optional
+  // reason via the browser's confirm/prompt — keeps the UI minimal
+  // for v1; the Phase 7 visual refresh will replace these with a
+  // proper modal. Subscription orders DO NOT credit the wash back.
+  const refundOrder = useMutation({
+    mutationFn: async (vars: { orderId: string; reason: string | null }) => {
+      const res = await apiRequest(
+        "POST",
+        `/api/pos/orders/${vars.orderId}/refund`,
+        { reason: vars.reason },
+      );
+      return res as { ok: true; order: TodayOrder };
+    },
+    onSuccess: (data) => {
+      queryClient.invalidateQueries({
+        queryKey: ["/api/pos/orders/today", branchId],
+      });
+      toast({
+        title: `Refunded ${data.order.ticket_code}`,
+        description: `${data.order.plate} · −${formatBND(data.order.total_cents)}`,
+      });
+    },
+    onError: (err: any) => {
+      const code = err?.message ?? "refund_failed";
+      const friendly =
+        code.includes("already_refunded")
+          ? "This order has already been refunded."
+          : code.includes("branch_mismatch")
+            ? "You can only refund orders at your own branch."
+            : code.includes("not_found")
+              ? "Order not found."
+              : "Could not issue refund.";
+      toast({
+        title: "Refund failed",
+        description: friendly,
+        variant: "destructive",
+      });
+    },
+  });
+
+  const promptRefund = (o: TodayOrder) => {
+    if (!confirm(
+      `Refund ticket ${o.ticket_code} (${o.plate}) for ${formatBND(o.total_cents)}?\n\n` +
+      `This cannot be undone. The order will show as a negative entry.`,
+    )) {
+      return;
+    }
+    const reason = prompt("Reason (optional):") ?? "";
+    refundOrder.mutate({
+      orderId: o.id,
+      reason: reason.trim() || null,
+    });
   };
 
   // ----- Phase 3: license plate recognition -----
@@ -1285,30 +1343,67 @@ export default function POS() {
                       No orders yet today.
                     </p>
                   ) : (
-                    todayData.orders.map((o) => (
-                      <div
-                        key={o.id}
-                        className="flex items-center justify-between text-sm border-b last:border-b-0 py-2"
-                        data-testid={`row-today-${o.id}`}
-                      >
-                        <div className="flex flex-col">
-                          <span className="font-mono font-semibold">
-                            {o.ticket_code}
-                          </span>
-                          <span className="text-gray-500 text-xs">
-                            {o.plate} · {formatTime(o.created_at)}
-                          </span>
+                    todayData.orders.map((o) => {
+                      const isRefunded = o.status === "refunded";
+                      return (
+                        <div
+                          key={o.id}
+                          className={`flex items-center justify-between text-sm border-b last:border-b-0 py-2 gap-2 ${
+                            isRefunded ? "opacity-70" : ""
+                          }`}
+                          data-testid={`row-today-${o.id}`}
+                        >
+                          <div className="flex flex-col min-w-0">
+                            <span
+                              className={`font-mono font-semibold ${
+                                isRefunded ? "line-through text-gray-500" : ""
+                              }`}
+                            >
+                              {o.ticket_code}
+                            </span>
+                            <span className="text-gray-500 text-xs truncate">
+                              {o.plate} · {formatTime(o.created_at)}
+                            </span>
+                            {isRefunded && o.refund_reason && (
+                              <span className="text-xs text-red-600 italic truncate">
+                                {o.refund_reason}
+                              </span>
+                            )}
+                          </div>
+                          <div className="flex flex-col items-end gap-1">
+                            <span
+                              className={`font-medium ${
+                                isRefunded ? "text-red-600" : ""
+                              }`}
+                            >
+                              {isRefunded ? "−" : ""}
+                              {formatBND(o.total_cents)}
+                            </span>
+                            {isRefunded ? (
+                              <Badge
+                                variant="destructive"
+                                className="text-xs"
+                                data-testid={`badge-refunded-${o.id}`}
+                              >
+                                Refunded
+                              </Badge>
+                            ) : (
+                              <Button
+                                type="button"
+                                variant="ghost"
+                                size="sm"
+                                className="h-6 px-2 text-xs text-red-600 hover:text-red-700 hover:bg-red-50"
+                                disabled={refundOrder.isPending}
+                                onClick={() => promptRefund(o)}
+                                data-testid={`button-refund-${o.id}`}
+                              >
+                                Refund
+                              </Button>
+                            )}
+                          </div>
                         </div>
-                        <div className="flex flex-col items-end">
-                          <span className="font-medium">
-                            {formatBND(o.total_cents)}
-                          </span>
-                          <Badge variant="outline" className="text-xs capitalize">
-                            {o.status}
-                          </Badge>
-                        </div>
-                      </div>
-                    ))
+                      );
+                    })
                   )}
                 </CardContent>
               </Card>

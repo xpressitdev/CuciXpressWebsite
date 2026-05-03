@@ -1961,6 +1961,81 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
+  // POST /api/pos/orders/:id/refund — Phase 4 full-order refund.
+  //
+  // Decisions (owner, 2026-05-04):
+  //   * Any staff can refund — no manager PIN gate.
+  //   * Full order only (no partials).
+  //   * Subscription orders DO NOT credit the wash back to the
+  //     pack — the redemption stays consumed. Refund just marks
+  //     the order line as refunded for reporting.
+  //
+  // Branch authorisation mirrors POST /api/pos/orders. Runs in a
+  // transaction with FOR UPDATE so two cashiers can't double-
+  // refund the same row.
+  app.post('/api/pos/orders/:id/refund', requireStaff, async (req, res) => {
+    const orderId = String(req.params.id ?? '');
+    if (!orderId) return res.status(400).json({ error: 'invalid_id' });
+
+    const schema = z.object({
+      reason: z.string().trim().max(500).optional().nullable(),
+    });
+    const parsed = schema.safeParse(req.body ?? {});
+    if (!parsed.success) {
+      return res.status(400).json({ error: 'invalid_request' });
+    }
+    const reason = parsed.data.reason?.trim() || null;
+
+    const staffUser = req.staff!.user as any;
+    const staffId = staffUser.id as string;
+    const staffRole = staffUser.role as 'owner' | 'manager' | 'lane' | 'cashier';
+    const staffBranchId = staffUser.branchId as number | null;
+
+    try {
+      const updated = await db.transaction(async (tx) => {
+        const rows = (await tx.execute(sql`
+          SELECT id, branch_id, status, total_cents
+            FROM orders
+           WHERE id = ${orderId}
+           FOR UPDATE
+        `)).rows as Array<{ id: string; branch_id: number; status: string; total_cents: number }>;
+        if (rows.length === 0) {
+          throw Object.assign(new Error('not_found'), { httpStatus: 404 });
+        }
+        const o = rows[0];
+
+        // Lane/cashier can only refund orders at their own branch.
+        if (staffRole !== 'owner' && staffRole !== 'manager') {
+          if (staffBranchId == null || o.branch_id !== staffBranchId) {
+            throw Object.assign(new Error('branch_mismatch'), { httpStatus: 403 });
+          }
+        }
+
+        if (o.status === 'refunded') {
+          throw Object.assign(new Error('already_refunded'), { httpStatus: 409 });
+        }
+
+        const upd = (await tx.execute(sql`
+          UPDATE orders
+             SET status               = 'refunded',
+                 refunded_at          = now(),
+                 refunded_by_staff_id = ${staffId},
+                 refund_reason        = ${reason}
+           WHERE id = ${orderId}
+       RETURNING id, ticket_code, plate, package_name, total_cents,
+                 payment_method, status, created_at, refunded_at, refund_reason
+        `)).rows[0];
+        return upd;
+      });
+      res.json({ ok: true, order: updated });
+    } catch (err: any) {
+      const status = err?.httpStatus ?? 500;
+      const code = err?.message ?? 'refund_failed';
+      if (status === 500) console.error('[pos.orders.refund] failed:', err);
+      res.status(status).json({ error: code });
+    }
+  });
+
   // GET /api/pos/orders/today?branch_id=N
   // Today's orders for a branch, newest first. Used by the right-rail of
   // the POS page so the cashier sees what's been booked.
@@ -1972,7 +2047,8 @@ export async function registerRoutes(app: Express): Promise<Server> {
     try {
       const rows = (await db.execute(sql`
         SELECT id, ticket_code, plate, package_name,
-               total_cents, payment_method, status, created_at
+               total_cents, payment_method, status, created_at,
+               refunded_at, refund_reason
           FROM orders
          WHERE branch_id = ${branchId}
            AND ticket_day = (now() AT TIME ZONE 'UTC')::date

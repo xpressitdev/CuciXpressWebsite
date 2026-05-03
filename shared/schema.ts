@@ -430,7 +430,9 @@ export type InsertPackage = z.infer<typeof insertPackageSchema>;
 // --- Orders (POS transactions) -------------------------------
 // addons: jsonb array of { id: string, name: string, price_cents: number }
 // payment_method: 'cash' | 'card' | 'qr' | 'subscription' | 'voucher'
-// status: 'paid' | 'queued' | 'washing' | 'done' | 'voided'
+// status: 'paid' | 'queued' | 'washing' | 'done' | 'voided' | 'refunded'
+//   'refunded' added 2026-05-04_07. When set, refunded_at and
+//   refunded_by_staff_id are non-null (CHECK constraint enforces).
 export type OrderAddonSnapshot = {
   id: string;
   name: string;
@@ -461,6 +463,10 @@ export const orders = pgTable("orders", {
     .notNull()
     .default(sql`((now() AT TIME ZONE 'UTC')::date)`),
   status: text("status").default("paid").notNull(),
+  // Phase 4 — refund audit. Populated together when status='refunded'.
+  refunded_at: timestamp("refunded_at", { withTimezone: true }),
+  refunded_by_staff_id: text("refunded_by_staff_id").references(() => staff.id),
+  refund_reason: text("refund_reason"),
   created_at: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
   completed_at: timestamp("completed_at", { withTimezone: true }),
 

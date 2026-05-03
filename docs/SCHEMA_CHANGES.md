@@ -683,3 +683,35 @@ so the owner can audit false positives.
 by hand. Branch authorisation matches `POST /api/pos/orders`.
 
 Applied to staging + prod 2026-05-04.
+
+---
+
+## 2026-05-04_07 — `orders` refund columns (Phase 4)
+
+Adds full-order refund support. Owner decisions:
+- ANY staff can refund (no manager PIN gate).
+- FULL ORDER ONLY (no partials).
+- Subscription orders DO NOT credit the wash back to the pack —
+  membership_redemptions stays, remaining_washes stays decremented.
+  Refund only voids the order line for reporting.
+
+**Schema changes on `orders`:**
+- `refunded_at timestamptz` (NULL unless refunded)
+- `refunded_by_staff_id text → staff(id)` (who issued)
+- `refund_reason text` (optional free-text)
+- `orders_status_check` REPLACED to allow new `'refunded'` value
+- New `orders_refund_fields_consistent` CHECK: refund fields are
+  populated together when status='refunded', NULL otherwise
+- Partial index `idx_orders_refunded_at (branch_id, refunded_at DESC)
+  WHERE status='refunded'` for "today's refunds at branch X" reporting
+
+**Endpoint:** `POST /api/pos/orders/:id/refund` body `{ reason? }`
+- Runs in a txn with FOR UPDATE
+- Lane/cashier limited to their own branch (mirrors POS order create)
+- 409 `already_refunded`, 404 `not_found`, 403 `branch_mismatch`
+
+**UI:** Each row in the POS Today feed gets a small "Refund" button.
+After refund, the row shows strike-through ticket code, red −B$X.XX,
+and a "Refunded" badge with the reason underneath if provided.
+
+Applied to staging + prod 2026-05-04.
