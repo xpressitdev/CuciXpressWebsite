@@ -177,6 +177,44 @@ Wait until tomorrow if you're unsure
 
 Append-only. Newest at the top.
 
+### 2026-05-03 — `migrations/manual/2026-05-03_01_packages_and_pricing.sql`
+**Author:** agent (Week 2.1 plan execution)
+**Summary:** Adds 2 new tables (`packages`, `package_pricing`) for the POS
+catalog and per-vehicle-size price matrix. Seeds 2 default packages
+(Basic Wash, Premium Wash), 8 pricing rows (4 vehicle sizes × 2 packages,
+all `branch_id = NULL` = global default), and 4 rows in the existing
+`addons_catalog` table (Tire Shine, Dashboard Polish, Interior Vacuum,
+Engine Bay Wash). Zero changes to any of the 17 existing tables.
+**Vehicle taxonomy decision:** `package_pricing.vehicle_size` is a CHECK-
+constrained enum (`small`/`medium`/`large`/`xlarge`). The existing
+`cars.type` column is free-text and contains 55 distinct values today
+(incl. typos and a row with the value "Lambak"), so it cannot be used
+as a FK or domain. A future cleanup migration will reconcile
+`cars.type` → `vehicle_size` via a lookup table; until then, POS staff
+pick the size at the lane.
+**Branch override pattern:** `package_pricing.branch_id` is NULLable.
+NULL = applies to every branch. A row with a specific `branch_id`
+overrides the NULL row for that branch. The unique partial index
+`package_pricing_unique_active_idx` enforces "one active price per
+(package, size, branch)" using `COALESCE(branch_id, 0)` so NULL is
+treated as a real key.
+**Status:** **APPLIED 2026-05-03** to staging via `tsx scripts/migrate-staging.ts`
+(verified: 2 packages, 8 pricing rows, 4 addons, idempotent re-run is no-op),
+then to production via `psql $DATABASE_URL -f ...` after schema-only backup
+to `.local/backups/prod_schema_before_2026-05-03_01.sql`. Verified post-apply:
+2 packages, 8 pricing rows, 4 addons; existing row counts unchanged
+(`branches=5`, `users=508`, `staff=5`); idempotent re-run on prod confirmed
+(second `INSERT 0 0`).
+**Prices:** PLACEHOLDER values only. Reasonable Brunei car-wash ballparks
+(BND 5–25) but NOT confirmed by the owner. Must be updated via /admin or
+a follow-up migration before the POS goes live.
+**`shared/schema.ts`:** Added Drizzle definitions for `packages` and
+`packagePricing` plus their insert schemas and inferred types. The
+`VehicleSize` string-literal type is exported for use by POS UI code.
+**Rollback:** Forward-only. To undo, write a new migration that drops
+`package_pricing` then `packages` (in that order; cascade FK from pricing
+to packages) and DELETEs the 4 seeded `addons_catalog` rows.
+
 ### 2026-05-02 — `migrations/manual/2026-05-02_01_auth_and_pos_prereqs.sql`
 **Author:** agent (Week 1 plan execution)
 **Summary:** Adds 8 new tables required for Lucia v3 auth and the POS surface

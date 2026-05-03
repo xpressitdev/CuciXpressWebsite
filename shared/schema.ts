@@ -377,6 +377,47 @@ export const insertAddonCatalogSchema = createInsertSchema(addonsCatalog);
 export type AddonCatalog = typeof addonsCatalog.$inferSelect;
 export type InsertAddonCatalog = z.infer<typeof insertAddonCatalogSchema>;
 
+// --- Packages (POS catalog) ----------------------------------
+// Added by migrations/manual/2026-05-03_01_packages_and_pricing.sql
+export const packages = pgTable("packages", {
+  id: text("id").primaryKey(),
+  name: text("name").notNull(),
+  description: text("description"),
+  duration_minutes: integer("duration_minutes"),
+  is_active: boolean("is_active").default(true).notNull(),
+  sort_order: integer("sort_order").default(0).notNull(),
+  created_at: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
+});
+
+export const insertPackageSchema = createInsertSchema(packages).omit({
+  created_at: true,
+});
+export type Package = typeof packages.$inferSelect;
+export type InsertPackage = z.infer<typeof insertPackageSchema>;
+
+// --- Package pricing matrix ----------------------------------
+// One row per (package, vehicle_size, branch_id). branch_id NULL means
+// "applies to every branch" (the default). A row with a specific
+// branch_id overrides the NULL row for that branch.
+export type VehicleSize = "small" | "medium" | "large" | "xlarge";
+
+export const packagePricing = pgTable("package_pricing", {
+  id: serial("id").primaryKey(),
+  package_id: text("package_id").references(() => packages.id, { onDelete: "cascade" }).notNull(),
+  vehicle_size: text("vehicle_size").$type<VehicleSize>().notNull(),
+  branch_id: integer("branch_id").references(() => branches.id),
+  price_cents: integer("price_cents").notNull(),
+  is_active: boolean("is_active").default(true).notNull(),
+  effective_from: timestamp("effective_from", { withTimezone: true }).defaultNow().notNull(),
+});
+
+export const insertPackagePricingSchema = createInsertSchema(packagePricing).omit({
+  id: true,
+  effective_from: true,
+});
+export type PackagePricing = typeof packagePricing.$inferSelect;
+export type InsertPackagePricing = z.infer<typeof insertPackagePricingSchema>;
+
 // --- Orders (POS transactions) -------------------------------
 // addons: jsonb array of { id: string, name: string, price_cents: number }
 // payment_method: 'cash' | 'card' | 'qr' | 'subscription' | 'voucher'
