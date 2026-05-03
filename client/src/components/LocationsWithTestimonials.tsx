@@ -1,6 +1,6 @@
 import { motion, AnimatePresence } from "framer-motion";
 import { MapPin, Navigation, Star, Crown } from "lucide-react";
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { useQuery } from "@tanstack/react-query";
 
 interface TestimonialProps {
@@ -16,87 +16,67 @@ interface LocationProps {
   name: string;
   address: string;
   hours: string;
+  bgColor: string;
   iconBg: string;
-  coordinates: { lat: number; lng: number };
+  coordinates: {
+    lat: number;
+    lng: number;
+  };
   placeId: string;
   flagship?: boolean;
   services?: string[];
 }
 
-function LocationCard({
-  name,
-  address,
-  hours,
-  iconBg,
-  flagship,
-  services,
-  isSelected,
-  onClick,
-}: LocationProps & { isSelected: boolean; onClick: () => void }) {
+function LocationCard({ name, address, hours, bgColor, iconBg, coordinates, placeId, flagship, services, isSelected, onClick }: LocationProps & { isSelected: boolean; onClick: () => void }) {
   return (
     <motion.div
-      initial={{ opacity: 0, x: -20 }}
+      initial={{ opacity: 0, x: -30 }}
       whileInView={{ opacity: 1, x: 0 }}
-      transition={{ duration: 0.5 }}
+      transition={{ duration: 0.6 }}
       viewport={{ once: true }}
-      whileHover={{ translateX: -2, translateY: -2 }}
+      className={`bg-white p-6 rounded-2xl shadow-lg hover:shadow-xl transition-all duration-300 cursor-pointer relative overflow-hidden ${isSelected ? 'ring-2 ring-cuci-primary ring-opacity-50' : ''} ${flagship ? 'border-2 border-yellow-400' : ''}`}
+      whileHover={{ scale: 1.02 }}
       onClick={onClick}
-      className={`cuci-card p-5 cursor-pointer relative overflow-hidden transition-all ${
-        isSelected ? "ring-2 ring-cuci-primary ring-offset-2" : ""
-      }`}
-      data-testid={`card-location-${name}`}
     >
       {flagship && (
-        <div className="absolute top-0 right-0 bg-cuci-secondary text-black text-xs font-extrabold px-3 py-1 flex items-center gap-1 border-l-2 border-b-2 border-black">
+        <div className="absolute top-0 right-0 bg-gradient-to-l from-yellow-400 to-yellow-500 text-white text-xs font-bold px-3 py-1 flex items-center gap-1 rounded-bl-lg">
           <Crown className="w-3 h-3" />
           FLAGSHIP
         </div>
       )}
       <div className="flex items-start space-x-4">
-        <div
-          className={`p-3 rounded-lg border-2 border-black ${iconBg}`}
-          style={{ boxShadow: "2px 2px 0px 0px rgba(0,0,0,0.9)" }}
-        >
-          <MapPin className="w-5 h-5 text-white" />
+        <div className={`p-3 rounded-full ${iconBg}`}>
+          <MapPin className="w-6 h-6 text-white" />
         </div>
-        <div className="flex-1 min-w-0">
-          <h3 className="text-lg font-extrabold tracking-tight text-gray-900 mb-1">
-            {name}
-          </h3>
+        <div className="flex-1">
+          <h3 className="text-lg font-semibold text-gray-900 mb-1">{name}</h3>
           {services && services.length > 0 && (
             <div className="flex flex-wrap gap-1 mb-2">
               {services.map((service, i) => (
-                <span
-                  key={i}
-                  className="text-[11px] uppercase tracking-wider font-semibold bg-cuci-primary/10 text-cuci-primary px-2 py-0.5 rounded border border-cuci-primary/30"
-                >
+                <span key={i} className="text-xs bg-cuci-primary/10 text-cuci-primary font-medium px-2 py-0.5 rounded-full">
                   {service}
                 </span>
               ))}
             </div>
           )}
-          <p className="text-sm text-gray-700 mb-1">{address}</p>
-          <p className="text-xs text-gray-500 mb-3">{hours}</p>
-          <div className="flex items-center gap-3 flex-wrap">
+          <p className="text-gray-600 mb-2">{address}</p>
+          <p className="text-sm text-gray-500 mb-3">{hours}</p>
+          <div className="flex space-x-2">
             <button
               onClick={(e) => {
                 e.stopPropagation();
-                window.open(
-                  `https://www.google.com/maps/dir/?api=1&destination=${encodeURIComponent(name)}`,
-                  "_blank",
-                );
+                window.open(`https://www.google.com/maps/dir/?api=1&destination=${encodeURIComponent(name)}`, '_blank');
               }}
-              className="inline-flex items-center gap-1.5 text-xs font-bold uppercase tracking-wider text-cuci-primary hover:text-cuci-primary-dark transition-colors"
-              data-testid={`button-directions-${name}`}
+              className="inline-flex items-center space-x-2 text-sm font-medium text-cuci-primary hover:text-cuci-secondary transition-colors"
             >
-              <Navigation className="w-3.5 h-3.5" />
-              Get Directions
+              <Navigation className="w-4 h-4" />
+              <span>Get Directions</span>
             </button>
             {isSelected && (
-              <span className="inline-flex items-center gap-1 text-xs font-bold uppercase tracking-wider text-cuci-secondary">
-                <Star className="w-3.5 h-3.5 fill-current" />
-                Showing reviews
-              </span>
+              <div className="inline-flex items-center space-x-2 text-sm font-medium text-cuci-secondary">
+                <Star className="w-4 h-4 fill-current" />
+                <span>Showing Reviews</span>
+              </div>
             )}
           </div>
         </div>
@@ -108,34 +88,30 @@ function LocationCard({
 function TestimonialCard({ name, role, content, rating, initials, bgColor }: TestimonialProps) {
   return (
     <motion.div
-      initial={{ opacity: 0, y: 12 }}
+      initial={{ opacity: 0, y: 20 }}
       animate={{ opacity: 1, y: 0 }}
-      exit={{ opacity: 0, y: -12 }}
+      exit={{ opacity: 0, y: -20 }}
       transition={{ duration: 0.4 }}
-      className="cuci-card-soft p-5"
+      className="bg-white rounded-2xl p-6 shadow-lg"
     >
-      <div className="flex items-center space-x-3 mb-3">
-        <div
-          className={`w-10 h-10 ${bgColor} rounded-full flex items-center justify-center border-2 border-black`}
-        >
-          <span className="text-white font-extrabold text-sm">{initials}</span>
+      <div className="flex items-center space-x-4 mb-4">
+        <div className={`w-12 h-12 ${bgColor} rounded-full flex items-center justify-center`}>
+          <span className="text-white font-bold text-lg">{initials}</span>
         </div>
-        <div className="min-w-0">
-          <h4 className="font-extrabold text-gray-900 truncate">{name}</h4>
-          <p className="text-xs text-gray-500 truncate">{role}</p>
+        <div>
+          <h4 className="font-bold text-gray-900">{name}</h4>
+          <p className="text-gray-600 text-sm">{role}</p>
         </div>
       </div>
-      <div className="flex items-center space-x-0.5 mb-3">
+      <div className="flex items-center space-x-1 mb-4">
         {[...Array(5)].map((_, i) => (
-          <Star
-            key={i}
-            className={`w-4 h-4 ${
-              i < rating ? "text-yellow-400 fill-current" : "text-gray-300"
-            }`}
+          <Star 
+            key={i} 
+            className={`w-5 h-5 ${i < rating ? 'text-yellow-400 fill-current' : 'text-gray-300'}`} 
           />
         ))}
       </div>
-      <p className="text-sm text-gray-700 leading-relaxed">{content}</p>
+      <p className="text-gray-700 leading-relaxed">{content}</p>
     </motion.div>
   );
 }
@@ -146,93 +122,88 @@ export default function LocationsWithTestimonials() {
   const locations: LocationProps[] = [
     {
       name: "Cuci Xpress Tungku Link",
-      address:
-        "A6–A7, Ground Floor, Block A, Eng Ho Complex, Spg. 217-5-54 Jalan, Lebuhraya Tungku, BE3119",
+      address: "A6–A7, Ground Floor, Block A, Eng Ho Complex, Spg. 217-5-54 Jalan, Lebuhraya Tungku, BE3119",
       hours: "Daily: 8:00 AM - 7:00 PM",
+      bgColor: "bg-gradient-to-br from-purple-50 to-purple-100",
       iconBg: "bg-cuci-primary",
       coordinates: { lat: 4.9112738, lng: 114.9239572 },
       placeId: "",
       flagship: true,
-      services: ["Exterior Auto Wash", "Interior Detailing"],
+      services: ["Exterior Auto Wash", "Interior Detailing"]
     },
     {
       name: "Cuci Xpress Salar",
       address: "Block B, Salar Light Industrial, Unit 23 Jalan Muara, BU1429",
       hours: "Daily: 8:00 AM - 7:00 PM",
+      bgColor: "bg-gradient-to-br from-orange-50 to-orange-100",
       iconBg: "bg-cuci-secondary",
-      coordinates: { lat: 5.00443, lng: 114.9929 },
+      coordinates: { lat: 5.00443, lng: 114.99290 },
       placeId: "salar-branch",
-      services: ["Exterior Auto Wash"],
+      services: ["Exterior Auto Wash"]
     },
     {
       name: "Cuci Xpress Bengkurong",
-      address:
-        "Unit 12, Ground Floor, Spg. 122, Jalan Bengkurong Masin, Jalan Kampung Bengkurong, Bandar Seri Begawan BF1920",
+      address: "Unit 12, Ground Floor, Spg. 122, Jalan Bengkurong Masin, Jalan Kampung Bengkurong, Bandar Seri Begawan BF1920",
       hours: "Daily: 8:00 AM - 7:00 PM",
+      bgColor: "bg-gradient-to-br from-green-50 to-green-100",
       iconBg: "bg-green-500",
       coordinates: { lat: 4.89035, lng: 114.94006 },
       placeId: "bengkurong-branch",
-      services: ["Exterior Auto Wash"],
+      services: ["Exterior Auto Wash"]
     },
     {
       name: "Cuci Xpress Tutong",
-      address:
-        "Unit 5, Ground Floor, Block A, Fatimah Ahmad Complex, Tutong TA2341",
+      address: "Unit 5, Ground Floor, Block A, Fatimah Ahmad Complex, Tutong TA2341",
       hours: "Daily: 8:00 AM - 7:00 PM",
+      bgColor: "bg-gradient-to-br from-blue-50 to-blue-100",
       iconBg: "bg-blue-500",
       coordinates: { lat: 4.8007081, lng: 114.6520481 },
       placeId: "tutong-branch",
-      services: ["Exterior Auto Wash"],
+      services: ["Exterior Auto Wash"]
     },
     {
       name: "Cuci Xpress Lambak",
-      address:
-        "Unit B11, Ground Floor, Block B, PHDPS Complex, Spg. 209, Jalan Penghubung Berakas, Kg. Lambak Kanan, Bandar Seri Begawan BB1714",
+      address: "Unit B11, Ground Floor, Block B, PHDPS Complex, Spg. 209, Jalan Penghubung Berakas, Kg. Lambak Kanan, Bandar Seri Begawan BB1714",
       hours: "Daily: 8:00 AM - 7:00 PM",
+      bgColor: "bg-gradient-to-br from-pink-50 to-pink-100",
       iconBg: "bg-pink-500",
       coordinates: { lat: 4.9715818, lng: 114.9499111 },
       placeId: "lambak-branch",
-      services: ["Exterior Auto Wash"],
-    },
+      services: ["Exterior Auto Wash"]
+    }
   ];
 
-  const { data: reviewsData, isLoading } = useQuery<{ reviews: TestimonialProps[] }>({
-    queryKey: ["/api/reviews", locations[selectedLocationIndex].placeId],
+  // Fetch Google Reviews for the selected location
+  const { data: reviewsData, isLoading } = useQuery({
+    queryKey: ['/api/reviews', locations[selectedLocationIndex].placeId],
     queryFn: async () => {
-      const response = await fetch(
-        `/api/reviews?placeId=${locations[selectedLocationIndex].placeId}`,
-      );
-      if (!response.ok) throw new Error("Failed to fetch reviews");
+      const response = await fetch(`/api/reviews?placeId=${locations[selectedLocationIndex].placeId}`);
+      if (!response.ok) throw new Error('Failed to fetch reviews');
       return response.json();
     },
-    enabled: true,
+    enabled: true
   });
 
   const selectedLocation = locations[selectedLocationIndex];
   const testimonials = reviewsData?.reviews || [];
 
   return (
-    <section id="locations" className="py-20 bg-gray-50">
+    <section id="locations" className="py-16 bg-gray-50">
       <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
         <motion.div
           initial={{ opacity: 0, y: 20 }}
           whileInView={{ opacity: 1, y: 0 }}
           transition={{ duration: 0.6 }}
           viewport={{ once: true }}
-          className="text-center mb-14"
+          className="text-center mb-16"
         >
-          <div className="cuci-eyebrow mb-3">5 branches across Brunei</div>
-          <h2 className="text-4xl md:text-5xl font-extrabold tracking-tight text-gray-900 mb-4">
-            Find us <span className="text-cuci-primary">near you</span>
-          </h2>
-          <p className="text-lg text-gray-600 max-w-3xl mx-auto">
-            With 5 locations across the region, an Xpress car wash is always
-            within reach.
-          </p>
+          <h2 className="text-4xl font-bold text-gray-900 mb-4">Find Us Near You</h2>
+          <p className="text-xl text-gray-600 max-w-3xl mx-auto">With 5 locations across the region, regular Xpress car wash is always within reach.</p>
         </motion.div>
 
-        <div className="grid lg:grid-cols-2 gap-10 items-start">
-          <div className="space-y-4">
+        <div className="grid lg:grid-cols-2 gap-12 items-start">
+          {/* Locations Grid */}
+          <div className="space-y-6">
             {locations.map((location, index) => (
               <LocationCard
                 key={index}
@@ -243,50 +214,42 @@ export default function LocationsWithTestimonials() {
             ))}
           </div>
 
+          {/* Dynamic Testimonials */}
           <motion.div
             initial={{ opacity: 0, y: 20 }}
             whileInView={{ opacity: 1, y: 0 }}
             transition={{ duration: 0.6 }}
             viewport={{ once: true }}
-            className="cuci-card p-6 md:p-8 lg:sticky lg:top-24"
+            className="bg-gray-100 rounded-2xl p-8"
           >
-            <div className="text-center mb-6">
-              <div className="cuci-eyebrow mb-2">Customer reviews</div>
-              <h3 className="text-2xl font-extrabold tracking-tight text-gray-900">
-                What our customers say
-              </h3>
-              <p className="text-sm text-gray-500 mt-1">
-                Reviews from {selectedLocation.name}
-              </p>
+            <div className="text-center mb-8">
+              <h3 className="text-2xl font-bold text-gray-900 mb-2">What Our Customers Say</h3>
+              <p className="text-gray-600">Reviews from {selectedLocation.name}</p>
             </div>
-
+            
             <AnimatePresence mode="wait">
-              <div key={selectedLocationIndex} className="grid gap-4 md:grid-cols-2">
+              <div key={selectedLocationIndex} className="grid gap-6 md:grid-cols-2">
                 {isLoading ? (
                   <div className="md:col-span-2 flex items-center justify-center py-8">
-                    <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-cuci-primary" />
-                    <span className="ml-3 text-sm text-gray-600">
-                      Loading reviews...
-                    </span>
+                    <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-cuci-primary"></div>
+                    <span className="ml-3 text-gray-600">Loading reviews...</span>
                   </div>
                 ) : testimonials && testimonials.length > 0 ? (
-                  testimonials.slice(0, 4).map((testimonial, index) => (
+                  testimonials.slice(0, 4).map((testimonial: any, index: number) => (
                     <TestimonialCard key={index} {...testimonial} />
                   ))
                 ) : (
                   <div className="md:col-span-2 text-center py-8">
                     <Star className="w-8 h-8 text-gray-300 mx-auto mb-2" />
-                    <p className="text-sm text-gray-500">
-                      Loading authentic reviews for this location...
-                    </p>
+                    <p className="text-gray-500">Loading authentic reviews for this location...</p>
                   </div>
                 )}
               </div>
             </AnimatePresence>
-
-            <div className="mt-6 text-center">
-              <p className="text-xs text-gray-500">
-                Click any branch on the left to see its reviews.
+            
+            <div className="mt-8 text-center">
+              <p className="text-sm text-gray-500">
+                Click different locations to see reviews from each branch
               </p>
             </div>
           </motion.div>
