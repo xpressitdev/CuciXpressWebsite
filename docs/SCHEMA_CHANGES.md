@@ -623,3 +623,28 @@ as 0 (the columns are unused for that kind; the existing
   for packs.
 - The order summary discount line says "Unlimited pass" or "Wash pack
   redemption" depending on which kind covered the order.
+
+### Follow-up same day — lazy expiry sweep
+
+To keep `memberships.status` accurate for reporting (instead of leaving
+expired rows with `status='active'` and rejecting them at runtime), the
+three membership-touching endpoints now run a tiny idempotent sweep
+before their main query:
+
+```sql
+UPDATE memberships
+   SET status = 'expired'
+ WHERE status = 'active'
+   AND expires_at IS NOT NULL
+   AND expires_at < now()
+```
+
+Locations:
+- `GET /api/pos/memberships/active` (top of handler)
+- `GET /api/pos/memberships` (top of handler)
+- `POST /api/pos/orders` when `payment_method='subscription'` (before
+  the txn opens — outside the txn so the flip persists even if the
+  redemption itself rolls back)
+
+The partial filter is highly selective — touches at most a handful of
+rows per request, costs nothing on a cold table. No cron job needed.

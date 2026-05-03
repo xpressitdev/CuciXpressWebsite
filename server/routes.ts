@@ -1666,6 +1666,20 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
 
     try {
+      // Lazy expiry sweep before opening the txn. Lives outside the
+      // transaction on purpose: if the redemption itself fails and the
+      // txn rolls back, we still want expired-status flips to persist.
+      // Only runs when this order is touching a membership.
+      if (body.payment_method === 'subscription') {
+        await db.execute(sql`
+          UPDATE memberships
+             SET status = 'expired'
+           WHERE status = 'active'
+             AND expires_at IS NOT NULL
+             AND expires_at < now()
+        `);
+      }
+
       // Everything below — package lookup, customer/vehicle upsert,
       // ticket allocation, order INSERT, and (when applicable) the
       // membership redemption — runs in a single DB transaction so a
@@ -2144,6 +2158,22 @@ export async function registerRoutes(app: Express): Promise<Server> {
   // chooses payment_method='subscription' (see that route for the txn).
   // ==========================================================================
 
+  // Lazy sweep: any membership whose expires_at is in the past gets
+  // flipped from 'active' → 'expired' the next time someone touches
+  // the table. Idempotent, runs on a cheap partial filter, keeps
+  // `status` accurate for reporting without needing a cron job.
+  // Called at the top of every membership-reading endpoint and before
+  // the subscription redemption transaction.
+  const sweepExpiredMemberships = async () => {
+    await db.execute(sql`
+      UPDATE memberships
+         SET status = 'expired'
+       WHERE status = 'active'
+         AND expires_at IS NOT NULL
+         AND expires_at < now()
+    `);
+  };
+
   // GET /api/pos/memberships/active?customer_id=N[&vehicle_id=N]
   // Returns the customer's current active wash-pack(s). If vehicle_id is
   // supplied, also includes vehicle-pinned packs that match. Used by the
@@ -2156,6 +2186,17 @@ export async function registerRoutes(app: Express): Promise<Server> {
       return res.status(400).json({ error: 'customer_id required' });
     }
     try {
+      // Lazy expiry sweep — flip any active rows whose expires_at has
+      // passed to status='expired' so reporting/UI stays clean. Cheap:
+      // the partial WHERE is highly selective and idempotent.
+      await db.execute(sql`
+        UPDATE memberships
+           SET status = 'expired'
+         WHERE status = 'active'
+           AND expires_at IS NOT NULL
+           AND expires_at < now()
+      `);
+
       // 'pack' kind requires remaining_washes > 0; 'unlimited' kind
       // bypasses the count gate (it always has remaining=0 by design)
       // and is gated by expires_at instead. Either way the row must be
@@ -2271,8 +2312,17 @@ export async function registerRoutes(app: Express): Promise<Server> {
       return res.status(400).json({ error: 'customer_id required' });
     }
     try {
+      // Same lazy expiry sweep as /active so the history list shows
+      // correct status without depending on /active being called first.
+      await db.execute(sql`
+        UPDATE memberships
+           SET status = 'expired'
+         WHERE status = 'active'
+           AND expires_at IS NOT NULL
+           AND expires_at < now()
+      `);
       const rows = (await db.execute(sql`
-        SELECT id, vehicle_id, total_washes, remaining_washes, price_cents,
+        SELECT id, vehicle_id, kind, total_washes, remaining_washes, price_cents,
                status, expires_at, created_at
           FROM memberships
          WHERE customer_id = ${customerId}
