@@ -49,6 +49,9 @@ import {
   X,
   Clock,
   AlertTriangle,
+  LineChart as LineChartIcon,
+  Printer,
+  Building2,
 } from "lucide-react";
 import { Link } from "wouter";
 import { motion } from "framer-motion";
@@ -58,11 +61,14 @@ import type { CollaborationSubmission, SubscriptionSignup } from "@shared/schema
 import {
   AreaChart,
   Area,
+  BarChart,
+  Bar,
   XAxis,
   YAxis,
   CartesianGrid,
   Tooltip as RTooltip,
   ResponsiveContainer,
+  Legend,
 } from "recharts";
 
 interface CollaborationsResponse {
@@ -253,6 +259,10 @@ export default function Admin() {
                 <BarChart3 className="w-4 h-4" />
                 Dashboard
               </TabsTrigger>
+              <TabsTrigger value="trends" className="flex items-center gap-2" data-testid="tab-trends">
+                <LineChartIcon className="w-4 h-4" />
+                Trends
+              </TabsTrigger>
               <TabsTrigger value="orders" className="flex items-center gap-2" data-testid="tab-orders-report">
                 <ClipboardList className="w-4 h-4" />
                 Order Report
@@ -298,6 +308,10 @@ export default function Admin() {
 
             <TabsContent value="dashboard" className="mt-6">
               <DashboardTab />
+            </TabsContent>
+
+            <TabsContent value="trends" className="mt-6">
+              <TrendsTab />
             </TabsContent>
 
             <TabsContent value="orders" className="mt-6">
@@ -2036,6 +2050,303 @@ function AddonEditDialog({
 }
 
 // ============================================================
+// Trends tab — Phase 9 (manager + owner only).
+//
+// Date range (default: last 30 days) + branch filter, then:
+//   • KPI strip (net sales, transactions, avg ticket, refunds)
+//   • Daily revenue area chart (sales + refunds)
+//   • By-branch revenue bar chart
+//   • Day-of-week × hour heatmap (busy-hour staffing planner)
+// Backed by GET /api/admin/reports/trends.
+// ============================================================
+
+interface TrendsResp {
+  filter: { branch_id: number | null; from: string; to: string };
+  branches: Array<{ id: number; name: string }>;
+  daily: Array<{ date: string; sales_cents: number; refund_cents: number; transactions: number }>;
+  by_branch: Array<{ branch_id: number; branch_name: string; sales_cents: number; refund_cents: number; transactions: number }>;
+  heatmap: Array<{ dow: number; hour: number; transactions: number; sales_cents: number }>;
+  totals: {
+    sales_cents: number;
+    refund_cents: number;
+    transactions: number;
+    refund_count: number;
+    avg_ticket_cents: number;
+  };
+}
+
+const DOW_LABEL = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
+
+function defaultTrendsRange() {
+  const today = todayBNT();
+  const ms = Date.parse(today + "T00:00:00Z") - 29 * 24 * 60 * 60 * 1000;
+  const from = new Date(ms).toISOString().slice(0, 10);
+  return { from, to: today };
+}
+
+function TrendsTab() {
+  const initial = defaultTrendsRange();
+  const [from, setFrom] = useState<string>(initial.from);
+  const [to, setTo] = useState<string>(initial.to);
+  const [branch, setBranch] = useState<string>("all");
+
+  const qs = new URLSearchParams();
+  if (from) qs.set("from", from);
+  if (to) qs.set("to", to);
+  if (branch !== "all") qs.set("branch_id", branch);
+  const url = `/api/admin/reports/trends?${qs.toString()}`;
+
+  const { data, isLoading, error } = useQuery<TrendsResp>({
+    queryKey: ["/api/admin/reports/trends", from, to, branch],
+    queryFn: async () => {
+      const res = await fetch(url, { credentials: "include" });
+      if (!res.ok) throw new Error("trends_failed");
+      return res.json();
+    },
+  });
+
+  const dailyChartData = useMemo(
+    () =>
+      (data?.daily ?? []).map((r) => ({
+        date: r.date.slice(5), // MM-DD
+        sales: r.sales_cents / 100,
+        refunds: r.refund_cents / 100,
+        transactions: r.transactions,
+      })),
+    [data],
+  );
+
+  const branchChartData = useMemo(
+    () =>
+      (data?.by_branch ?? []).map((r) => ({
+        branch: r.branch_name,
+        sales: r.sales_cents / 100,
+        transactions: r.transactions,
+      })),
+    [data],
+  );
+
+  // Build a 7×24 matrix from heatmap rows for fast lookup.
+  const { heatmap, heatmapMax } = useMemo(() => {
+    const grid: number[][] = Array.from({ length: 7 }, () => Array(24).fill(0));
+    let max = 0;
+    for (const r of data?.heatmap ?? []) {
+      if (r.dow >= 0 && r.dow < 7 && r.hour >= 0 && r.hour < 24) {
+        grid[r.dow][r.hour] = r.transactions;
+        if (r.transactions > max) max = r.transactions;
+      }
+    }
+    return { heatmap: grid, heatmapMax: max };
+  }, [data]);
+
+  const setQuickRange = (days: number) => {
+    const today = todayBNT();
+    const ms = Date.parse(today + "T00:00:00Z") - (days - 1) * 24 * 60 * 60 * 1000;
+    setFrom(new Date(ms).toISOString().slice(0, 10));
+    setTo(today);
+  };
+
+  return (
+    <div className="space-y-6">
+      <Card className="cuci-card border-2 border-black">
+        <CardHeader>
+          <div className="cuci-eyebrow">Strategic view</div>
+          <CardTitle className="text-2xl font-extrabold tracking-tight">
+            Sales <span className="text-cuci-primary">trends</span>
+          </CardTitle>
+          <p className="text-sm text-gray-600">
+            Multi-day revenue, branch comparison, and day-of-week × hour busy
+            patterns to plan staffing.
+          </p>
+        </CardHeader>
+        <CardContent className="space-y-4">
+          <div className="grid grid-cols-2 md:grid-cols-5 gap-3">
+            <div>
+              <label className="text-xs font-semibold text-gray-700 mb-1 block">From</label>
+              <Input type="date" value={from} onChange={(e) => setFrom(e.target.value)} data-testid="input-trends-from" />
+            </div>
+            <div>
+              <label className="text-xs font-semibold text-gray-700 mb-1 block">To</label>
+              <Input type="date" value={to} onChange={(e) => setTo(e.target.value)} data-testid="input-trends-to" />
+            </div>
+            <div>
+              <label className="text-xs font-semibold text-gray-700 mb-1 block">Branch</label>
+              <Select value={branch} onValueChange={setBranch}>
+                <SelectTrigger data-testid="select-trends-branch"><SelectValue /></SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="all">All branches</SelectItem>
+                  {(data?.branches ?? []).map((b) => (
+                    <SelectItem key={b.id} value={String(b.id)}>{b.name}</SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
+            <div className="md:col-span-2 flex gap-2 items-end">
+              <Button size="sm" variant="outline" className="border-2 border-black" onClick={() => setQuickRange(7)}>7d</Button>
+              <Button size="sm" variant="outline" className="border-2 border-black" onClick={() => setQuickRange(30)}>30d</Button>
+              <Button size="sm" variant="outline" className="border-2 border-black" onClick={() => setQuickRange(90)}>90d</Button>
+            </div>
+          </div>
+
+          {error && <p className="text-sm text-red-600">Failed to load trends.</p>}
+        </CardContent>
+      </Card>
+
+      {/* KPI strip */}
+      <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+        <div className="cuci-kpi">
+          <div className="cuci-eyebrow">Net sales</div>
+          <div className="text-2xl font-extrabold tabular-nums" data-testid="kpi-net-sales">
+            {isLoading ? "…" : formatBND(data?.totals.sales_cents ?? 0)}
+          </div>
+        </div>
+        <div className="cuci-kpi">
+          <div className="cuci-eyebrow">Transactions</div>
+          <div className="text-2xl font-extrabold tabular-nums" data-testid="kpi-transactions">
+            {isLoading ? "…" : (data?.totals.transactions ?? 0).toLocaleString()}
+          </div>
+        </div>
+        <div className="cuci-kpi">
+          <div className="cuci-eyebrow">Avg ticket</div>
+          <div className="text-2xl font-extrabold tabular-nums" data-testid="kpi-avg-ticket">
+            {isLoading ? "…" : formatBND(data?.totals.avg_ticket_cents ?? 0)}
+          </div>
+        </div>
+        <div className="cuci-kpi">
+          <div className="cuci-eyebrow">Refunds</div>
+          <div className="text-2xl font-extrabold tabular-nums" data-testid="kpi-refunds">
+            {isLoading ? "…" : `${data?.totals.refund_count ?? 0} · ${formatBND(data?.totals.refund_cents ?? 0)}`}
+          </div>
+        </div>
+      </div>
+
+      {/* Daily revenue area chart */}
+      <Card className="cuci-card border-2 border-black">
+        <CardHeader>
+          <CardTitle className="text-lg font-extrabold">Daily revenue</CardTitle>
+          <p className="text-xs text-gray-500">Sales (purple) vs refunds (orange) per day in B$.</p>
+        </CardHeader>
+        <CardContent>
+          <div className="w-full h-72">
+            <ResponsiveContainer>
+              <AreaChart data={dailyChartData}>
+                <defs>
+                  <linearGradient id="trendsSales" x1="0" y1="0" x2="0" y2="1">
+                    <stop offset="0%" stopColor="hsl(257,74%,66%)" stopOpacity={0.9} />
+                    <stop offset="100%" stopColor="hsl(257,74%,66%)" stopOpacity={0.1} />
+                  </linearGradient>
+                  <linearGradient id="trendsRefunds" x1="0" y1="0" x2="0" y2="1">
+                    <stop offset="0%" stopColor="hsl(36,100%,50%)" stopOpacity={0.7} />
+                    <stop offset="100%" stopColor="hsl(36,100%,50%)" stopOpacity={0.05} />
+                  </linearGradient>
+                </defs>
+                <CartesianGrid strokeDasharray="3 3" stroke="#e5e7eb" />
+                <XAxis dataKey="date" fontSize={11} />
+                <YAxis fontSize={11} tickFormatter={(v) => `B$${v}`} />
+                <RTooltip
+                  formatter={(v: number) => `B$${v.toFixed(2)}`}
+                  contentStyle={{ border: "2px solid #000", borderRadius: 8 }}
+                />
+                <Legend />
+                <Area type="monotone" dataKey="sales" stroke="hsl(257,74%,66%)" strokeWidth={2} fill="url(#trendsSales)" name="Sales" />
+                <Area type="monotone" dataKey="refunds" stroke="hsl(36,100%,50%)" strokeWidth={2} fill="url(#trendsRefunds)" name="Refunds" />
+              </AreaChart>
+            </ResponsiveContainer>
+          </div>
+        </CardContent>
+      </Card>
+
+      {/* By-branch + Heatmap side-by-side on lg */}
+      <div className="grid lg:grid-cols-2 gap-6">
+        <Card className="cuci-card border-2 border-black">
+          <CardHeader>
+            <CardTitle className="text-lg font-extrabold flex items-center gap-2">
+              <Building2 className="w-5 h-5 text-cuci-primary" />
+              Revenue by branch
+            </CardTitle>
+            <p className="text-xs text-gray-500">Net sales per branch over the selected range.</p>
+          </CardHeader>
+          <CardContent>
+            <div className="w-full h-72">
+              <ResponsiveContainer>
+                <BarChart data={branchChartData} layout="vertical" margin={{ left: 20 }}>
+                  <CartesianGrid strokeDasharray="3 3" stroke="#e5e7eb" />
+                  <XAxis type="number" fontSize={11} tickFormatter={(v) => `B$${v}`} />
+                  <YAxis type="category" dataKey="branch" fontSize={11} width={80} />
+                  <RTooltip
+                    formatter={(v: number) => `B$${v.toFixed(2)}`}
+                    contentStyle={{ border: "2px solid #000", borderRadius: 8 }}
+                  />
+                  <Bar dataKey="sales" fill="hsl(257,74%,66%)" name="Sales" radius={[0, 4, 4, 0]} />
+                </BarChart>
+              </ResponsiveContainer>
+            </div>
+          </CardContent>
+        </Card>
+
+        <Card className="cuci-card border-2 border-black">
+          <CardHeader>
+            <CardTitle className="text-lg font-extrabold">Busy-hour heatmap</CardTitle>
+            <p className="text-xs text-gray-500">
+              Transactions by day-of-week × hour. Darker = busier. Use this to plan staffing.
+            </p>
+          </CardHeader>
+          <CardContent>
+            <div className="overflow-x-auto">
+              <table className="text-[10px] border-collapse" data-testid="heatmap-grid">
+                <thead>
+                  <tr>
+                    <th className="w-10"></th>
+                    {Array.from({ length: 24 }, (_, h) => (
+                      <th key={h} className="font-normal text-gray-500 px-[2px] text-center" style={{ minWidth: 18 }}>
+                        {h % 3 === 0 ? h : ""}
+                      </th>
+                    ))}
+                  </tr>
+                </thead>
+                <tbody>
+                  {DOW_LABEL.map((label, dow) => (
+                    <tr key={dow}>
+                      <td className="font-semibold text-gray-700 pr-2 text-right">{label}</td>
+                      {Array.from({ length: 24 }, (_, h) => {
+                        const v = heatmap[dow]?.[h] ?? 0;
+                        const intensity = heatmapMax > 0 ? v / heatmapMax : 0;
+                        const bg =
+                          v === 0
+                            ? "transparent"
+                            : `hsl(257, 74%, ${Math.round(96 - intensity * 50)}%)`;
+                        const color = intensity > 0.55 ? "#fff" : "#111";
+                        return (
+                          <td
+                            key={h}
+                            title={`${label} ${h}:00 — ${v} txn${v === 1 ? "" : "s"}`}
+                            className="text-center align-middle"
+                            style={{
+                              background: bg,
+                              color,
+                              border: "1px solid #f3f4f6",
+                              padding: 0,
+                              width: 18,
+                              height: 22,
+                            }}
+                          >
+                            {v > 0 ? v : ""}
+                          </td>
+                        );
+                      })}
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          </CardContent>
+        </Card>
+      </div>
+    </div>
+  );
+}
+
+// ============================================================
 // Shifts tab — Phase 8 (manager + owner only).
 //
 // Lists cashier shifts with filters (status / branch / date range)
@@ -2286,6 +2597,17 @@ function ShiftsTab() {
                     <div className="flex justify-between"><span className="text-gray-600">Closed by</span><span>{detail.shift.closed_by_name}</span></div>
                   )}
                 </div>
+
+                <Button
+                  size="sm"
+                  variant="outline"
+                  className="w-full border-2 border-black"
+                  onClick={() => window.open(`/admin/shifts/${detail.shift.id}/print`, "_blank")}
+                  data-testid="button-print-shift"
+                >
+                  <Printer className="w-4 h-4 mr-2" />
+                  Print end-of-day report
+                </Button>
 
                 <Separator />
 

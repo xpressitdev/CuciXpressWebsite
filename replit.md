@@ -372,3 +372,18 @@ Two auth systems coexist by design during the Week 1–Week 2 cutover:
    - New `client/src/components/ShiftBar.tsx` — self-contained pill + open-modal + close-modal widget. When no shift is open, shows an amber brutalist "Open shift" CTA → modal with float input + optional note. When a shift is open, shows a green-dot pill `Shift open · Float B$X · Hh Mm` → close modal with full per-payment breakdown, expected-cash math (float + cash sales − cash refunds), counted-cash input with live variance preview, and balanced/over/short toast on close.
    - `client/src/pages/pos.tsx` — slotted `<ShiftBar />` into the header. Renamed the deep-link from "End-of-Day" to "Reports" since shift close is now the proper end-of-day action.
    - `client/src/pages/admin.tsx` — new "Shifts" tab (manager + owner) with filterable list (status / branch / date range) and a sticky right-rail detail panel showing per-payment breakdown, the full expected/counted/variance math, and any notes. Variance is highlighted red with an alert icon when non-zero.
+
+   **Phase 9 — Owner trends + printable end-of-day.** The cashier shifts from Phase 8 produce data; this phase makes it readable for the owner. No schema change.
+
+   Backend (`server/routes.ts`):
+   - `GET /api/admin/reports/trends?from&to&branch_id` (owner + manager) returns four datasets in one round-trip:
+     - `daily` — sales / refunds / transactions per day in range, gap-filled via `generate_series` so the chart has no holes
+     - `by_branch` — net sales + refunds + transactions per branch over the range, sorted by sales desc
+     - `heatmap` — orders bucketed by `EXTRACT(DOW)` × `EXTRACT(HOUR)` in `Asia/Brunei` (the busy-hour staffing planner)
+     - `totals` — net sales, refund count + total, transactions, avg ticket
+   - Default range = last 30 days ending today (Brunei). Cashier role intentionally excluded — strategic view only.
+
+   Frontend:
+   - `client/src/pages/admin.tsx` — new "Trends" tab between Dashboard and Order Report. Date range pickers (with 7d/30d/90d quick buttons) + branch dropdown, KPI strip (net sales, transactions, avg ticket, refunds), recharts area chart for daily revenue (sales + refunds), horizontal bar chart for by-branch comparison, and a custom DOW × hour heatmap grid (HSL-shaded by transaction intensity, hover tooltip per cell).
+   - `client/src/pages/admin-shift-print.tsx` — new printable end-of-day report at `/admin/shifts/:id/print`. Receipt-style A4 layout with sales-by-method breakdown, full cash-drawer math (float + cash sales − refunds = expected, vs counted, with variance highlighted), opening + closing notes, and signature lines for cashier + manager. Auto-opens the print dialog 300ms after data loads. Wired from a "Print end-of-day report" button in the Shifts tab detail panel.
+   - `client/src/App.tsx` — registered the new `/admin/shifts/:id/print` route.

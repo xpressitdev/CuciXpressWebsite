@@ -1084,6 +1084,135 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
+  // GET /api/admin/reports/trends?from=YYYY-MM-DD&to=YYYY-MM-DD&branch_id=N|all
+  // Phase 9 — Owner trends. Returns:
+  //   - daily series (sales / refunds / transactions per day in range)
+  //   - by_branch breakdown (totals per branch over the same range)
+  //   - heatmap (orders & sales bucketed by day-of-week × hour, Asia/Brunei)
+  //   - totals (range KPIs)
+  // Owner + manager only. Cashier intentionally excluded — this is the
+  // strategic "where do I spend my staffing budget" view.
+  app.get('/api/admin/reports/trends', requireStaff, requireStaffRole('owner', 'manager'), async (req, res) => {
+    const branchParam = String(req.query.branch_id ?? 'all').trim();
+    const branchId =
+      branchParam === '' || branchParam === 'all' ? null : Number(branchParam);
+    if (branchId !== null && (!Number.isFinite(branchId) || branchId <= 0)) {
+      return res.status(400).json({ error: 'invalid_branch_id' });
+    }
+    const isDate = (s: string) => /^\d{4}-\d{2}-\d{2}$/.test(s);
+    const fromParam = String(req.query.from ?? '').trim();
+    const toParam = String(req.query.to ?? '').trim();
+
+    try {
+      // Default: last 30 days ending today (Brunei).
+      const todayRow = (await db.execute(
+        sql`SELECT (now() AT TIME ZONE 'Asia/Brunei')::date AS d`,
+      )).rows[0] as { d: string };
+      const to = isDate(toParam) ? toParam : todayRow.d;
+      const from = isDate(fromParam)
+        ? fromParam
+        : (await db.execute(sql`SELECT (${to}::date - INTERVAL '29 days')::date AS d`)).rows[0].d as string;
+
+      const branchFilter = branchId !== null ? sql`AND o.branch_id = ${branchId}` : sql``;
+
+      const branches = (await db.execute(sql`SELECT id, name FROM branches ORDER BY name`)).rows;
+
+      // Daily series — fill gaps with generate_series so the chart has no holes.
+      const dailyRows = (await db.execute(sql`
+        WITH days AS (
+          SELECT generate_series(${from}::date, ${to}::date, INTERVAL '1 day')::date AS d
+        )
+        SELECT d AS date,
+               COALESCE(SUM(CASE WHEN o.status <> 'refunded' THEN o.total_cents ELSE 0 END), 0)::bigint AS sales_cents,
+               COALESCE(SUM(CASE WHEN o.status =  'refunded' THEN o.total_cents ELSE 0 END), 0)::bigint AS refund_cents,
+               COUNT(o.id) FILTER (WHERE o.status <> 'refunded')::int AS transactions
+          FROM days
+          LEFT JOIN orders o
+            ON o.ticket_day = d
+            ${branchFilter}
+         GROUP BY d
+         ORDER BY d
+      `)).rows as Array<{ date: string; sales_cents: string | number; refund_cents: string | number; transactions: number }>;
+
+      // By-branch totals.
+      const byBranchRows = (await db.execute(sql`
+        SELECT b.id AS branch_id, b.name AS branch_name,
+               COALESCE(SUM(CASE WHEN o.status <> 'refunded' THEN o.total_cents ELSE 0 END), 0)::bigint AS sales_cents,
+               COALESCE(SUM(CASE WHEN o.status =  'refunded' THEN o.total_cents ELSE 0 END), 0)::bigint AS refund_cents,
+               COUNT(o.id) FILTER (WHERE o.status <> 'refunded')::int AS transactions
+          FROM branches b
+          LEFT JOIN orders o
+            ON o.branch_id = b.id
+           AND o.ticket_day BETWEEN ${from}::date AND ${to}::date
+         ${branchId !== null ? sql`WHERE b.id = ${branchId}` : sql``}
+         GROUP BY b.id, b.name
+         ORDER BY sales_cents DESC, b.name
+      `)).rows;
+
+      // Heatmap — DOW (0=Sun..6=Sat) × hour (0..23) in Asia/Brunei.
+      const heatmapRows = (await db.execute(sql`
+        SELECT EXTRACT(DOW  FROM (o.created_at AT TIME ZONE 'Asia/Brunei'))::int AS dow,
+               EXTRACT(HOUR FROM (o.created_at AT TIME ZONE 'Asia/Brunei'))::int AS hour,
+               COUNT(*)::int AS transactions,
+               COALESCE(SUM(o.total_cents), 0)::bigint AS sales_cents
+          FROM orders o
+         WHERE o.ticket_day BETWEEN ${from}::date AND ${to}::date
+           AND o.status <> 'refunded'
+           ${branchFilter}
+         GROUP BY 1, 2
+         ORDER BY 1, 2
+      `)).rows as Array<{ dow: number; hour: number; transactions: number; sales_cents: string | number }>;
+
+      // Range totals.
+      const totalsRow = (await db.execute(sql`
+        SELECT COALESCE(SUM(CASE WHEN o.status <> 'refunded' THEN o.total_cents ELSE 0 END), 0)::bigint AS sales_cents,
+               COALESCE(SUM(CASE WHEN o.status =  'refunded' THEN o.total_cents ELSE 0 END), 0)::bigint AS refund_cents,
+               COUNT(*) FILTER (WHERE o.status <> 'refunded')::int AS transactions,
+               COUNT(*) FILTER (WHERE o.status =  'refunded')::int AS refund_count
+          FROM orders o
+         WHERE o.ticket_day BETWEEN ${from}::date AND ${to}::date
+           ${branchFilter}
+      `)).rows[0] as any;
+
+      const sales = Number(totalsRow.sales_cents ?? 0);
+      const tx = Number(totalsRow.transactions ?? 0);
+
+      res.json({
+        filter: { branch_id: branchId, from, to },
+        branches,
+        daily: dailyRows.map((r) => ({
+          date: r.date,
+          sales_cents: Number(r.sales_cents),
+          refund_cents: Number(r.refund_cents),
+          transactions: Number(r.transactions),
+        })),
+        by_branch: byBranchRows.map((r: any) => ({
+          branch_id: r.branch_id,
+          branch_name: r.branch_name,
+          sales_cents: Number(r.sales_cents),
+          refund_cents: Number(r.refund_cents),
+          transactions: Number(r.transactions),
+        })),
+        heatmap: heatmapRows.map((r) => ({
+          dow: Number(r.dow),
+          hour: Number(r.hour),
+          transactions: Number(r.transactions),
+          sales_cents: Number(r.sales_cents),
+        })),
+        totals: {
+          sales_cents: sales,
+          refund_cents: Number(totalsRow.refund_cents ?? 0),
+          transactions: tx,
+          refund_count: Number(totalsRow.refund_count ?? 0),
+          avg_ticket_cents: tx > 0 ? Math.round(sales / tx) : 0,
+        },
+      });
+    } catch (err) {
+      console.error('[admin.reports.trends] failed:', err);
+      res.status(500).json({ error: 'report_failed' });
+    }
+  });
+
   // ==========================================================================
   // Phase 5c — Catalog management (Packages + Add-ons)
   // Owner-only CRUD over the existing `packages` and `addons_catalog` tables.

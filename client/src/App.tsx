@@ -14,6 +14,7 @@ import Checkout from "@/pages/checkout";
 import PrivacyPolicy from "@/pages/privacy-policy";
 import TermsOfService from "@/pages/terms-of-service";
 import Admin from "@/pages/admin";
+import AdminShiftPrint from "@/pages/admin-shift-print";
 import POS from "@/pages/pos";
 import PaymentSuccess from "@/pages/PaymentSuccess";
 import PaymentCancel from "@/pages/PaymentCancel";
@@ -39,6 +40,7 @@ function Router() {
       <Route path="/privacy-policy" component={PrivacyPolicy} />
       <Route path="/terms-of-service" component={TermsOfService} />
       <Route path="/admin" component={Admin} />
+      <Route path="/admin/shifts/:id/print" component={AdminShiftPrint} />
       <Route path="/pos" component={POS} />
       <Route path="/payment-success" component={PaymentSuccess} />
       <Route path="/payment-cancel" component={PaymentCancel} />
