@@ -175,6 +175,53 @@ Wait until tomorrow if you're unsure
 
 ## Applied migrations log
 
+### 2026-05-04 — `migrations/manual/2026-05-04_02_dedup_cars_plate_unique.sql`
+**Author:** agent (Phase 1 follow-up — "Option 1: most recent owner wins")
+**Summary:** One-time dedup of the 16 duplicate normalised-plate groups
+that blocked a UNIQUE constraint in the original Phase 1 migration.
+Owner-approved policy: a license plate is a unique identifier going
+forward; among existing duplicates, keep the most recent owner.
+
+**Winner-selection rule** (deterministic, encoded in SQL):
+1. Real customer beats Cuci Xpress shop accounts
+   (`cucixpress.user.bn+*@gmail.com` aliases that staff used to log
+   walk-ins before the new `customers` table existed).
+2. Otherwise, highest `cars.id` wins (most recent registration).
+
+**Steps in a single transaction:**
+1. Build a `_dedup_plan` temp table marking each row in a duplicate
+   group as `winner` or `loser` per the rule above.
+2. `UPDATE orders SET vehicle_id = winner.id` for any orders pointing
+   at a loser (zero rows in prod — `orders.vehicle_id` only just landed
+   in `2026-05-04_01`).
+3. `DELETE FROM cars WHERE id IN losers` — 17 rows.
+4. `DROP INDEX cars_plate_normalized_idx` (the non-unique functional
+   index from `_01`) and `CREATE UNIQUE INDEX
+   cars_plate_normalized_unique ON cars (UPPER(REGEXP_REPLACE(
+   license_plate,'\s+','','g')))`.
+
+**Idempotent.** Re-running on a deduped DB produces an empty
+`_dedup_plan` (UPDATE/DELETE no-op) and the index DDL uses
+`IF EXISTS` / `IF NOT EXISTS`.
+
+**Status:** **APPLIED 2026-05-04** to staging Neon (empty DB, only the
+unique index was created) and production Neon (cars 559 → 542 = 17
+deletions, dup_groups 16 → 0, unique index installed, old non-unique
+index dropped, 0 orders affected) via `tsx
+scripts/_apply-2026-05-04-02.ts` (script self-deleted post-apply,
+along with the read-only preview script `_preview-2026-05-04-02.ts`).
+
+**Note on Phase 1 entry below:** The "Why no UNIQUE on `cars.license_plate`"
+note is now obsolete — UNIQUE is in place. Trunk-user immutability
+guarantee is unchanged: the POS upsert path still never overwrites a
+non-null `cars.user_id`. Application code in `server/routes.ts` was
+not changed; the existing find-by-normalised-plate-then-INSERT/UPDATE
+path is now backed by a UNIQUE constraint that prevents any future
+duplicate from being inserted.
+
+**Rollback:** Forward-only. The 17 deleted rows are unrecoverable
+without restoring from a Neon point-in-time snapshot.
+
 ### 2026-05-04 — `migrations/manual/2026-05-04_01_pos_customers_vehicles.sql`
 **Author:** agent (Phase 1 of POS_CX feature port)
 **Summary:** Phase 1 of the customer-and-vehicle normalisation work. Adds a

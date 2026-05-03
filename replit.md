@@ -169,6 +169,19 @@ Two auth systems coexist by design during the Week 1–Week 2 cutover:
    `migrations/manual/2026-05-04_01_pos_customers_vehicles.sql`,
    applied to both staging and prod (559 cars + 508 users untouched).
 
+   **Follow-up same day (`2026-05-04_02_dedup_cars_plate_unique.sql`):**
+   Owner approved "Option 1: most recent owner wins". Deduped the 16
+   duplicate normalised-plate groups in prod — 10 were real-customer-vs-
+   shop-account collisions (real customer wins), 6 were two real
+   customers (kept the most recently registered car row, i.e. effectively
+   "the current owner"), and BAT4455 was the owner's own test data.
+   17 loser rows deleted, 0 orders affected (vehicle_id only just landed
+   earlier the same day). Replaced the non-unique functional index with
+   a UNIQUE one (`cars_plate_normalized_unique`). Going forward the DB
+   itself guarantees no two cars share a normalised plate, which lets
+   the cashier flow trust plate as the canonical vehicle identifier.
+   Cars total: 559 → 542.
+
 ## External Dependencies
 
 - **UI/Styling**: Radix UI, Tailwind CSS, Framer Motion, Lucide React (icons).
