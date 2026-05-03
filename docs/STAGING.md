@@ -45,7 +45,25 @@ sees a broken migration.
    `AWS US East (N. Virginia)` (same as production).
 3. Copy the **pooled** connection string. It must include `?sslmode=require`.
 4. Add it as a Replit Secret named `STAGING_DATABASE_URL`.
-5. Bring staging to schema parity with production:
+5. **Bootstrap step** — clone the production schema (DDL only) and the public
+   branch rows (no customer data) into staging:
+   ```bash
+   # 5a. Schema only (no data) — copies all 17 tables, sequences, indexes, FKs
+   pg_dump "$DATABASE_URL" --schema-only --no-owner --no-acl --no-comments \
+     | grep -v '^\\restrict' | grep -v '^\\unrestrict' \
+     | psql "$STAGING_DATABASE_URL" -v ON_ERROR_STOP=1
+
+   # 5b. Branch rows (public data only — names, locations, Google Maps URLs)
+   pg_dump "$DATABASE_URL" --data-only --table=public.branches --no-owner --no-acl \
+     | grep -v '^\\restrict' | grep -v '^\\unrestrict' \
+     | psql "$STAGING_DATABASE_URL" -v ON_ERROR_STOP=1
+
+   # 5c. Sync the id sequence so future branch inserts don't collide
+   psql "$STAGING_DATABASE_URL" -c \
+     "SELECT setval('public.branches_id_seq', (SELECT max(id) FROM public.branches));"
+   ```
+6. Register the manual migrations in staging's `_migration_log` (so future
+   `migrate-staging.ts` runs only apply NEW files):
    ```bash
    tsx scripts/migrate-staging.ts
    ```
@@ -53,9 +71,10 @@ sees a broken migration.
 The script:
 - Refuses to run if `STAGING_DATABASE_URL` points at the same Neon project as
   `DATABASE_URL` (safety check).
+- Sets `search_path` per session (Neon's pooler discards role-level defaults).
 - Creates a `_migration_log` tracking table on staging.
 - Replays every file in `migrations/manual/` in filename order, idempotently.
-- Seeds the 5 branch rows.
+- Verifies branches table has rows; warns if empty.
 - Prints the resulting table list.
 
 To preview without applying anything: `tsx scripts/migrate-staging.ts --dry`

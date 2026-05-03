@@ -77,14 +77,22 @@ const pool = new Pool({ connectionString: stagingUrl });
 
 async function main() {
   info(`Connecting to staging database…`);
-  const ping = await pool.query("SELECT current_database() AS db, version()");
+  // Use a sticky client so SET search_path persists across all queries.
+  // Neon's pooler discards role-level search_path defaults.
+  const client = await pool.connect();
+  await client.query(`SET search_path TO public, "$user"`);
+  const ping = await client.query("SELECT current_database() AS db, version()");
   ok(`Connected: ${ping.rows[0].db}`);
+
+  // Shadow pool with client.query for the rest of the script.
+  const exec = (text: string, params?: any[]) =>
+    params ? client.query(text, params) : client.query(text);
 
   // 1. Migration tracking table
   if (DRY_RUN) {
     info(`[dry-run] Would create _migration_log table if missing`);
   } else {
-    await pool.query(`
+    await exec(`
       CREATE TABLE IF NOT EXISTS _migration_log (
         filename text PRIMARY KEY,
         applied_at timestamptz NOT NULL DEFAULT now(),
@@ -113,7 +121,7 @@ async function main() {
 
     const already = DRY_RUN
       ? { rows: [] as any[] }
-      : await pool.query(`SELECT sha256 FROM _migration_log WHERE filename = $1`, [filename]);
+      : await exec(`SELECT sha256 FROM _migration_log WHERE filename = $1`, [filename]);
 
     if (already.rows.length > 0) {
       const prev = already.rows[0].sha256;
@@ -137,8 +145,8 @@ async function main() {
 
     info(`Applying ${filename}…`);
     try {
-      await pool.query(sql);
-      await pool.query(
+      await exec(sql);
+      await exec(
         `INSERT INTO _migration_log (filename, sha256) VALUES ($1, $2)
          ON CONFLICT (filename) DO UPDATE SET sha256 = EXCLUDED.sha256, applied_at = now()`,
         [filename, sha],
@@ -149,34 +157,36 @@ async function main() {
     }
   }
 
-  // 4. Seed branches (no customer data; just the 5 branches so the app boots)
-  if (DRY_RUN) {
-    info(`[dry-run] Would seed 5 branches`);
-  } else {
-    info(`Seeding branches…`);
-    await pool.query(`
-      INSERT INTO branches (id, name, slug, address, phone, is_active)
-      VALUES
-        (1, 'Cuci Xpress Tungku',     'tungku',     'Tungku, Brunei',     '+6738000001', true),
-        (2, 'Cuci Xpress Salar',      'salar',      'Salar, Brunei',      '+6738000002', true),
-        (3, 'Cuci Xpress Bengkurong', 'bengkurong', 'Bengkurong, Brunei', '+6738000003', true),
-        (4, 'Cuci Xpress Tutong',     'tutong',     'Tutong, Brunei',     '+6738000004', true),
-        (5, 'Cuci Xpress Lambak',     'lambak',     'Lambak, Brunei',     '+6738000005', true)
-      ON CONFLICT (id) DO NOTHING
-    `);
-    const { rows } = await pool.query(`SELECT count(*)::int AS n FROM branches`);
-    ok(`Branches seeded (${rows[0].n} total)`);
+  // 4. Sanity check: branches must already exist (loaded by the bootstrap
+  //    step in docs/STAGING.md — pg_dump --data-only --table=branches from
+  //    production). The 5 branch rows are public data (names, locations,
+  //    Google Maps URLs); no PII. We do NOT seed them from this script
+  //    because the columns drift over time and a wrong INSERT here is
+  //    worse than a missing one.
+  if (!DRY_RUN) {
+    const { rows } = await exec(`SELECT count(*)::int AS n FROM branches`);
+    if (rows[0].n === 0) {
+      console.warn(
+        `\x1b[33m⚠\x1b[0m  branches table is empty. Run the bootstrap step from docs/STAGING.md:\n` +
+          `   pg_dump "$DATABASE_URL" --data-only --table=public.branches --no-owner --no-acl \\\n` +
+          `     | grep -v '^\\\\restrict' | grep -v '^\\\\unrestrict' \\\n` +
+          `     | psql "$STAGING_DATABASE_URL" -v ON_ERROR_STOP=1`,
+      );
+    } else {
+      ok(`branches: ${rows[0].n} row(s) present`);
+    }
   }
 
   // 5. Final summary
   if (!DRY_RUN) {
-    const { rows } = await pool.query(`
+    const { rows } = await exec(`
       SELECT tablename FROM pg_tables WHERE schemaname='public' ORDER BY tablename
     `);
     info(`Staging now has ${rows.length} tables:`);
     rows.forEach((r) => console.log(`    • ${r.tablename}`));
   }
 
+  client.release();
   await pool.end();
   ok(DRY_RUN ? "Dry run complete." : "Staging is at schema parity with production.");
 }
