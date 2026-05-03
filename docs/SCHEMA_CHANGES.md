@@ -808,3 +808,35 @@ Both endpoints reuse the same Asia/Brunei `ticket_day` filter as
 the existing reports. Surfaced in `/admin` as two new tabs
 (**Payment Methods**, **Best Selling**) alongside Dashboard / Order
 Report. Tab strip widened from 4 to 6 columns on desktop.
+
+---
+
+## Phase 5c — Catalog management: Packages + Add-ons (no schema change)
+
+Owner-only CRUD over the existing `packages` and `addons_catalog`
+tables. Manager role intentionally NOT included — pricing edits are
+owner-only (reports/refunds remain manager-allowed).
+
+Endpoints:
+- `GET    /api/admin/catalog/packages` (lists all + per-row order_count)
+- `POST   /api/admin/catalog/packages`
+- `PATCH  /api/admin/catalog/packages/:id`
+- `DELETE /api/admin/catalog/packages/:id` — soft (is_active=false)
+  by default. `?force=1` hard-deletes when no order has ever
+  referenced the row, otherwise returns 409 `{error:'in_use',
+  order_count}`.
+- Same shape for `/api/admin/catalog/addons` (usage counted by
+  unwrapping `orders.addons` jsonb and matching `a->>'id'`).
+
+Body validation via Zod: `name 1–120`, `price_cents 0..100_000`,
+`duration_minutes 1..600 | null`, `sort_order 0..999`. The POST/
+PATCH branches reuse one schema (PATCH = `.partial()`).
+
+Surfaced in `/admin` as a new **Catalog** tab containing two stacked
+sections (Packages, Add-ons), each with an inline edit dialog.
+Tab strip widened from 6 to 7 columns on desktop. Non-owners see a
+read-only view with an amber banner instead of buttons.
+
+Skipped this phase: **promotions / promo codes** — owner deferred
+(they have none today). Will be revisited later if promo support is
+needed at the till.

@@ -42,6 +42,11 @@ import {
   Download,
   CreditCard,
   TrendingUp,
+  Package as PackageIcon,
+  Plus,
+  Pencil,
+  Trash2,
+  X,
 } from "lucide-react";
 import { Link } from "wouter";
 import { motion } from "framer-motion";
@@ -213,7 +218,7 @@ export default function Admin() {
           </div>
 
           <Tabs defaultValue="dashboard" className="w-full">
-            <TabsList className="grid w-full grid-cols-2 sm:grid-cols-3 md:grid-cols-6">
+            <TabsList className="grid w-full grid-cols-2 sm:grid-cols-4 md:grid-cols-7">
               <TabsTrigger value="dashboard" className="flex items-center gap-2" data-testid="tab-dashboard">
                 <BarChart3 className="w-4 h-4" />
                 Dashboard
@@ -229,6 +234,10 @@ export default function Admin() {
               <TabsTrigger value="best-selling" className="flex items-center gap-2" data-testid="tab-best-selling-report">
                 <TrendingUp className="w-4 h-4" />
                 Best Selling
+              </TabsTrigger>
+              <TabsTrigger value="catalog" className="flex items-center gap-2" data-testid="tab-catalog">
+                <PackageIcon className="w-4 h-4" />
+                Catalog
               </TabsTrigger>
               <TabsTrigger value="collaborations" className="flex items-center gap-2">
                 <MessageSquare className="w-4 h-4" />
@@ -259,6 +268,10 @@ export default function Admin() {
 
             <TabsContent value="best-selling" className="mt-6">
               <BestSellingTab />
+            </TabsContent>
+
+            <TabsContent value="catalog" className="mt-6">
+              <CatalogTab isOwner={staff?.role === "owner"} />
             </TabsContent>
 
             <TabsContent value="collaborations" className="mt-6">
@@ -1391,6 +1404,480 @@ function BestSellingTab() {
             </div>
           )}
         </CardContent>
+      </Card>
+    </div>
+  );
+}
+
+// =====================================================================
+// Phase 5c — Catalog management (Packages + Add-ons)
+// Two stacked sections in one tab; both use the same compact "row +
+// edit dialog" pattern so the owner doesn't have to learn two UIs.
+// All mutations are owner-only on the server. We still surface the
+// owner check on the client so non-owners see a read-only view rather
+// than buttons that explode on click.
+// =====================================================================
+interface CatalogPackage {
+  id: string;
+  name: string;
+  description: string | null;
+  duration_minutes: number | null;
+  price_cents: number;
+  is_active: boolean;
+  sort_order: number;
+  order_count: number;
+}
+interface CatalogAddon {
+  id: string;
+  name: string;
+  price_cents: number;
+  is_active: boolean;
+  sort_order: number;
+  order_count: number;
+}
+
+const formatBndInput = (cents: number) => (cents / 100).toFixed(2);
+const parseBndInput = (s: string): number | null => {
+  const n = Number(String(s).trim());
+  if (!Number.isFinite(n) || n < 0) return null;
+  return Math.round(n * 100);
+};
+
+function CatalogTab({ isOwner }: { isOwner: boolean }) {
+  return (
+    <div className="space-y-8">
+      {!isOwner && (
+        <div className="rounded-lg border border-amber-200 bg-amber-50 p-3 text-sm text-amber-900">
+          You're signed in as a manager. Catalog changes are owner-only — view only here.
+        </div>
+      )}
+      <PackagesSection canEdit={isOwner} />
+      <AddonsSection canEdit={isOwner} />
+    </div>
+  );
+}
+
+// ---------------------------------------------------------------------
+// Packages section
+// ---------------------------------------------------------------------
+function PackagesSection({ canEdit }: { canEdit: boolean }) {
+  const qc = useQueryClient();
+  const { data, isLoading } = useQuery<{ rows: CatalogPackage[] }>({
+    queryKey: ["/api/admin/catalog/packages"],
+  });
+  const rows = data?.rows ?? [];
+  const [editing, setEditing] = useState<CatalogPackage | null>(null);
+  const [creating, setCreating] = useState(false);
+
+  const save = useMutation({
+    mutationFn: async (vars: { id?: string; body: any }) => {
+      const res = vars.id
+        ? await apiRequest("PATCH", `/api/admin/catalog/packages/${vars.id}`, vars.body)
+        : await apiRequest("POST", `/api/admin/catalog/packages`, vars.body);
+      return res.json();
+    },
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ["/api/admin/catalog/packages"] });
+      setEditing(null);
+      setCreating(false);
+    },
+  });
+
+  const remove = useMutation({
+    mutationFn: async (vars: { id: string; force: boolean }) => {
+      const res = await fetch(
+        `/api/admin/catalog/packages/${vars.id}${vars.force ? "?force=1" : ""}`,
+        { method: "DELETE", credentials: "include" },
+      );
+      const body = await res.json().catch(() => ({}));
+      if (!res.ok) throw Object.assign(new Error("delete_failed"), { body, status: res.status });
+      return body;
+    },
+    onSuccess: () => qc.invalidateQueries({ queryKey: ["/api/admin/catalog/packages"] }),
+  });
+
+  const onDelete = (row: CatalogPackage) => {
+    if (row.order_count > 0) {
+      const ok = window.confirm(
+        `"${row.name}" was used by ${row.order_count} order(s). It can't be hard-deleted, but I can deactivate it so it stops showing in the POS. Proceed?`,
+      );
+      if (!ok) return;
+      remove.mutate({ id: row.id, force: false });
+    } else {
+      const ok = window.confirm(`Delete "${row.name}"? This is permanent.`);
+      if (!ok) return;
+      remove.mutate({ id: row.id, force: true });
+    }
+  };
+
+  return (
+    <Card>
+      <CardHeader>
+        <CardTitle className="text-base flex items-center justify-between">
+          <span>Packages</span>
+          {canEdit && (
+            <Button size="sm" onClick={() => setCreating(true)} data-testid="button-pkg-new">
+              <Plus className="w-4 h-4 mr-1" /> New package
+            </Button>
+          )}
+        </CardTitle>
+      </CardHeader>
+      <CardContent>
+        {isLoading ? (
+          <div className="space-y-2">
+            {Array.from({ length: 2 }).map((_, i) => (
+              <div key={i} className="h-12 rounded bg-gray-100 animate-pulse" />
+            ))}
+          </div>
+        ) : rows.length === 0 ? (
+          <p className="text-sm text-gray-500 py-4 text-center">No packages yet.</p>
+        ) : (
+          <div className="overflow-x-auto">
+            <Table>
+              <TableHeader>
+                <TableRow>
+                  <TableHead>Name</TableHead>
+                  <TableHead>Description</TableHead>
+                  <TableHead className="text-right">Duration</TableHead>
+                  <TableHead className="text-right">Price</TableHead>
+                  <TableHead className="text-right">Orders</TableHead>
+                  <TableHead>Status</TableHead>
+                  {canEdit && <TableHead className="text-right">Actions</TableHead>}
+                </TableRow>
+              </TableHeader>
+              <TableBody>
+                {rows.map((r) => (
+                  <TableRow key={r.id} className={!r.is_active ? "opacity-60" : ""} data-testid={`row-pkg-${r.id}`}>
+                    <TableCell className="font-medium text-sm">{r.name}</TableCell>
+                    <TableCell className="text-xs text-gray-600 max-w-[280px] truncate">{r.description ?? "—"}</TableCell>
+                    <TableCell className="text-right text-xs">{r.duration_minutes ? `${r.duration_minutes} min` : "—"}</TableCell>
+                    <TableCell className="text-right text-sm font-medium">{formatBND(r.price_cents)}</TableCell>
+                    <TableCell className="text-right text-xs">{r.order_count.toLocaleString()}</TableCell>
+                    <TableCell>
+                      <Badge variant="outline" className={r.is_active ? "border-emerald-200 text-emerald-700 bg-emerald-50" : "border-gray-200 text-gray-600"}>
+                        {r.is_active ? "Active" : "Inactive"}
+                      </Badge>
+                    </TableCell>
+                    {canEdit && (
+                      <TableCell className="text-right">
+                        <div className="flex justify-end gap-1">
+                          <Button size="sm" variant="outline" onClick={() => setEditing(r)} data-testid={`button-pkg-edit-${r.id}`}>
+                            <Pencil className="w-3 h-3" />
+                          </Button>
+                          <Button size="sm" variant="outline" onClick={() => onDelete(r)} data-testid={`button-pkg-delete-${r.id}`}>
+                            <Trash2 className="w-3 h-3" />
+                          </Button>
+                        </div>
+                      </TableCell>
+                    )}
+                  </TableRow>
+                ))}
+              </TableBody>
+            </Table>
+          </div>
+        )}
+      </CardContent>
+
+      {(editing || creating) && (
+        <PackageEditDialog
+          initial={editing}
+          isPending={save.isPending}
+          onClose={() => { setEditing(null); setCreating(false); }}
+          onSave={(body) => save.mutate({ id: editing?.id, body })}
+        />
+      )}
+    </Card>
+  );
+}
+
+function PackageEditDialog({
+  initial,
+  isPending,
+  onClose,
+  onSave,
+}: {
+  initial: CatalogPackage | null;
+  isPending: boolean;
+  onClose: () => void;
+  onSave: (body: any) => void;
+}) {
+  const [name, setName] = useState(initial?.name ?? "");
+  const [description, setDescription] = useState(initial?.description ?? "");
+  const [duration, setDuration] = useState(initial?.duration_minutes ? String(initial.duration_minutes) : "");
+  const [price, setPrice] = useState(initial ? formatBndInput(initial.price_cents) : "");
+  const [isActive, setIsActive] = useState(initial?.is_active ?? true);
+  const [sortOrder, setSortOrder] = useState(initial?.sort_order != null ? String(initial.sort_order) : "0");
+  const [err, setErr] = useState<string | null>(null);
+
+  const submit = () => {
+    setErr(null);
+    if (!name.trim()) return setErr("Name is required.");
+    const cents = parseBndInput(price);
+    if (cents === null) return setErr("Price must be a non-negative number (e.g. 8.00).");
+    const dur = duration.trim() === "" ? null : Number(duration);
+    if (dur !== null && (!Number.isInteger(dur) || dur < 1 || dur > 600)) {
+      return setErr("Duration must be a whole number of minutes (1–600), or leave blank.");
+    }
+    const so = Number(sortOrder);
+    if (!Number.isInteger(so) || so < 0 || so > 999) return setErr("Sort order must be 0–999.");
+    onSave({
+      name: name.trim(),
+      description: description.trim() === "" ? null : description.trim(),
+      duration_minutes: dur,
+      price_cents: cents,
+      is_active: isActive,
+      sort_order: so,
+    });
+  };
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4" onClick={onClose}>
+      <Card className="w-full max-w-lg" onClick={(e) => e.stopPropagation()}>
+        <CardHeader>
+          <CardTitle className="text-base flex items-center justify-between">
+            <span>{initial ? "Edit package" : "New package"}</span>
+            <Button variant="ghost" size="sm" onClick={onClose}><X className="w-4 h-4" /></Button>
+          </CardTitle>
+        </CardHeader>
+        <CardContent className="space-y-3">
+          <div className="space-y-1">
+            <label className="text-xs text-gray-600">Name</label>
+            <Input value={name} onChange={(e) => setName(e.target.value)} placeholder="Basic Wash" data-testid="input-pkg-name" />
+          </div>
+          <div className="space-y-1">
+            <label className="text-xs text-gray-600">Description (optional)</label>
+            <Input value={description} onChange={(e) => setDescription(e.target.value)} placeholder="Exterior wash + interior wipe-down" data-testid="input-pkg-description" />
+          </div>
+          <div className="grid grid-cols-3 gap-3">
+            <div className="space-y-1">
+              <label className="text-xs text-gray-600">Price (BND)</label>
+              <Input value={price} onChange={(e) => setPrice(e.target.value)} placeholder="8.00" inputMode="decimal" data-testid="input-pkg-price" />
+            </div>
+            <div className="space-y-1">
+              <label className="text-xs text-gray-600">Duration (min)</label>
+              <Input value={duration} onChange={(e) => setDuration(e.target.value)} placeholder="10" inputMode="numeric" data-testid="input-pkg-duration" />
+            </div>
+            <div className="space-y-1">
+              <label className="text-xs text-gray-600">Sort order</label>
+              <Input value={sortOrder} onChange={(e) => setSortOrder(e.target.value)} inputMode="numeric" data-testid="input-pkg-sort" />
+            </div>
+          </div>
+          <label className="flex items-center gap-2 text-sm">
+            <input type="checkbox" checked={isActive} onChange={(e) => setIsActive(e.target.checked)} data-testid="input-pkg-active" />
+            Active (shown in POS)
+          </label>
+          {err && <p className="text-sm text-red-600">{err}</p>}
+        </CardContent>
+        <div className="flex justify-end gap-2 px-6 pb-6">
+          <Button variant="outline" onClick={onClose} disabled={isPending}>Cancel</Button>
+          <Button onClick={submit} disabled={isPending} data-testid="button-pkg-save">
+            {isPending ? "Saving…" : "Save"}
+          </Button>
+        </div>
+      </Card>
+    </div>
+  );
+}
+
+// ---------------------------------------------------------------------
+// Add-ons section
+// ---------------------------------------------------------------------
+function AddonsSection({ canEdit }: { canEdit: boolean }) {
+  const qc = useQueryClient();
+  const { data, isLoading } = useQuery<{ rows: CatalogAddon[] }>({
+    queryKey: ["/api/admin/catalog/addons"],
+  });
+  const rows = data?.rows ?? [];
+  const [editing, setEditing] = useState<CatalogAddon | null>(null);
+  const [creating, setCreating] = useState(false);
+
+  const save = useMutation({
+    mutationFn: async (vars: { id?: string; body: any }) => {
+      const res = vars.id
+        ? await apiRequest("PATCH", `/api/admin/catalog/addons/${vars.id}`, vars.body)
+        : await apiRequest("POST", `/api/admin/catalog/addons`, vars.body);
+      return res.json();
+    },
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ["/api/admin/catalog/addons"] });
+      setEditing(null);
+      setCreating(false);
+    },
+  });
+
+  const remove = useMutation({
+    mutationFn: async (vars: { id: string; force: boolean }) => {
+      const res = await fetch(
+        `/api/admin/catalog/addons/${vars.id}${vars.force ? "?force=1" : ""}`,
+        { method: "DELETE", credentials: "include" },
+      );
+      const body = await res.json().catch(() => ({}));
+      if (!res.ok) throw Object.assign(new Error("delete_failed"), { body, status: res.status });
+      return body;
+    },
+    onSuccess: () => qc.invalidateQueries({ queryKey: ["/api/admin/catalog/addons"] }),
+  });
+
+  const onDelete = (row: CatalogAddon) => {
+    if (row.order_count > 0) {
+      const ok = window.confirm(
+        `"${row.name}" was used on ${row.order_count} order(s). It can't be hard-deleted, but I can deactivate it so it stops showing in the POS. Proceed?`,
+      );
+      if (!ok) return;
+      remove.mutate({ id: row.id, force: false });
+    } else {
+      const ok = window.confirm(`Delete "${row.name}"? This is permanent.`);
+      if (!ok) return;
+      remove.mutate({ id: row.id, force: true });
+    }
+  };
+
+  return (
+    <Card>
+      <CardHeader>
+        <CardTitle className="text-base flex items-center justify-between">
+          <span>Add-ons</span>
+          {canEdit && (
+            <Button size="sm" onClick={() => setCreating(true)} data-testid="button-addon-new">
+              <Plus className="w-4 h-4 mr-1" /> New add-on
+            </Button>
+          )}
+        </CardTitle>
+      </CardHeader>
+      <CardContent>
+        {isLoading ? (
+          <div className="space-y-2">
+            {Array.from({ length: 2 }).map((_, i) => (
+              <div key={i} className="h-12 rounded bg-gray-100 animate-pulse" />
+            ))}
+          </div>
+        ) : rows.length === 0 ? (
+          <p className="text-sm text-gray-500 py-4 text-center">No add-ons yet.</p>
+        ) : (
+          <div className="overflow-x-auto">
+            <Table>
+              <TableHeader>
+                <TableRow>
+                  <TableHead>Name</TableHead>
+                  <TableHead className="text-right">Price</TableHead>
+                  <TableHead className="text-right">Sort</TableHead>
+                  <TableHead className="text-right">Used in</TableHead>
+                  <TableHead>Status</TableHead>
+                  {canEdit && <TableHead className="text-right">Actions</TableHead>}
+                </TableRow>
+              </TableHeader>
+              <TableBody>
+                {rows.map((r) => (
+                  <TableRow key={r.id} className={!r.is_active ? "opacity-60" : ""} data-testid={`row-addon-${r.id}`}>
+                    <TableCell className="font-medium text-sm">{r.name}</TableCell>
+                    <TableCell className="text-right text-sm font-medium">{formatBND(r.price_cents)}</TableCell>
+                    <TableCell className="text-right text-xs">{r.sort_order}</TableCell>
+                    <TableCell className="text-right text-xs">{r.order_count.toLocaleString()}</TableCell>
+                    <TableCell>
+                      <Badge variant="outline" className={r.is_active ? "border-emerald-200 text-emerald-700 bg-emerald-50" : "border-gray-200 text-gray-600"}>
+                        {r.is_active ? "Active" : "Inactive"}
+                      </Badge>
+                    </TableCell>
+                    {canEdit && (
+                      <TableCell className="text-right">
+                        <div className="flex justify-end gap-1">
+                          <Button size="sm" variant="outline" onClick={() => setEditing(r)} data-testid={`button-addon-edit-${r.id}`}>
+                            <Pencil className="w-3 h-3" />
+                          </Button>
+                          <Button size="sm" variant="outline" onClick={() => onDelete(r)} data-testid={`button-addon-delete-${r.id}`}>
+                            <Trash2 className="w-3 h-3" />
+                          </Button>
+                        </div>
+                      </TableCell>
+                    )}
+                  </TableRow>
+                ))}
+              </TableBody>
+            </Table>
+          </div>
+        )}
+      </CardContent>
+
+      {(editing || creating) && (
+        <AddonEditDialog
+          initial={editing}
+          isPending={save.isPending}
+          onClose={() => { setEditing(null); setCreating(false); }}
+          onSave={(body) => save.mutate({ id: editing?.id, body })}
+        />
+      )}
+    </Card>
+  );
+}
+
+function AddonEditDialog({
+  initial,
+  isPending,
+  onClose,
+  onSave,
+}: {
+  initial: CatalogAddon | null;
+  isPending: boolean;
+  onClose: () => void;
+  onSave: (body: any) => void;
+}) {
+  const [name, setName] = useState(initial?.name ?? "");
+  const [price, setPrice] = useState(initial ? formatBndInput(initial.price_cents) : "");
+  const [isActive, setIsActive] = useState(initial?.is_active ?? true);
+  const [sortOrder, setSortOrder] = useState(initial?.sort_order != null ? String(initial.sort_order) : "0");
+  const [err, setErr] = useState<string | null>(null);
+
+  const submit = () => {
+    setErr(null);
+    if (!name.trim()) return setErr("Name is required.");
+    const cents = parseBndInput(price);
+    if (cents === null) return setErr("Price must be a non-negative number (e.g. 1.00).");
+    const so = Number(sortOrder);
+    if (!Number.isInteger(so) || so < 0 || so > 999) return setErr("Sort order must be 0–999.");
+    onSave({
+      name: name.trim(),
+      price_cents: cents,
+      is_active: isActive,
+      sort_order: so,
+    });
+  };
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4" onClick={onClose}>
+      <Card className="w-full max-w-md" onClick={(e) => e.stopPropagation()}>
+        <CardHeader>
+          <CardTitle className="text-base flex items-center justify-between">
+            <span>{initial ? "Edit add-on" : "New add-on"}</span>
+            <Button variant="ghost" size="sm" onClick={onClose}><X className="w-4 h-4" /></Button>
+          </CardTitle>
+        </CardHeader>
+        <CardContent className="space-y-3">
+          <div className="space-y-1">
+            <label className="text-xs text-gray-600">Name</label>
+            <Input value={name} onChange={(e) => setName(e.target.value)} placeholder="Tire Shine" data-testid="input-addon-name" />
+          </div>
+          <div className="grid grid-cols-2 gap-3">
+            <div className="space-y-1">
+              <label className="text-xs text-gray-600">Price (BND)</label>
+              <Input value={price} onChange={(e) => setPrice(e.target.value)} placeholder="1.00" inputMode="decimal" data-testid="input-addon-price" />
+            </div>
+            <div className="space-y-1">
+              <label className="text-xs text-gray-600">Sort order</label>
+              <Input value={sortOrder} onChange={(e) => setSortOrder(e.target.value)} inputMode="numeric" data-testid="input-addon-sort" />
+            </div>
+          </div>
+          <label className="flex items-center gap-2 text-sm">
+            <input type="checkbox" checked={isActive} onChange={(e) => setIsActive(e.target.checked)} data-testid="input-addon-active" />
+            Active (shown in POS)
+          </label>
+          {err && <p className="text-sm text-red-600">{err}</p>}
+        </CardContent>
+        <div className="flex justify-end gap-2 px-6 pb-6">
+          <Button variant="outline" onClick={onClose} disabled={isPending}>Cancel</Button>
+          <Button onClick={submit} disabled={isPending} data-testid="button-addon-save">
+            {isPending ? "Saving…" : "Save"}
+          </Button>
+        </div>
       </Card>
     </div>
   );

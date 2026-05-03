@@ -1002,6 +1002,252 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
+  // ==========================================================================
+  // Phase 5c — Catalog management (Packages + Add-ons)
+  // Owner-only CRUD over the existing `packages` and `addons_catalog` tables.
+  // No schema change. Manager role intentionally NOT included — pricing
+  // changes are owner-only (reports/refunds remain manager-allowed).
+  //
+  // Deletion strategy: soft-delete (toggle is_active=false) is the safe
+  // path because every order snapshots the package_name + price_cents at
+  // the time of sale, so historical reports keep working even if a row
+  // disappears. We still allow hard delete via DELETE …?force=1 when no
+  // order has ever referenced the row, to keep the catalog tidy.
+  // ==========================================================================
+
+  // GET /api/admin/catalog/packages
+  app.get('/api/admin/catalog/packages', requireStaff, requireStaffRole('owner'), async (_req, res) => {
+    try {
+      const rows = (await db.execute(sql`
+        SELECT id, name, description, duration_minutes, price_cents, is_active, sort_order, created_at
+          FROM packages
+         ORDER BY is_active DESC, sort_order ASC, name ASC
+      `)).rows;
+      // Tag each row with whether it's safe to hard-delete.
+      const used = (await db.execute(sql`
+        SELECT package_id, COUNT(*)::int AS n
+          FROM orders
+         WHERE package_id IS NOT NULL
+         GROUP BY 1
+      `)).rows as Array<{ package_id: string; n: number }>;
+      const usage = new Map(used.map((u) => [u.package_id, u.n]));
+      res.json({
+        rows: rows.map((r: any) => ({ ...r, order_count: usage.get(r.id) ?? 0 })),
+      });
+    } catch (err) {
+      console.error('[admin.catalog.packages.list] failed:', err);
+      res.status(500).json({ error: 'list_failed' });
+    }
+  });
+
+  const packageBodySchema = z.object({
+    name: z.string().trim().min(1).max(120),
+    description: z.string().trim().max(500).nullable().optional(),
+    duration_minutes: z.number().int().min(1).max(600).nullable().optional(),
+    price_cents: z.number().int().min(0).max(1_000_00),
+    is_active: z.boolean().optional(),
+    sort_order: z.number().int().min(0).max(999).optional(),
+  });
+
+  // POST /api/admin/catalog/packages
+  app.post('/api/admin/catalog/packages', requireStaff, requireStaffRole('owner'), async (req, res) => {
+    const parsed = packageBodySchema.safeParse(req.body);
+    if (!parsed.success) {
+      return res.status(400).json({ error: 'invalid_body', details: parsed.error.flatten() });
+    }
+    const { name, description, duration_minutes, price_cents, is_active, sort_order } = parsed.data;
+    const id = `pkg_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 8)}`;
+    try {
+      const inserted = (await db.execute(sql`
+        INSERT INTO packages (id, name, description, duration_minutes, price_cents, is_active, sort_order)
+        VALUES (
+          ${id}, ${name}, ${description ?? null}, ${duration_minutes ?? null},
+          ${price_cents}, ${is_active ?? true}, ${sort_order ?? 0}
+        )
+        RETURNING id, name, description, duration_minutes, price_cents, is_active, sort_order, created_at
+      `)).rows[0];
+      res.json({ row: inserted });
+    } catch (err) {
+      console.error('[admin.catalog.packages.create] failed:', err);
+      res.status(500).json({ error: 'create_failed' });
+    }
+  });
+
+  // PATCH /api/admin/catalog/packages/:id
+  app.patch('/api/admin/catalog/packages/:id', requireStaff, requireStaffRole('owner'), async (req, res) => {
+    const id = String(req.params.id ?? '').trim();
+    if (!id) return res.status(400).json({ error: 'missing_id' });
+    const parsed = packageBodySchema.partial().safeParse(req.body);
+    if (!parsed.success) {
+      return res.status(400).json({ error: 'invalid_body', details: parsed.error.flatten() });
+    }
+    const p = parsed.data;
+    try {
+      const updated = (await db.execute(sql`
+        UPDATE packages
+           SET name             = COALESCE(${p.name             ?? null}, name),
+               description      = CASE WHEN ${p.description !== undefined} THEN ${p.description ?? null} ELSE description END,
+               duration_minutes = CASE WHEN ${p.duration_minutes !== undefined} THEN ${p.duration_minutes ?? null} ELSE duration_minutes END,
+               price_cents      = COALESCE(${p.price_cents      ?? null}, price_cents),
+               is_active        = COALESCE(${p.is_active        ?? null}, is_active),
+               sort_order       = COALESCE(${p.sort_order       ?? null}, sort_order)
+         WHERE id = ${id}
+         RETURNING id, name, description, duration_minutes, price_cents, is_active, sort_order, created_at
+      `)).rows[0];
+      if (!updated) return res.status(404).json({ error: 'not_found' });
+      res.json({ row: updated });
+    } catch (err) {
+      console.error('[admin.catalog.packages.update] failed:', err);
+      res.status(500).json({ error: 'update_failed' });
+    }
+  });
+
+  // DELETE /api/admin/catalog/packages/:id   (soft by default; ?force=1 hard-deletes if unused)
+  app.delete('/api/admin/catalog/packages/:id', requireStaff, requireStaffRole('owner'), async (req, res) => {
+    const id = String(req.params.id ?? '').trim();
+    const force = String(req.query.force ?? '') === '1';
+    if (!id) return res.status(400).json({ error: 'missing_id' });
+    try {
+      if (force) {
+        const used = (await db.execute(
+          sql`SELECT COUNT(*)::int AS n FROM orders WHERE package_id = ${id}`,
+        )).rows[0] as { n: number };
+        if (used.n > 0) {
+          return res.status(409).json({ error: 'in_use', order_count: used.n });
+        }
+        const deleted = (await db.execute(
+          sql`DELETE FROM packages WHERE id = ${id} RETURNING id`,
+        )).rows[0];
+        if (!deleted) return res.status(404).json({ error: 'not_found' });
+        return res.json({ ok: true, deleted: true });
+      }
+      const updated = (await db.execute(sql`
+        UPDATE packages SET is_active = false WHERE id = ${id}
+        RETURNING id, is_active
+      `)).rows[0];
+      if (!updated) return res.status(404).json({ error: 'not_found' });
+      res.json({ ok: true, deactivated: true });
+    } catch (err) {
+      console.error('[admin.catalog.packages.delete] failed:', err);
+      res.status(500).json({ error: 'delete_failed' });
+    }
+  });
+
+  // ---- Add-ons --------------------------------------------------------
+
+  const addonBodySchema = z.object({
+    name: z.string().trim().min(1).max(120),
+    price_cents: z.number().int().min(0).max(1_000_00),
+    is_active: z.boolean().optional(),
+    sort_order: z.number().int().min(0).max(999).optional(),
+  });
+
+  // GET /api/admin/catalog/addons
+  app.get('/api/admin/catalog/addons', requireStaff, requireStaffRole('owner'), async (_req, res) => {
+    try {
+      const rows = (await db.execute(sql`
+        SELECT id, name, price_cents, is_active, sort_order
+          FROM addons_catalog
+         ORDER BY is_active DESC, sort_order ASC, name ASC
+      `)).rows;
+      // Add-ons live inside orders.addons jsonb — count usage by id.
+      const used = (await db.execute(sql`
+        SELECT (a->>'id') AS addon_id, COUNT(*)::int AS n
+          FROM orders, jsonb_array_elements(COALESCE(addons,'[]'::jsonb)) a
+         WHERE (a->>'id') IS NOT NULL
+         GROUP BY 1
+      `)).rows as Array<{ addon_id: string; n: number }>;
+      const usage = new Map(used.map((u) => [u.addon_id, u.n]));
+      res.json({
+        rows: rows.map((r: any) => ({ ...r, order_count: usage.get(r.id) ?? 0 })),
+      });
+    } catch (err) {
+      console.error('[admin.catalog.addons.list] failed:', err);
+      res.status(500).json({ error: 'list_failed' });
+    }
+  });
+
+  // POST /api/admin/catalog/addons
+  app.post('/api/admin/catalog/addons', requireStaff, requireStaffRole('owner'), async (req, res) => {
+    const parsed = addonBodySchema.safeParse(req.body);
+    if (!parsed.success) {
+      return res.status(400).json({ error: 'invalid_body', details: parsed.error.flatten() });
+    }
+    const { name, price_cents, is_active, sort_order } = parsed.data;
+    const id = `addon_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 8)}`;
+    try {
+      const inserted = (await db.execute(sql`
+        INSERT INTO addons_catalog (id, name, price_cents, is_active, sort_order)
+        VALUES (${id}, ${name}, ${price_cents}, ${is_active ?? true}, ${sort_order ?? 0})
+        RETURNING id, name, price_cents, is_active, sort_order
+      `)).rows[0];
+      res.json({ row: inserted });
+    } catch (err) {
+      console.error('[admin.catalog.addons.create] failed:', err);
+      res.status(500).json({ error: 'create_failed' });
+    }
+  });
+
+  // PATCH /api/admin/catalog/addons/:id
+  app.patch('/api/admin/catalog/addons/:id', requireStaff, requireStaffRole('owner'), async (req, res) => {
+    const id = String(req.params.id ?? '').trim();
+    if (!id) return res.status(400).json({ error: 'missing_id' });
+    const parsed = addonBodySchema.partial().safeParse(req.body);
+    if (!parsed.success) {
+      return res.status(400).json({ error: 'invalid_body', details: parsed.error.flatten() });
+    }
+    const p = parsed.data;
+    try {
+      const updated = (await db.execute(sql`
+        UPDATE addons_catalog
+           SET name        = COALESCE(${p.name        ?? null}, name),
+               price_cents = COALESCE(${p.price_cents ?? null}, price_cents),
+               is_active   = COALESCE(${p.is_active   ?? null}, is_active),
+               sort_order  = COALESCE(${p.sort_order  ?? null}, sort_order)
+         WHERE id = ${id}
+         RETURNING id, name, price_cents, is_active, sort_order
+      `)).rows[0];
+      if (!updated) return res.status(404).json({ error: 'not_found' });
+      res.json({ row: updated });
+    } catch (err) {
+      console.error('[admin.catalog.addons.update] failed:', err);
+      res.status(500).json({ error: 'update_failed' });
+    }
+  });
+
+  // DELETE /api/admin/catalog/addons/:id   (soft by default; ?force=1 hard-deletes if unused)
+  app.delete('/api/admin/catalog/addons/:id', requireStaff, requireStaffRole('owner'), async (req, res) => {
+    const id = String(req.params.id ?? '').trim();
+    const force = String(req.query.force ?? '') === '1';
+    if (!id) return res.status(400).json({ error: 'missing_id' });
+    try {
+      if (force) {
+        const used = (await db.execute(sql`
+          SELECT COUNT(*)::int AS n
+            FROM orders, jsonb_array_elements(COALESCE(addons,'[]'::jsonb)) a
+           WHERE (a->>'id') = ${id}
+        `)).rows[0] as { n: number };
+        if (used.n > 0) {
+          return res.status(409).json({ error: 'in_use', order_count: used.n });
+        }
+        const deleted = (await db.execute(
+          sql`DELETE FROM addons_catalog WHERE id = ${id} RETURNING id`,
+        )).rows[0];
+        if (!deleted) return res.status(404).json({ error: 'not_found' });
+        return res.json({ ok: true, deleted: true });
+      }
+      const updated = (await db.execute(sql`
+        UPDATE addons_catalog SET is_active = false WHERE id = ${id}
+        RETURNING id, is_active
+      `)).rows[0];
+      if (!updated) return res.status(404).json({ error: 'not_found' });
+      res.json({ ok: true, deactivated: true });
+    } catch (err) {
+      console.error('[admin.catalog.addons.delete] failed:', err);
+      res.status(500).json({ error: 'delete_failed' });
+    }
+  });
+
   // Test Google API key endpoint
   app.get("/api/test-google-api", async (req, res) => {
     try {

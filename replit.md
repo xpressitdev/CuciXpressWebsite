@@ -311,6 +311,8 @@ Two auth systems coexist by design during the Week 1–Week 2 cutover:
    `await res.json()` so the success toast actually reads
    `data.order.ticket_code`.
 
+   **Phase 5c — Catalog management: Packages + Add-ons (no migration).** Owner-only CRUD endpoints over the existing `packages` and `addons_catalog` tables (`/api/admin/catalog/packages`, `/api/admin/catalog/addons`, both supporting list / create / update / soft-delete / `?force=1` hard-delete with in-use guard). Surfaced as a new Catalog tab with two stacked sections and inline edit dialogs. Each row shows live usage count (orders that reference the package_id, or that include the add-on in their snapshot jsonb), so the owner sees what is safe to hard-delete vs needs deactivation. Promo codes intentionally skipped this phase per owner direction. Tab strip widened to 7 columns on desktop. Non-owners see a read-only view with an amber banner.
+
    **Phase 5b — Payment Methods + Best Selling reports (no migration).** Two new admin endpoints — `GET /api/admin/reports/payment-methods` returns sales/refund/share by payment_method × qr_provider for the date range; `GET /api/admin/reports/best-selling` returns the top N (default 25, capped 100) package + addon line-items by quantity, with revenue and revenue-share. Each order contributes 1 package row plus one row per addon unwrapped from the `orders.addons` jsonb snapshot; package revenue = total minus addon snapshot prices so package + addons sum back to the order total. Both surfaced as new tabs (Payment Methods, Best Selling) alongside Dashboard and Order Report. Tab strip widened to 6 columns on desktop.
 
    **Phase 5a addendum — Power BI export.** New
