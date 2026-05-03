@@ -12,6 +12,7 @@
     "db:generate": "echo '🛑 BLOCKED: db:generate has been disabled. See MIGRATION_NOTES.md - we use raw SQL, not Drizzle migrations.' && exit 1"
   },
   "dependencies": {
+    "@google/genai": "^1.51.0",
     "@hookform/resolvers": "^3.10.0",
     "@jridgewell/trace-mapping": "^0.3.25",
     "@lucia-auth/adapter-drizzle": "^1.1.0",
