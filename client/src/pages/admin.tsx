@@ -217,8 +217,31 @@ export default function Admin() {
             </div>
           </div>
 
+          {/* Tab visibility by role:
+              - cashier:  Dashboard, Order Report, Payment Methods, Best Selling
+              - manager:  cashier set + Collaborations + Subscriptions
+              - owner:    everything (adds Catalog)
+              Endpoints are also gated server-side, this is just UX. */}
+          {(() => {
+            const role = staff?.role;
+            const isOwner = role === "owner";
+            const isManagerOrOwner = role === "owner" || role === "manager";
+            const visibleTabs = [
+              "dashboard",
+              "orders",
+              "payments",
+              "best-selling",
+              ...(isOwner ? ["catalog"] : []),
+              ...(isManagerOrOwner ? ["collaborations", "subscriptions"] : []),
+            ];
+            const colMd = visibleTabs.length;
+            const colSm = Math.min(4, colMd);
+            return (
           <Tabs defaultValue="dashboard" className="w-full">
-            <TabsList className="grid w-full grid-cols-2 sm:grid-cols-4 md:grid-cols-7">
+            <TabsList
+              className="grid w-full"
+              style={{ gridTemplateColumns: `repeat(${colSm}, minmax(0, 1fr))` }}
+            >
               <TabsTrigger value="dashboard" className="flex items-center gap-2" data-testid="tab-dashboard">
                 <BarChart3 className="w-4 h-4" />
                 Dashboard
@@ -235,23 +258,29 @@ export default function Admin() {
                 <TrendingUp className="w-4 h-4" />
                 Best Selling
               </TabsTrigger>
-              <TabsTrigger value="catalog" className="flex items-center gap-2" data-testid="tab-catalog">
-                <PackageIcon className="w-4 h-4" />
-                Catalog
-              </TabsTrigger>
-              <TabsTrigger value="collaborations" className="flex items-center gap-2">
-                <MessageSquare className="w-4 h-4" />
-                Collaborations
-                {unreadCount > 0 && (
-                  <Badge variant="destructive" className="ml-1 text-xs">
-                    {unreadCount}
-                  </Badge>
-                )}
-              </TabsTrigger>
-              <TabsTrigger value="subscriptions" className="flex items-center gap-2">
-                <Users className="w-4 h-4" />
-                Subscriptions ({signups.length})
-              </TabsTrigger>
+              {isOwner && (
+                <TabsTrigger value="catalog" className="flex items-center gap-2" data-testid="tab-catalog">
+                  <PackageIcon className="w-4 h-4" />
+                  Catalog
+                </TabsTrigger>
+              )}
+              {isManagerOrOwner && (
+                <TabsTrigger value="collaborations" className="flex items-center gap-2">
+                  <MessageSquare className="w-4 h-4" />
+                  Collaborations
+                  {unreadCount > 0 && (
+                    <Badge variant="destructive" className="ml-1 text-xs">
+                      {unreadCount}
+                    </Badge>
+                  )}
+                </TabsTrigger>
+              )}
+              {isManagerOrOwner && (
+                <TabsTrigger value="subscriptions" className="flex items-center gap-2">
+                  <Users className="w-4 h-4" />
+                  Subscriptions ({signups.length})
+                </TabsTrigger>
+              )}
             </TabsList>
 
             <TabsContent value="dashboard" className="mt-6">
@@ -270,10 +299,13 @@ export default function Admin() {
               <BestSellingTab />
             </TabsContent>
 
-            <TabsContent value="catalog" className="mt-6">
-              <CatalogTab isOwner={staff?.role === "owner"} />
-            </TabsContent>
+            {isOwner && (
+              <TabsContent value="catalog" className="mt-6">
+                <CatalogTab isOwner={true} />
+              </TabsContent>
+            )}
 
+            {isManagerOrOwner && (
             <TabsContent value="collaborations" className="mt-6">
               {submissions.length === 0 ? (
                 <Card>
@@ -425,7 +457,9 @@ export default function Admin() {
                 </div>
               )}
             </TabsContent>
+            )}
 
+            {isManagerOrOwner && (
             <TabsContent value="subscriptions" className="mt-6">
               {signups.length === 0 ? (
                 <Card>
@@ -477,7 +511,10 @@ export default function Admin() {
                 </div>
               )}
             </TabsContent>
+            )}
           </Tabs>
+            );
+          })()}
         </div>
       </main>
       <Footer />

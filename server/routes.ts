@@ -396,7 +396,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
   // GET /api/admin/dashboard?branch_id=N|all&date=YYYY-MM-DD
   // Returns 12 KPI tiles + 24-hour sales/refund breakdown.
-  app.get('/api/admin/dashboard', requireStaff, requireStaffRole('owner', 'manager'), async (req, res) => {
+  app.get('/api/admin/dashboard', requireStaff, requireStaffRole('owner', 'manager', 'cashier'), async (req, res) => {
     const branchParam = String(req.query.branch_id ?? 'all').trim();
     const branchId =
       branchParam === '' || branchParam === 'all' ? null : Number(branchParam);
@@ -502,7 +502,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
   //   &staff_id=text|all
   //   &search=ticket_code|plate|customer_name (>=2 chars)
   //   &page=1&per_page=50                (10..200)
-  app.get('/api/admin/reports/orders', requireStaff, requireStaffRole('owner', 'manager'), async (req, res) => {
+  app.get('/api/admin/reports/orders', requireStaff, requireStaffRole('owner', 'manager', 'cashier'), async (req, res) => {
     const branchParam = String(req.query.branch_id ?? 'all').trim();
     const branchId =
       branchParam === '' || branchParam === 'all' ? null : Number(branchParam);
@@ -632,7 +632,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
   // Receipt Date / Time are Excel serial numbers (Asia/Brunei wall clock)
   // for parity with the KedaiPOS export the user has been uploading.
   // Hard-capped at 100,000 rows per call.
-  app.get('/api/admin/reports/orders/export', requireStaff, requireStaffRole('owner', 'manager'), async (req, res) => {
+  app.get('/api/admin/reports/orders/export', requireStaff, requireStaffRole('owner', 'manager', 'cashier'), async (req, res) => {
     const branchParam = String(req.query.branch_id ?? 'all').trim();
     const branchId =
       branchParam === '' || branchParam === 'all' ? null : Number(branchParam);
@@ -824,7 +824,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
   // Same range/branch filters as the orders report. Aggregates orders by
   // payment_method (+ qr_provider for QR payments) so the owner can see
   // the cash/card/transfer/QR mix at a glance.
-  app.get('/api/admin/reports/payment-methods', requireStaff, requireStaffRole('owner', 'manager'), async (req, res) => {
+  app.get('/api/admin/reports/payment-methods', requireStaff, requireStaffRole('owner', 'manager', 'cashier'), async (req, res) => {
     const branchParam = String(req.query.branch_id ?? 'all').trim();
     const branchId =
       branchParam === '' || branchParam === 'all' ? null : Number(branchParam);
@@ -898,7 +898,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
   // price_cents}). Revenue for the package = total_cents minus the sum
   // of its addon snapshot prices (so package + addons sum back to the
   // order total). Returns the top N (default 25, capped at 100).
-  app.get('/api/admin/reports/best-selling', requireStaff, requireStaffRole('owner', 'manager'), async (req, res) => {
+  app.get('/api/admin/reports/best-selling', requireStaff, requireStaffRole('owner', 'manager', 'cashier'), async (req, res) => {
     const branchParam = String(req.query.branch_id ?? 'all').trim();
     const branchId =
       branchParam === '' || branchParam === 'all' ? null : Number(branchParam);
