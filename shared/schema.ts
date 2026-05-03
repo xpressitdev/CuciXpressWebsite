@@ -452,7 +452,37 @@ export const orders = pgTable("orders", {
   status: text("status").default("paid").notNull(),
   created_at: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
   completed_at: timestamp("completed_at", { withTimezone: true }),
+
+  // --- KedaiPOS sync columns (added 2026-05-03_02) -----------
+  // Mirror the fields KedaiPOS exports so historical backfill (Month 3)
+  // and live two-way sync land cleanly. All optional / default 0.
+  kedaipos_id: text("kedaipos_id"),                           // KedaiPOS internal "ID" (unique when present)
+  kedaipos_order_number: text("kedaipos_order_number"),       // e.g. "76-1000" (branch prefix + counter)
+  kedaipos_pos_name: text("kedaipos_pos_name"),               // e.g. "POS 1", "Default"
+  original_receipt_no: text("original_receipt_no"),           // for refund chains: links a refund row to the original receipt
+  customer_name_walkin: text("customer_name_walkin"),         // when a walk-in gives a name but isn't a registered user
+  qr_provider: text("qr_provider"),                           // when payment_method='qr_code': 'pocket_pay' | 'dst_easy' | etc.
+  service_charge_cents: integer("service_charge_cents").default(0).notNull(),
+  tax_cents: integer("tax_cents").default(0).notNull(),
+  discount_cents: integer("discount_cents").default(0).notNull(),
+  promo_discount_cents: integer("promo_discount_cents").default(0).notNull(),
+  paid_amount_cents: integer("paid_amount_cents"),            // what cashier accepted; >= total when tip given
+  change_cents: integer("change_cents").default(0).notNull(),
+  order_notes: text("order_notes"),                           // operational notes ("water pressure low", "tips $1")
+  item_notes: text("item_notes"),                             // car description ("Mini Cooper BAK9007")
 });
+
+// Allowed payment methods. Mirrors the orders.payment_method CHECK
+// constraint set in 2026-05-03_02_pos_sync_alignment.sql.
+export type PaymentMethod =
+  | "cash"
+  | "bank_transfer"
+  | "card"
+  | "qr_code"
+  | "baiduri_pay"
+  | "quick_pay"
+  | "subscription"
+  | "voucher";
 
 export const insertOrderSchema = createInsertSchema(orders).omit({
   created_at: true,

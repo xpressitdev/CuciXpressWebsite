@@ -177,6 +177,79 @@ Wait until tomorrow if you're unsure
 
 Append-only. Newest at the top.
 
+### 2026-05-03 — `migrations/manual/2026-05-03_02_pos_sync_alignment.sql`
+**Author:** agent (Week 2.2 plan execution)
+**Summary:** Aligns the schema with the real Cuci Xpress operation after
+analysing 129,185 rows of historical KedaiPOS exports
+(`attached_assets/Master_Data_Cuci_Xpress_Sales_(2)_*.xlsx`,
+2021-12-26 → 2026-04-30).
+
+Five owner-confirmed changes:
+
+1. **Packages — replaced placeholders with real menu.** The owner has
+   ONE package, "Basic Wash", at flat **BND 8.00** for every car size,
+   regardless of branch. The placeholder "Premium Wash" is dropped.
+   `pkg_basic` description and duration (10 min) refreshed.
+   `package_pricing` for `pkg_basic` now has 4 rows (one per
+   `vehicle_size`) all priced at 800 cents, `branch_id` NULL.
+2. **Addons — replaced placeholders with the real two:**
+   `addon_tire_shine` $1.00 and `addon_spray_wax` $3.00 (both active).
+   The 4 placeholders from `2026-05-03_01` (`addon_dashboard`,
+   `addon_vacuum`, `addon_engine_bay`) are kept in the table but
+   marked `is_active=false` so any historical order snapshot remains
+   valid while they no longer appear in the POS UI.
+   The combinations (Basic+Tire = $9, Basic+Wax = $11,
+   Basic+Tire+Wax = $12) match the three dominant historical price
+   points ($9 = 43%, $12 = 38%, $8 = 16%, total 97% of all transactions).
+3. **`orders.payment_method` CHECK broadened.** Old set:
+   `cash, card, qr, subscription, voucher`.
+   New set: `cash, bank_transfer, card, qr_code, baiduri_pay,
+   quick_pay, subscription, voucher`. `'qr'` rows (none in prod) are
+   migrated to `'qr_code'`. The umbrella `qr_code` covers any QR
+   provider; the specific provider goes in a new `qr_provider` text
+   column (`pocket_pay`, `dst_easy`, etc.).
+4. **14 new columns on `orders` for KedaiPOS sync:**
+   `kedaipos_id`, `kedaipos_order_number`, `kedaipos_pos_name`,
+   `original_receipt_no`, `customer_name_walkin`, `qr_provider`,
+   `service_charge_cents`, `tax_cents`, `discount_cents`,
+   `promo_discount_cents`, `paid_amount_cents`, `change_cents`,
+   `order_notes`, `item_notes`. All optional or default 0; non-negative
+   CHECK constraints added on every monetary column.
+   Three new indexes: `orders_kedaipos_id_uniq` (partial unique on
+   non-NULL), `orders_kedaipos_order_number_idx`,
+   `orders_original_receipt_no_idx` (both partial on non-NULL).
+5. **Pandan branch — explicitly NOT added.** Historical data shows
+   22,632 transactions tagged "Pandan Branch" (KedaiPOS prefix `90-`),
+   but the owner confirmed it is closed/planned-only. Will be added
+   later if/when it re-opens.
+
+**Status:** **APPLIED 2026-05-03** to staging Neon (`ep-curly-meadow`)
+via `tsx scripts/migrate-staging.ts`, then to production Neon
+(`ep-damp-frog`) via `psql -f`. Pre-apply prod backup saved at
+`.local/db_backups/prod_20260503T005936Z_pre_pos_sync_alignment.sql.gz`.
+
+**Verified post-apply (prod):**
+- `packages` → 1 row (`pkg_basic`, active).
+- `package_pricing` for `pkg_basic` → 4 rows, all 800 cents.
+- `addons_catalog` → 5 rows total, 2 active (tire_shine 100,
+  spray_wax 300), 3 inactive placeholders.
+- `orders_payment_method_check` constraint definition shows the new
+  8-element ARRAY.
+- `orders` has all 14 new columns (verified via
+  `information_schema.columns`).
+
+**`shared/schema.ts`:** Added the 14 new optional columns to the
+`orders` Drizzle table and exported a `PaymentMethod` string-literal
+union that mirrors the broadened CHECK.
+
+**Rollback:** Forward-only. To undo, write a new migration that:
+(a) drops the 14 columns + 3 indexes from `orders`, (b) restores the
+old `orders_payment_method_check` (after migrating any `qr_code`,
+`bank_transfer`, `baiduri_pay`, `quick_pay` rows back to allowed
+values), (c) restores `pkg_premium` + 4 placeholder pricing rows,
+(d) re-activates the 3 inactive addons. The pre-apply backup
+referenced above is the cleanest emergency restore path.
+
 ### 2026-05-03 — `migrations/manual/2026-05-03_01_packages_and_pricing.sql`
 **Author:** agent (Week 2.1 plan execution)
 **Summary:** Adds 2 new tables (`packages`, `package_pricing`) for the POS
