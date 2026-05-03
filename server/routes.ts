@@ -3075,6 +3075,20 @@ export async function registerRoutes(app: Express): Promise<Server> {
           chargedTotal = 0;
         }
 
+        // 6.5 Phase 8: tag the order with the cashier's open shift
+        // (best-effort — orders without an open shift still go through).
+        // Match must be both staff AND branch: a manager who opened a
+        // shift at branch A and is now ringing at branch B shouldn't
+        // pollute A's drawer reconciliation.
+        const shiftRows = (await tx.execute(sql`
+          SELECT id FROM cashier_shifts
+           WHERE opened_by_staff_id = ${staffId}
+             AND branch_id = ${effectiveBranchId}
+             AND status = 'open'
+           LIMIT 1
+        `)).rows as Array<{ id: number }>;
+        const shiftIdForOrder: number | null = shiftRows[0]?.id ?? null;
+
         // 7. Insert order.
         const orderId = `ord_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 8)}`;
         await tx.execute(sql`
@@ -3085,7 +3099,8 @@ export async function registerRoutes(app: Express): Promise<Server> {
             payment_method, payment_ref,
             ticket_code, status,
             order_notes, item_notes,
-            vehicle_id, customer_name_walkin
+            vehicle_id, customer_name_walkin,
+            shift_id
           ) VALUES (
             ${orderId}, ${effectiveBranchId}, ${staffId}, ${plateUpper},
             ${pkg.id}, ${pkg.name}, ${pkg.price_cents},
@@ -3093,7 +3108,8 @@ export async function registerRoutes(app: Express): Promise<Server> {
             ${body.payment_method}, ${body.payment_ref ?? null},
             ${ticketCode}, 'paid',
             ${body.order_notes ?? null}, ${body.item_notes ?? null},
-            ${resolvedVehicleId}, ${walkinName}
+            ${resolvedVehicleId}, ${walkinName},
+            ${shiftIdForOrder}
           )
         `);
 
@@ -3266,6 +3282,278 @@ export async function registerRoutes(app: Express): Promise<Server> {
     } catch (err) {
       console.error('[pos.orders.today] failed:', err);
       res.status(500).json({ error: 'Failed to load today\'s orders' });
+    }
+  });
+
+  // ==========================================================================
+  // POS — Cashier shifts (Phase 8, 2026-05-04_09)
+  //
+  // Each cashier opens a shift with a declared cash float, takes orders,
+  // and closes the shift with a counted-cash declaration. Variance =
+  // counted - expected, where expected = float + cash_sales - cash_refunds.
+  //
+  // - One open shift per staff (DB-enforced via partial unique index).
+  // - Orders auto-tag to the open shift in POST /api/pos/orders.
+  // - Owner/manager can review all shifts under /admin -> Shifts tab.
+  // ==========================================================================
+
+  // Aggregate the totals for a given shift_id. Returns sales, refunds,
+  // expected cash, and a per-payment-method breakdown. Reused by both
+  // the running view (shift open) and the close screen (shift opening).
+  async function computeShiftTotals(
+    runner: typeof db | Parameters<Parameters<typeof db.transaction>[0]>[0],
+    shiftId: number,
+    openingFloatCents: number,
+  ) {
+    const rows = (await runner.execute(sql`
+      SELECT payment_method,
+             COALESCE(SUM(CASE WHEN status <> 'refunded' THEN total_cents ELSE 0 END), 0)::int AS sales_cents,
+             COALESCE(SUM(CASE WHEN status <> 'refunded' THEN 1 ELSE 0 END), 0)::int          AS sales_count,
+             COALESCE(SUM(CASE WHEN status =  'refunded' THEN total_cents ELSE 0 END), 0)::int AS refund_cents,
+             COALESCE(SUM(CASE WHEN status =  'refunded' THEN 1 ELSE 0 END), 0)::int          AS refund_count
+        FROM orders
+       WHERE shift_id = ${shiftId}
+       GROUP BY payment_method
+       ORDER BY payment_method
+    `)).rows as Array<{
+      payment_method: string;
+      sales_cents: number; sales_count: number;
+      refund_cents: number; refund_count: number;
+    }>;
+    let salesCents = 0, salesCount = 0, refundCents = 0, refundCount = 0;
+    let cashSales = 0, cashRefunds = 0;
+    for (const r of rows) {
+      salesCents += r.sales_cents;
+      salesCount += r.sales_count;
+      refundCents += r.refund_cents;
+      refundCount += r.refund_count;
+      if (r.payment_method === 'cash') {
+        cashSales = r.sales_cents;
+        cashRefunds = r.refund_cents;
+      }
+    }
+    return {
+      breakdown: rows,
+      sales_cents: salesCents,
+      sales_count: salesCount,
+      refund_cents: refundCents,
+      refund_count: refundCount,
+      net_sales_cents: salesCents - refundCents,
+      cash_sales_cents: cashSales,
+      cash_refund_cents: cashRefunds,
+      expected_cash_cents: openingFloatCents + cashSales - cashRefunds,
+    };
+  }
+
+  // POST /api/pos/shifts/open
+  // Cashier opens a drawer with a starting cash float. Server enforces
+  // "one open shift per staff" via the partial unique index — concurrent
+  // opens fail with 23505 and we surface a friendly 409.
+  app.post('/api/pos/shifts/open', requireStaff, async (req, res) => {
+    const schema = z.object({
+      branch_id: z.number().int().positive(),
+      opening_float_cents: z.number().int().min(0).max(10_000_00),
+      opening_note: z.string().trim().max(500).optional().nullable(),
+    });
+    const parsed = schema.safeParse(req.body);
+    if (!parsed.success) {
+      return res.status(400).json({ error: 'invalid_request', details: parsed.error.flatten() });
+    }
+    const body = parsed.data;
+    const staffUser = req.staff!.user as any;
+    const staffId = staffUser.id as string;
+    const staffRole = staffUser.role as 'owner' | 'manager' | 'lane' | 'cashier';
+    const staffBranchId = staffUser.branchId as number | null;
+
+    // Lane/cashier locked to their own branch (mirrors POST /api/pos/orders).
+    let effectiveBranchId: number;
+    if (staffRole === 'owner' || staffRole === 'manager') {
+      if (![1,2,3,4,5].includes(body.branch_id)) {
+        return res.status(400).json({ error: 'invalid_branch' });
+      }
+      effectiveBranchId = body.branch_id;
+    } else {
+      if (staffBranchId == null) return res.status(400).json({ error: 'staff_no_branch' });
+      effectiveBranchId = staffBranchId;
+    }
+
+    try {
+      const ins = (await db.execute(sql`
+        INSERT INTO cashier_shifts (
+          branch_id, opened_by_staff_id, opening_float_cents, opening_note
+        ) VALUES (
+          ${effectiveBranchId}, ${staffId}, ${body.opening_float_cents},
+          ${body.opening_note?.trim() || null}
+        )
+        RETURNING id, branch_id, opened_by_staff_id, opening_float_cents,
+                  opening_note, status, opened_at
+      `)).rows[0] as any;
+      res.status(201).json({ ok: true, shift: ins });
+    } catch (err: any) {
+      if (err?.code === '23505') {
+        return res.status(409).json({ error: 'shift_already_open' });
+      }
+      console.error('[pos.shifts.open] failed:', err);
+      res.status(500).json({ error: 'open_failed' });
+    }
+  });
+
+  // GET /api/pos/shifts/current
+  // Returns the staff's currently open shift (if any) plus running
+  // totals so the cashier can see expected cash live.
+  app.get('/api/pos/shifts/current', requireStaff, async (req, res) => {
+    const staffUser = req.staff!.user as any;
+    const staffId = staffUser.id as string;
+    try {
+      const rows = (await db.execute(sql`
+        SELECT id, branch_id, opened_by_staff_id, opening_float_cents,
+               opening_note, status, opened_at
+          FROM cashier_shifts
+         WHERE opened_by_staff_id = ${staffId} AND status = 'open'
+         LIMIT 1
+      `)).rows as Array<{
+        id: number; branch_id: number; opened_by_staff_id: string;
+        opening_float_cents: number; opening_note: string | null;
+        status: string; opened_at: string;
+      }>;
+      if (rows.length === 0) {
+        return res.json({ shift: null });
+      }
+      const shift = rows[0];
+      const totals = await computeShiftTotals(db, shift.id, shift.opening_float_cents);
+      res.json({ shift, totals });
+    } catch (err) {
+      console.error('[pos.shifts.current] failed:', err);
+      res.status(500).json({ error: 'current_failed' });
+    }
+  });
+
+  // POST /api/pos/shifts/close
+  // Closes the staff's open shift. Computes expected_cash from orders
+  // tagged with this shift (cash sales - cash refunds + opening float),
+  // computes variance = counted - expected, persists everything for
+  // audit, returns the close summary.
+  app.post('/api/pos/shifts/close', requireStaff, async (req, res) => {
+    const schema = z.object({
+      counted_cents: z.number().int().min(0).max(100_000_00),
+      closing_note: z.string().trim().max(500).optional().nullable(),
+    });
+    const parsed = schema.safeParse(req.body);
+    if (!parsed.success) {
+      return res.status(400).json({ error: 'invalid_request', details: parsed.error.flatten() });
+    }
+    const body = parsed.data;
+    const staffUser = req.staff!.user as any;
+    const staffId = staffUser.id as string;
+
+    try {
+      const result = await db.transaction(async (tx) => {
+        const rows = (await tx.execute(sql`
+          SELECT id, opening_float_cents
+            FROM cashier_shifts
+           WHERE opened_by_staff_id = ${staffId} AND status = 'open'
+           FOR UPDATE
+        `)).rows as Array<{ id: number; opening_float_cents: number }>;
+        if (rows.length === 0) {
+          throw Object.assign(new Error('no_open_shift'), { httpStatus: 404 });
+        }
+        const shift = rows[0];
+        const totals = await computeShiftTotals(tx, shift.id, shift.opening_float_cents);
+        const expected = totals.expected_cash_cents;
+        const variance = body.counted_cents - expected;
+
+        const upd = (await tx.execute(sql`
+          UPDATE cashier_shifts
+             SET status                 = 'closed',
+                 closed_at              = now(),
+                 closed_by_staff_id     = ${staffId},
+                 closing_counted_cents  = ${body.counted_cents},
+                 closing_expected_cents = ${expected},
+                 closing_variance_cents = ${variance},
+                 closing_note           = ${body.closing_note?.trim() || null}
+           WHERE id = ${shift.id}
+       RETURNING id, branch_id, opened_by_staff_id, closed_by_staff_id,
+                 opening_float_cents, opening_note,
+                 closing_counted_cents, closing_expected_cents,
+                 closing_variance_cents, closing_note,
+                 status, opened_at, closed_at
+        `)).rows[0];
+        return { shift: upd, totals };
+      });
+      res.json({ ok: true, ...result });
+    } catch (err: any) {
+      const status = err?.httpStatus ?? 500;
+      const code = err?.message ?? 'close_failed';
+      if (status === 500) console.error('[pos.shifts.close] failed:', err);
+      res.status(status).json({ error: code });
+    }
+  });
+
+  // GET /api/admin/shifts?branch_id=&staff_id=&from=&to=&status=
+  // Owner/manager view of all shifts. Filters are optional.
+  app.get('/api/admin/shifts', requireStaff, requireStaffRole('owner', 'manager'), async (req, res) => {
+    const branchId = req.query.branch_id ? Number(req.query.branch_id) : null;
+    const staffIdFilter = req.query.staff_id ? String(req.query.staff_id) : null;
+    const status = req.query.status ? String(req.query.status) : null;
+    const from = req.query.from ? String(req.query.from) : null;
+    const to = req.query.to ? String(req.query.to) : null;
+    try {
+      const rows = (await db.execute(sql`
+        SELECT cs.id, cs.branch_id, b.name AS branch_name,
+               cs.opened_by_staff_id, s_open.name AS opened_by_name,
+               cs.closed_by_staff_id, s_close.name AS closed_by_name,
+               cs.opening_float_cents, cs.opening_note,
+               cs.closing_counted_cents, cs.closing_expected_cents,
+               cs.closing_variance_cents, cs.closing_note,
+               cs.status, cs.opened_at, cs.closed_at
+          FROM cashier_shifts cs
+          JOIN branches b           ON b.id = cs.branch_id
+          JOIN staff   s_open       ON s_open.id = cs.opened_by_staff_id
+          LEFT JOIN staff s_close   ON s_close.id = cs.closed_by_staff_id
+         WHERE (${branchId}::int IS NULL OR cs.branch_id = ${branchId}::int)
+           AND (${staffIdFilter}::text IS NULL OR cs.opened_by_staff_id = ${staffIdFilter}::text)
+           AND (${status}::text IS NULL OR cs.status = ${status}::text)
+           AND (${from}::date IS NULL OR cs.opened_at >= (${from}::date))
+           AND (${to}::date   IS NULL OR cs.opened_at <  ((${to}::date) + INTERVAL '1 day'))
+         ORDER BY cs.opened_at DESC
+         LIMIT 200
+      `)).rows;
+      res.json({ shifts: rows });
+    } catch (err) {
+      console.error('[admin.shifts] failed:', err);
+      res.status(500).json({ error: 'list_failed' });
+    }
+  });
+
+  // GET /api/admin/shifts/:id — detail view including totals breakdown.
+  app.get('/api/admin/shifts/:id', requireStaff, requireStaffRole('owner', 'manager'), async (req, res) => {
+    const id = Number(req.params.id);
+    if (!Number.isFinite(id) || id <= 0) {
+      return res.status(400).json({ error: 'invalid_id' });
+    }
+    try {
+      const rows = (await db.execute(sql`
+        SELECT cs.id, cs.branch_id, b.name AS branch_name,
+               cs.opened_by_staff_id, s_open.name AS opened_by_name,
+               cs.closed_by_staff_id, s_close.name AS closed_by_name,
+               cs.opening_float_cents, cs.opening_note,
+               cs.closing_counted_cents, cs.closing_expected_cents,
+               cs.closing_variance_cents, cs.closing_note,
+               cs.status, cs.opened_at, cs.closed_at
+          FROM cashier_shifts cs
+          JOIN branches b           ON b.id = cs.branch_id
+          JOIN staff   s_open       ON s_open.id = cs.opened_by_staff_id
+          LEFT JOIN staff s_close   ON s_close.id = cs.closed_by_staff_id
+         WHERE cs.id = ${id}
+         LIMIT 1
+      `)).rows as any[];
+      if (rows.length === 0) return res.status(404).json({ error: 'not_found' });
+      const shift = rows[0];
+      const totals = await computeShiftTotals(db, shift.id, shift.opening_float_cents);
+      res.json({ shift, totals });
+    } catch (err) {
+      console.error('[admin.shifts.detail] failed:', err);
+      res.status(500).json({ error: 'detail_failed' });
     }
   });
 

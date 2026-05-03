@@ -47,6 +47,8 @@ import {
   Pencil,
   Trash2,
   X,
+  Clock,
+  AlertTriangle,
 } from "lucide-react";
 import { Link } from "wouter";
 import { motion } from "framer-motion";
@@ -234,7 +236,7 @@ export default function Admin() {
               "payments",
               "best-selling",
               ...(isOwner ? ["catalog"] : []),
-              ...(isManagerOrOwner ? ["collaborations", "subscriptions"] : []),
+              ...(isManagerOrOwner ? ["shifts", "collaborations", "subscriptions"] : []),
             ];
             const colMd = visibleTabs.length;
             const colSm = Math.min(4, colMd);
@@ -267,6 +269,12 @@ export default function Admin() {
                 <TabsTrigger value="catalog" className="flex items-center gap-2" data-testid="tab-catalog">
                   <PackageIcon className="w-4 h-4" />
                   Catalog
+                </TabsTrigger>
+              )}
+              {isManagerOrOwner && (
+                <TabsTrigger value="shifts" className="flex items-center gap-2" data-testid="tab-shifts">
+                  <Clock className="w-4 h-4" />
+                  Shifts
                 </TabsTrigger>
               )}
               {isManagerOrOwner && (
@@ -308,6 +316,12 @@ export default function Admin() {
               <TabsContent value="catalog" className="mt-6">
                 <CatalogTab isOwner={true} />
               </TabsContent>
+            )}
+
+            {isManagerOrOwner && (
+            <TabsContent value="shifts" className="mt-6">
+              <ShiftsTab />
+            </TabsContent>
             )}
 
             {isManagerOrOwner && (
@@ -2017,6 +2031,337 @@ function AddonEditDialog({
           </Button>
         </div>
       </Card>
+    </div>
+  );
+}
+
+// ============================================================
+// Shifts tab — Phase 8 (manager + owner only).
+//
+// Lists cashier shifts with filters (status / branch / date range)
+// and a click-through detail panel showing the full per-payment
+// breakdown and any over/short variance. Server endpoints:
+//
+//   GET /api/admin/shifts
+//   GET /api/admin/shifts/:id
+// ============================================================
+
+const PAYMENT_LABEL: Record<string, string> = {
+  cash: "Cash",
+  bank_transfer: "Bank Transfer",
+  card: "Card",
+  qr_code: "QR Code",
+  baiduri_pay: "Baiduri Pay",
+  quick_pay: "Quick Pay",
+  subscription: "Subscription",
+  voucher: "Voucher",
+};
+
+interface ShiftListRow {
+  id: number;
+  branch_id: number;
+  branch_name: string;
+  opened_by_staff_id: string;
+  opened_by_name: string;
+  closed_by_staff_id: string | null;
+  closed_by_name: string | null;
+  opening_float_cents: number;
+  opening_note: string | null;
+  closing_counted_cents: number | null;
+  closing_expected_cents: number | null;
+  closing_variance_cents: number | null;
+  closing_note: string | null;
+  status: "open" | "closed";
+  opened_at: string;
+  closed_at: string | null;
+}
+
+interface ShiftDetailResp {
+  shift: ShiftListRow;
+  totals: {
+    breakdown: Array<{
+      payment_method: string;
+      sales_cents: number; sales_count: number;
+      refund_cents: number; refund_count: number;
+    }>;
+    sales_cents: number;
+    sales_count: number;
+    refund_cents: number;
+    refund_count: number;
+    net_sales_cents: number;
+    cash_sales_cents: number;
+    cash_refund_cents: number;
+    expected_cash_cents: number;
+  };
+}
+
+function formatDateTime(iso: string | null): string {
+  if (!iso) return "—";
+  return new Date(iso).toLocaleString("en-GB", {
+    day: "2-digit", month: "short",
+    hour: "2-digit", minute: "2-digit",
+    timeZone: "Asia/Brunei",
+  });
+}
+
+function ShiftsTab() {
+  const [statusFilter, setStatusFilter] = useState<string>("all");
+  const [branchFilter, setBranchFilter] = useState<string>("all");
+  const [from, setFrom] = useState<string>("");
+  const [to, setTo] = useState<string>("");
+  const [selectedId, setSelectedId] = useState<number | null>(null);
+
+  const queryParams = new URLSearchParams();
+  if (statusFilter !== "all") queryParams.set("status", statusFilter);
+  if (branchFilter !== "all") queryParams.set("branch_id", branchFilter);
+  if (from) queryParams.set("from", from);
+  if (to) queryParams.set("to", to);
+  const qs = queryParams.toString();
+  const listUrl = qs ? `/api/admin/shifts?${qs}` : "/api/admin/shifts";
+
+  const { data, isLoading, error } = useQuery<{ shifts: ShiftListRow[] }>({
+    queryKey: ["/api/admin/shifts", statusFilter, branchFilter, from, to],
+    queryFn: async () => {
+      const res = await fetch(listUrl, { credentials: "include" });
+      if (!res.ok) throw new Error("list_failed");
+      return res.json();
+    },
+  });
+
+  const { data: detail, isLoading: detailLoading } = useQuery<ShiftDetailResp>({
+    queryKey: ["/api/admin/shifts", selectedId],
+    enabled: selectedId !== null,
+    queryFn: async () => {
+      const res = await fetch(`/api/admin/shifts/${selectedId}`, { credentials: "include" });
+      if (!res.ok) throw new Error("detail_failed");
+      return res.json();
+    },
+  });
+
+  const shifts = data?.shifts ?? [];
+
+  return (
+    <div className="grid lg:grid-cols-3 gap-6">
+      {/* ---- Left: list + filters ----------------------------------- */}
+      <div className="lg:col-span-2 space-y-4">
+        <Card className="cuci-card border-2 border-black">
+          <CardHeader>
+            <div className="cuci-eyebrow">Drawer reconciliation</div>
+            <CardTitle className="text-2xl font-extrabold tracking-tight">
+              Cashier <span className="text-cuci-primary">shifts</span>
+            </CardTitle>
+            <p className="text-sm text-gray-600">
+              Review opening floats, sales by payment method, and any over/short
+              variance at close.
+            </p>
+          </CardHeader>
+          <CardContent className="space-y-4">
+            <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+              <div>
+                <label className="text-xs font-semibold text-gray-700 mb-1 block">Status</label>
+                <Select value={statusFilter} onValueChange={setStatusFilter}>
+                  <SelectTrigger data-testid="select-shift-status"><SelectValue /></SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="all">All</SelectItem>
+                    <SelectItem value="open">Open</SelectItem>
+                    <SelectItem value="closed">Closed</SelectItem>
+                  </SelectContent>
+                </Select>
+              </div>
+              <div>
+                <label className="text-xs font-semibold text-gray-700 mb-1 block">Branch</label>
+                <Select value={branchFilter} onValueChange={setBranchFilter}>
+                  <SelectTrigger data-testid="select-shift-branch"><SelectValue /></SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="all">All branches</SelectItem>
+                    <SelectItem value="1">Bandar</SelectItem>
+                    <SelectItem value="2">Gadong</SelectItem>
+                    <SelectItem value="3">Kiulap</SelectItem>
+                    <SelectItem value="4">Tutong</SelectItem>
+                    <SelectItem value="5">KB</SelectItem>
+                  </SelectContent>
+                </Select>
+              </div>
+              <div>
+                <label className="text-xs font-semibold text-gray-700 mb-1 block">From</label>
+                <Input type="date" value={from} onChange={(e) => setFrom(e.target.value)} data-testid="input-shift-from" />
+              </div>
+              <div>
+                <label className="text-xs font-semibold text-gray-700 mb-1 block">To</label>
+                <Input type="date" value={to} onChange={(e) => setTo(e.target.value)} data-testid="input-shift-to" />
+              </div>
+            </div>
+
+            {error && (
+              <p className="text-sm text-red-600">Failed to load shifts.</p>
+            )}
+            {isLoading ? (
+              <p className="text-sm text-gray-500">Loading…</p>
+            ) : shifts.length === 0 ? (
+              <p className="text-sm text-gray-500 italic py-6 text-center">
+                No shifts match these filters.
+              </p>
+            ) : (
+              <div className="border-2 border-black rounded-md overflow-x-auto">
+                <Table>
+                  <TableHeader>
+                    <TableRow>
+                      <TableHead>Cashier</TableHead>
+                      <TableHead>Branch</TableHead>
+                      <TableHead>Opened</TableHead>
+                      <TableHead>Status</TableHead>
+                      <TableHead className="text-right">Float</TableHead>
+                      <TableHead className="text-right">Variance</TableHead>
+                      <TableHead></TableHead>
+                    </TableRow>
+                  </TableHeader>
+                  <TableBody>
+                    {shifts.map((s) => {
+                      const v = s.closing_variance_cents;
+                      return (
+                        <TableRow
+                          key={s.id}
+                          className={`cursor-pointer ${selectedId === s.id ? "bg-cuci-primary/5" : ""}`}
+                          onClick={() => setSelectedId(s.id)}
+                          data-testid={`row-shift-${s.id}`}
+                        >
+                          <TableCell className="font-semibold">{s.opened_by_name}</TableCell>
+                          <TableCell>{s.branch_name}</TableCell>
+                          <TableCell className="text-xs text-gray-600">{formatDateTime(s.opened_at)}</TableCell>
+                          <TableCell>
+                            {s.status === "open" ? (
+                              <Badge className="bg-green-600 text-white">Open</Badge>
+                            ) : (
+                              <Badge variant="outline">Closed</Badge>
+                            )}
+                          </TableCell>
+                          <TableCell className="text-right tabular-nums">
+                            {formatBND(s.opening_float_cents)}
+                          </TableCell>
+                          <TableCell className="text-right tabular-nums">
+                            {v === null ? (
+                              <span className="text-gray-400">—</span>
+                            ) : v === 0 ? (
+                              <span className="text-green-700 font-semibold">B$0.00</span>
+                            ) : (
+                              <span className="text-red-700 font-semibold inline-flex items-center gap-1 justify-end">
+                                <AlertTriangle className="w-3.5 h-3.5" />
+                                {v > 0 ? `+${formatBND(v)}` : `−${formatBND(-v)}`}
+                              </span>
+                            )}
+                          </TableCell>
+                          <TableCell>
+                            <Eye className="w-4 h-4 text-gray-400" />
+                          </TableCell>
+                        </TableRow>
+                      );
+                    })}
+                  </TableBody>
+                </Table>
+              </div>
+            )}
+          </CardContent>
+        </Card>
+      </div>
+
+      {/* ---- Right: detail panel ------------------------------------ */}
+      <div className="lg:col-span-1">
+        <Card className="cuci-card border-2 border-black sticky top-6">
+          <CardHeader>
+            <CardTitle className="text-lg">Shift detail</CardTitle>
+          </CardHeader>
+          <CardContent className="space-y-3 text-sm">
+            {selectedId === null ? (
+              <p className="text-gray-500 italic py-4 text-center">Click a shift to view its breakdown.</p>
+            ) : detailLoading || !detail ? (
+              <p className="text-gray-500">Loading…</p>
+            ) : (
+              <>
+                <div className="space-y-1">
+                  <div className="flex justify-between"><span className="text-gray-600">Cashier</span><span className="font-semibold">{detail.shift.opened_by_name}</span></div>
+                  <div className="flex justify-between"><span className="text-gray-600">Branch</span><span className="font-semibold">{detail.shift.branch_name}</span></div>
+                  <div className="flex justify-between"><span className="text-gray-600">Opened</span><span>{formatDateTime(detail.shift.opened_at)}</span></div>
+                  <div className="flex justify-between"><span className="text-gray-600">Closed</span><span>{formatDateTime(detail.shift.closed_at)}</span></div>
+                  {detail.shift.closed_by_name && (
+                    <div className="flex justify-between"><span className="text-gray-600">Closed by</span><span>{detail.shift.closed_by_name}</span></div>
+                  )}
+                </div>
+
+                <Separator />
+
+                <div className="space-y-1">
+                  <div className="cuci-eyebrow">Sales by method</div>
+                  {detail.totals.breakdown.length === 0 ? (
+                    <p className="text-gray-500 italic">No orders.</p>
+                  ) : (
+                    detail.totals.breakdown.map((r) => (
+                      <div key={r.payment_method} className="flex justify-between">
+                        <span>{PAYMENT_LABEL[r.payment_method] ?? r.payment_method}</span>
+                        <span className="tabular-nums">
+                          {formatBND(r.sales_cents - r.refund_cents)}
+                          {r.refund_count > 0 && (
+                            <span className="text-xs text-red-600 ml-1">(−{formatBND(r.refund_cents)})</span>
+                          )}
+                        </span>
+                      </div>
+                    ))
+                  )}
+                  <div className="flex justify-between font-bold border-t border-gray-200 pt-1 mt-1">
+                    <span>Net sales</span>
+                    <span className="tabular-nums">{formatBND(detail.totals.net_sales_cents)}</span>
+                  </div>
+                </div>
+
+                <Separator />
+
+                <div className="space-y-1 bg-gradient-to-br from-purple-50 to-orange-50 border-2 border-black rounded-md p-2">
+                  <div className="flex justify-between"><span>Opening float</span><span className="tabular-nums">{formatBND(detail.shift.opening_float_cents)}</span></div>
+                  <div className="flex justify-between"><span>+ Cash sales</span><span className="tabular-nums">{formatBND(detail.totals.cash_sales_cents)}</span></div>
+                  <div className="flex justify-between"><span>− Cash refunds</span><span className="tabular-nums">{formatBND(detail.totals.cash_refund_cents)}</span></div>
+                  <div className="flex justify-between border-t-2 border-black pt-1 mt-1 font-bold"><span>Expected cash</span><span className="tabular-nums">{formatBND(detail.totals.expected_cash_cents)}</span></div>
+                  {detail.shift.closing_counted_cents !== null && (
+                    <>
+                      <div className="flex justify-between"><span>Counted cash</span><span className="tabular-nums font-semibold">{formatBND(detail.shift.closing_counted_cents)}</span></div>
+                      <div className={`flex justify-between font-bold pt-1 border-t-2 border-black ${
+                        detail.shift.closing_variance_cents === 0 ? "text-green-700" : "text-red-700"
+                      }`}>
+                        <span>Variance</span>
+                        <span className="tabular-nums">
+                          {detail.shift.closing_variance_cents === 0
+                            ? "B$0.00"
+                            : detail.shift.closing_variance_cents! > 0
+                              ? `+${formatBND(detail.shift.closing_variance_cents!)}`
+                              : `−${formatBND(-detail.shift.closing_variance_cents!)}`}
+                        </span>
+                      </div>
+                    </>
+                  )}
+                </div>
+
+                {(detail.shift.opening_note || detail.shift.closing_note) && (
+                  <>
+                    <Separator />
+                    <div className="space-y-2">
+                      {detail.shift.opening_note && (
+                        <div>
+                          <div className="cuci-eyebrow">Opening note</div>
+                          <p className="text-sm text-gray-700 whitespace-pre-wrap">{detail.shift.opening_note}</p>
+                        </div>
+                      )}
+                      {detail.shift.closing_note && (
+                        <div>
+                          <div className="cuci-eyebrow">Closing note</div>
+                          <p className="text-sm text-gray-700 whitespace-pre-wrap">{detail.shift.closing_note}</p>
+                        </div>
+                      )}
+                    </div>
+                  </>
+                )}
+              </>
+            )}
+          </CardContent>
+        </Card>
+      </div>
     </div>
   );
 }

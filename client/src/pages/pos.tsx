@@ -45,6 +45,7 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import AdminLogin from "@/components/AdminLogin";
+import ShiftBar from "@/components/ShiftBar";
 import { useStaffAuth } from "@/hooks/useStaffAuth";
 import { useToast } from "@/hooks/use-toast";
 import { apiRequest } from "@/lib/queryClient";
@@ -827,6 +828,15 @@ export default function POS() {
                   )}
                 </div>
               )}
+              {/* Phase 8: shift open/close pill. Self-contained widget;
+                  shows "Open shift" CTA when no drawer is open, or a
+                  green "Shift open · float · Xh" pill that opens the
+                  close-shift modal. Disabled until a branch is picked. */}
+              <ShiftBar
+                branchId={branchId}
+                branchName={branchId !== null ? BRANCH_NAME_BY_ID[branchId] ?? null : null}
+                enabled={isAuthenticated}
+              />
               {/* End-of-Day shortcut: deep-links to /admin where the cashier
                   can pull the dashboard, payment-method breakdown, and Excel
                   export. Same staff session, no second login. */}
@@ -836,7 +846,7 @@ export default function POS() {
                   data-testid="button-pos-eod-report"
                 >
                   <BarChart3 className="w-4 h-4" />
-                  End-of-Day
+                  Reports
                 </button>
               </Link>
               <button

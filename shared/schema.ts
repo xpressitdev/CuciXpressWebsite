@@ -564,3 +564,37 @@ export const insertMembershipRedemptionSchema = createInsertSchema(membershipRed
 });
 export type MembershipRedemption = typeof membershipRedemptions.$inferSelect;
 export type InsertMembershipRedemption = z.infer<typeof insertMembershipRedemptionSchema>;
+
+// --- Cashier shifts (Phase 8) -------------------------------
+// One open shift per staff at a time (enforced by partial unique
+// index on opened_by_staff_id WHERE status='open'). The shift
+// captures the cash float at open, the counted cash + computed
+// expected + variance at close. Migration: 2026-05-04_09.
+export const cashierShifts = pgTable("cashier_shifts", {
+  id: bigserial("id", { mode: "number" }).primaryKey(),
+  branch_id: integer("branch_id").references(() => branches.id).notNull(),
+  opened_by_staff_id: text("opened_by_staff_id").references(() => staff.id).notNull(),
+  closed_by_staff_id: text("closed_by_staff_id").references(() => staff.id),
+  opening_float_cents: integer("opening_float_cents").notNull(),
+  closing_counted_cents: integer("closing_counted_cents"),
+  closing_expected_cents: integer("closing_expected_cents"),
+  closing_variance_cents: integer("closing_variance_cents"),
+  opening_note: text("opening_note"),
+  closing_note: text("closing_note"),
+  status: text("status").default("open").notNull(), // 'open' | 'closed'
+  opened_at: timestamp("opened_at", { withTimezone: true }).defaultNow().notNull(),
+  closed_at: timestamp("closed_at", { withTimezone: true }),
+});
+
+export const insertCashierShiftSchema = createInsertSchema(cashierShifts).omit({
+  id: true,
+  opened_at: true,
+  closed_at: true,
+  closed_by_staff_id: true,
+  closing_counted_cents: true,
+  closing_expected_cents: true,
+  closing_variance_cents: true,
+  closing_note: true,
+});
+export type CashierShift = typeof cashierShifts.$inferSelect;
+export type InsertCashierShift = z.infer<typeof insertCashierShiftSchema>;
