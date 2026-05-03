@@ -62,7 +62,16 @@ export default function Footer() {
   ];
 
   return (
-    <footer className="bg-gray-900 text-white py-16">
+    <footer className="relative bg-gray-900 text-white py-16">
+      {/* Brand accent stripe — ties footer back to the purple→orange DNA. */}
+      <div
+        aria-hidden
+        className="absolute top-0 left-0 right-0 h-1"
+        style={{
+          background:
+            "linear-gradient(90deg, var(--cuci-primary) 0%, var(--cuci-secondary) 100%)",
+        }}
+      />
       <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
         <div className="grid md:grid-cols-2 lg:grid-cols-4 gap-8 mb-12">
           <motion.div
@@ -77,7 +86,7 @@ export default function Footer() {
                 Cuci<span className="text-cuci-secondary">Xpress</span>
               </span>
             </div>
-            <p className="text-gray-300 mb-6 leading-relaxed">Xpress car wash service with 100,000+ satisfied customers across 4 locations. Experience time saving quick and clean car wash.</p>
+            <p className="text-gray-300 mb-6 leading-relaxed">Brunei's drive-thru car wash — five branches, eight-minute washes, zero appointments. We've cleaned 120,000+ cars and counting.</p>
             <div className="flex space-x-4">
               {socialLinks.map((link, index) => (
                 <motion.a
@@ -145,7 +154,7 @@ export default function Footer() {
         <div className="border-t border-gray-800 pt-8">
           <div className="flex flex-col md:flex-row justify-between items-center">
             <p className="text-gray-400 text-sm">
-              © 2024 Cuci Xpress. All rights reserved.
+              © 2026 Cuci Xpress. All rights reserved.
             </p>
             <div className="flex flex-col sm:flex-row items-center space-y-4 sm:space-y-0 sm:space-x-6 mt-4 md:mt-0">
               <div className="flex space-x-6">
@@ -160,9 +169,9 @@ export default function Footer() {
                 href="https://wa.me/6738387000"
                 target="_blank"
                 rel="noopener noreferrer"
-                className="bg-cuci-primary hover:bg-cuci-primary-dark text-white px-4 py-2 rounded-full text-sm font-medium transition-colors"
+                className="cuci-cta bg-cuci-secondary text-black px-4 py-2 rounded-full text-sm"
               >
-                Get in Touch
+                Get in Touch →
               </a>
             </div>
           </div>

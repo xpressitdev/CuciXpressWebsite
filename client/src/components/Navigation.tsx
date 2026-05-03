@@ -61,16 +61,18 @@ export default function Navigation() {
 
   return (
     <nav
-      className={`fixed top-0 w-full z-50 transition-all duration-300 ${
-        isScrolled ? "bg-white/95 shadow-sm" : "bg-white/90"
-      } nav-backdrop`}
+      className={`fixed top-0 w-full z-50 transition-all duration-300 nav-backdrop ${
+        isScrolled
+          ? "bg-white/95 border-b-2 border-black"
+          : "bg-white/90 border-b-2 border-transparent"
+      }`}
     >
       <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
         <div className="flex justify-between items-center h-16">
           <div className="flex items-center">
             <button 
               onClick={() => handleNavigation({ id: "home", path: "/" })}
-              className="text-2xl font-bold text-cuci-primary hover:opacity-80 transition-opacity"
+              className="text-2xl font-bold text-cuci-primary hover:opacity-80 transition-opacity whitespace-nowrap"
             >
               Cuci<span className="text-cuci-secondary">Xpress</span>
             </button>
@@ -78,19 +80,19 @@ export default function Navigation() {
 
           {/* Desktop Navigation */}
           <div className="hidden md:block">
-            <div className="ml-10 flex items-baseline space-x-8">
+            <div className="ml-10 flex items-center space-x-6">
               {navItems.map((item, index) => (
                 <button
                   key={`${item.id}-${index}`}
                   onClick={() => handleNavigation(item)}
-                  className="text-gray-700 hover:text-cuci-primary px-3 py-2 text-sm font-medium transition-colors"
+                  className="text-gray-700 hover:text-cuci-primary px-2 py-2 text-sm font-medium transition-colors whitespace-nowrap"
                 >
                   {item.label}
                 </button>
               ))}
               <Link
                 href="/queue"
-                className="text-gray-700 hover:text-cuci-primary px-3 py-2 text-sm font-medium transition-colors"
+                className="text-gray-700 hover:text-cuci-primary px-2 py-2 text-sm font-medium transition-colors whitespace-nowrap"
                 data-testid="link-nav-live-queue"
               >
                 Live Queue
@@ -98,7 +100,7 @@ export default function Navigation() {
               {isLoggedIn ? (
                 <Link
                   href="/dashboard"
-                  className="bg-cuci-primary hover:bg-cuci-primary-dark text-white px-5 py-2 rounded-full text-sm font-medium transition-colors inline-flex items-center gap-1"
+                  className="cuci-cta bg-cuci-primary text-white px-5 py-2 rounded-full text-sm inline-flex items-center gap-1 whitespace-nowrap"
                   data-testid="link-nav-dashboard"
                 >
                   <User className="w-4 h-4" /> My account
@@ -106,7 +108,7 @@ export default function Navigation() {
               ) : (
                 <Link
                   href="/login"
-                  className="bg-cuci-primary hover:bg-cuci-primary-dark text-white px-6 py-2 rounded-full text-sm font-medium transition-colors"
+                  className="cuci-cta bg-cuci-primary text-white px-6 py-2 rounded-full text-sm whitespace-nowrap"
                   data-testid="link-nav-signin"
                 >
                   Sign in
