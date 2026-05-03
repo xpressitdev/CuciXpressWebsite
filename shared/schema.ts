@@ -503,24 +503,53 @@ export const insertOrderSchema = createInsertSchema(orders).omit({
 export type Order = typeof orders.$inferSelect;
 export type InsertOrder = z.infer<typeof insertOrderSchema>;
 
-// --- Subscriptions (membership state) ------------------------
-export const subscriptions = pgTable("subscriptions", {
+// --- Memberships (prepaid wash-pack) -------------------------
+// Added by 2026-05-04_04_memberships.sql (replacing the unused
+// `subscriptions` stub which modelled a different product).
+//
+// A wash-pack belongs to a `customers` row (POS customer, keyed
+// by phone). It MAY be pinned to a specific `cars` row (vehicle),
+// or left null so any of the customer's cars can redeem against
+// it. `sold_by_staff_id` and `sold_at_branch_id` are audit fields
+// pointing at our `staff` table (POS auth, separate from the trunk
+// `users` table) and our `branches` table — matching how
+// `orders.staff_id` is wired.
+export const memberships = pgTable("memberships", {
   id: text("id").primaryKey(),
-  customer_id: integer("customer_id").references(() => users.id).notNull(),
-  tier: text("tier").notNull(), // 'unlimited' | 'family' | 'corporate'
+  customer_id: integer("customer_id").references(() => customers.id).notNull(),
+  vehicle_id: integer("vehicle_id").references(() => cars.id),
+  total_washes: integer("total_washes").notNull(),
+  remaining_washes: integer("remaining_washes").notNull(),
   price_cents: integer("price_cents").notNull(),
-  status: text("status").default("active").notNull(),
-  current_period_start: timestamp("current_period_start", { withTimezone: true }).defaultNow().notNull(),
-  current_period_end: timestamp("current_period_end", { withTimezone: true }).notNull(),
-  washes_used_this_cycle: integer("washes_used_this_cycle").default(0).notNull(),
+  status: text("status").default("active").notNull(), // 'active' | 'exhausted' | 'expired' | 'cancelled'
+  expires_at: timestamp("expires_at", { withTimezone: true }),
+  sold_by_staff_id: text("sold_by_staff_id").references(() => staff.id).notNull(),
+  sold_at_branch_id: integer("sold_at_branch_id").references(() => branches.id).notNull(),
   cancelled_at: timestamp("cancelled_at", { withTimezone: true }),
   created_at: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
 });
 
-export const insertSubscriptionSchema = createInsertSchema(subscriptions).omit({
+export const insertMembershipSchema = createInsertSchema(memberships).omit({
   created_at: true,
   cancelled_at: true,
-  washes_used_this_cycle: true,
 });
-export type Subscription = typeof subscriptions.$inferSelect;
-export type InsertSubscription = z.infer<typeof insertSubscriptionSchema>;
+export type Membership = typeof memberships.$inferSelect;
+export type InsertMembership = z.infer<typeof insertMembershipSchema>;
+
+// --- Membership redemptions ---------------------------------
+// One row per wash consumed. The unique index on `order_id`
+// guarantees an order is never the redemption target of two
+// memberships at once.
+export const membershipRedemptions = pgTable("membership_redemptions", {
+  id: text("id").primaryKey(),
+  membership_id: text("membership_id").references(() => memberships.id).notNull(),
+  order_id: text("order_id").references(() => orders.id).notNull(),
+  staff_id: text("staff_id").references(() => staff.id).notNull(),
+  created_at: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
+});
+
+export const insertMembershipRedemptionSchema = createInsertSchema(membershipRedemptions).omit({
+  created_at: true,
+});
+export type MembershipRedemption = typeof membershipRedemptions.$inferSelect;
+export type InsertMembershipRedemption = z.infer<typeof insertMembershipRedemptionSchema>;

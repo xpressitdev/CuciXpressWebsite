@@ -500,3 +500,80 @@ the branch's local timezone if/when multi-timezone support lands.
 8 tables in dependency order: `subscriptions`, `orders`, `addons_catalog`,
 `lanes`, `audit_log`, `otp_codes`, `auth_sessions`, `staff`. Verify each
 `DROP` against then-current foreign-key references first.
+
+---
+
+## 2026-05-04 — Phase 2: memberships (wash-pack model)
+
+**Migration:** `migrations/manual/2026-05-04_04_memberships.sql`
+**Applied to:** staging ✓, prod ✓ (same day).
+
+**What changed (plain English):** Cuci Xpress doesn't sell "monthly
+unlimited" subscriptions — they sell prepaid wash-packs. A customer
+walks in, pays B$X up front, gets N washes (typically 10), and
+redeems them over time at any branch. The pack may optionally be
+pinned to a specific car so it can't be used on a different vehicle.
+We needed a schema that captures the pack itself, decrements the
+balance per redemption, and keeps an audit row for every wash used.
+
+**Tables:**
+- Dropped: `subscriptions` (unused stub, 0 rows in both DBs).
+- New: `memberships`
+  - `customer_id NOT NULL → customers(id)`
+  - `vehicle_id → cars(id)` (nullable; null = any of the customer's cars)
+  - `total_washes`, `remaining_washes` (CHECK: 0 ≤ remaining ≤ total)
+  - `price_cents` (BND, snapshot at sale)
+  - `status` ∈ {active, exhausted, expired, cancelled}
+  - `expires_at` (nullable)
+  - `sold_by_staff_id NOT NULL → staff(id)` (audit)
+  - `sold_at_branch_id NOT NULL → branches(id)` (audit)
+- New: `membership_redemptions` — one row per wash consumed
+  - `membership_id → memberships(id)`
+  - `order_id → orders(id)` (UNIQUE — an order is at most one redemption)
+  - `staff_id → staff(id)` (who rang it up)
+
+**Indexes:**
+- `memberships_customer_status_idx (customer_id, status)`
+- `memberships_vehicle_status_idx (vehicle_id, status) WHERE vehicle_id IS NOT NULL`
+- `memberships_branch_created_idx (sold_at_branch_id, created_at DESC)`
+- `membership_redemptions_order_uniq (order_id)` — UNIQUE
+- `membership_redemptions_membership_idx (membership_id, created_at DESC)`
+
+**FK type note:** `sold_by_staff_id` and redemption `staff_id` reference
+`staff(id)` (text) — NOT `users(id)` (integer). This matches how
+`orders.staff_id` is wired (see schema.ts: `staff_id: text(...).references(() => staff.id)`).
+The trunk `users` table is for end-user accounts; `staff` is the POS
+auth table for cashier/lane/manager/owner roles.
+
+**Server flow (`POST /api/pos/orders` refactor):** The whole order-
+create now runs in a single `db.transaction`. When `payment_method =
+'subscription'`, the txn:
+1. Locks the membership row `FOR UPDATE`.
+2. Validates: belongs to the resolved customer, status='active',
+   remaining_washes > 0, not expired, vehicle pin (if any) matches.
+3. Inserts the order with `discount_cents = subtotal_cents` and
+   `total_cents = 0`.
+4. Inserts a `membership_redemptions` row (UNIQUE on order_id catches
+   any future double-redemption bug).
+5. Decrements `remaining_washes`; flips status to 'exhausted' at zero.
+
+A failure at any step rolls back everything — no leaked washes, no
+orders without an audit trail.
+
+**New endpoints:**
+- `GET /api/pos/memberships/active?customer_id=N[&vehicle_id=N]` — for
+  the POS badge.
+- `POST /api/pos/memberships` — sell a pack (any staff role).
+- `GET /api/pos/memberships?customer_id=N` — pack history for a customer.
+
+**UI:** POS surface (`client/src/pages/pos.tsx`) now shows a green
+"Wash pack: 7/10 left" pill in the matched-vehicle card whenever an
+active pack exists for the customer. When the cashier picks
+"Subscription" payment AND a pack is on file, the order summary shows
+a "Wash pack redemption" discount line and the total drops to B$0.
+Submit is blocked when subscription is selected without an active pack.
+
+**Pricing model (Phase 2 simplification):** A redemption covers the
+full subtotal, including addons. Future refinement (per-line discount,
+addon-only-cash-charge) can layer in once the Owner has feedback from
+real cashier use.

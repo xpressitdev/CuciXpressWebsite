@@ -70,6 +70,18 @@ interface CatalogResponse {
   payment_methods: readonly PaymentMethod[];
 }
 
+interface ActiveMembership {
+  id: string;
+  customer_id: number;
+  vehicle_id: number | null;
+  total_washes: number;
+  remaining_washes: number;
+  price_cents: number;
+  status: string;
+  expires_at: string | null;
+  created_at: string;
+}
+
 interface TodayOrder {
   id: string;
   ticket_code: string;
@@ -276,13 +288,25 @@ export default function POS() {
       .reduce((s, a) => s + a.price_cents, 0);
   }, [catalog, selectedAddons]);
 
-  const total = (packagePrice ?? 0) + addonsTotal;
+  const subtotal = (packagePrice ?? 0) + addonsTotal;
+  // When the cashier picks "Subscription" AND we have an active wash-pack
+  // for the customer, the pack covers the full subtotal (Phase 2 model —
+  // matches the server-side discount calculation).
+  const useMembership =
+    paymentMethod === "subscription" && activeMembership !== null;
+  const discount = useMembership ? subtotal : 0;
+  const total = subtotal - discount;
 
   const canSubmit =
     !!activePackage &&
     packagePrice !== null &&
     plate.trim().length > 0 &&
-    branchId !== null;
+    branchId !== null &&
+    // Subscription payment requires an active wash-pack on file. Block
+    // submit until the cashier either resolves a customer with a pack
+    // or switches payment method — the server enforces this too, but
+    // catching it client-side avoids a confusing 400 round-trip.
+    (paymentMethod !== "subscription" || activeMembership !== null);
 
   // Debounced plate autocomplete. Hits /api/pos/vehicles/search 200ms after
   // the user pauses typing. Skipped when a suggestion is already matched.
@@ -323,6 +347,37 @@ export default function POS() {
     },
   });
 
+  // Phase 2: wash-pack lookup. Driven by the customer attached to the
+  // matched vehicle. The server applies the customer + (optional)
+  // vehicle pin filter and only returns active, non-expired packs.
+  const customerIdForMembership = vehicleHistory?.customer?.id ?? null;
+
+  const { data: membershipData } = useQuery<{ memberships: ActiveMembership[] }>({
+    queryKey: [
+      "/api/pos/memberships/active",
+      customerIdForMembership,
+      matchedVehicleId,
+    ],
+    enabled: customerIdForMembership !== null,
+    queryFn: async () => {
+      const params = new URLSearchParams({ customer_id: String(customerIdForMembership) });
+      if (matchedVehicleId !== null) params.set("vehicle_id", String(matchedVehicleId));
+      const r = await fetch(`/api/pos/memberships/active?${params}`, {
+        credentials: "include",
+      });
+      if (!r.ok) throw new Error(`${r.status}`);
+      return r.json();
+    },
+  });
+
+  // Pick the most specific pack — vehicle-pinned trumps customer-wide.
+  const activeMembership: ActiveMembership | null = useMemo(() => {
+    const list = membershipData?.memberships ?? [];
+    if (list.length === 0) return null;
+    const pinned = list.find(m => m.vehicle_id === matchedVehicleId);
+    return pinned ?? list[0];
+  }, [membershipData, matchedVehicleId]);
+
   // When picking a suggestion, prefill plate + customer info (if any) so
   // the cashier doesn't retype it. They can still edit before submitting.
   const pickVehicle = (v: VehicleSuggestion) => {
@@ -354,6 +409,10 @@ export default function POS() {
         vehicle_id: matchedVehicleId,
         customer_phone: customerPhone.trim() || null,
         customer_name: customerName.trim() || null,
+        membership_id:
+          paymentMethod === "subscription" && activeMembership
+            ? activeMembership.id
+            : null,
       });
       return (await res.json()) as { ok: true; order: CreatedOrder };
     },
@@ -362,6 +421,12 @@ export default function POS() {
       queryClient.invalidateQueries({
         queryKey: ["/api/pos/orders/today", branchId],
       });
+      // Refresh membership balance after a redemption.
+      if (paymentMethod === "subscription") {
+        queryClient.invalidateQueries({
+          queryKey: ["/api/pos/memberships/active"],
+        });
+      }
       toast({
         title: `Ticket ${data.order.ticket_code}`,
         description: `${data.order.plate} · ${formatBND(data.order.total_cents)}`,
@@ -765,6 +830,20 @@ export default function POS() {
                               {formatRelative(vehicleHistory.recent_orders[0].created_at)}
                             </div>
                           )}
+                          {activeMembership && (
+                            <div
+                              className="mt-2 inline-flex items-center gap-1.5 rounded-full bg-emerald-50 border border-emerald-200 px-2 py-0.5 text-xs font-medium text-emerald-800"
+                              data-testid="badge-active-membership"
+                            >
+                              <ShieldCheck className="w-3 h-3" />
+                              Wash pack: {activeMembership.remaining_washes}/{activeMembership.total_washes} left
+                              {activeMembership.vehicle_id !== null && (
+                                <span className="text-emerald-700/70 font-normal">
+                                  · this car
+                                </span>
+                              )}
+                            </div>
+                          )}
                         </div>
                         <button
                           type="button"
@@ -946,6 +1025,15 @@ export default function POS() {
                       );
                     })}
                   </div>
+                  {useMembership && (
+                    <div
+                      className="flex justify-between text-sm text-emerald-700 font-medium"
+                      data-testid="row-summary-membership-discount"
+                    >
+                      <span>Wash pack redemption</span>
+                      <span>−{formatBND(discount)}</span>
+                    </div>
+                  )}
                   <Separator />
                   <div className="flex justify-between text-lg font-bold">
                     <span>Total</span>
@@ -953,6 +1041,15 @@ export default function POS() {
                       {formatBND(total)}
                     </span>
                   </div>
+                  {paymentMethod === "subscription" && !activeMembership && (
+                    <p
+                      className="text-xs text-amber-700 bg-amber-50 border border-amber-200 rounded px-2 py-1"
+                      data-testid="hint-no-membership"
+                    >
+                      No active wash pack found for this customer.
+                      Pick a different payment method or sell a pack first.
+                    </p>
+                  )}
                   <Button
                     className="w-full"
                     size="lg"

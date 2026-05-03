@@ -1617,6 +1617,11 @@ export async function registerRoutes(app: Express): Promise<Server> {
     vehicle_id: z.number().int().positive().optional().nullable(),
     customer_phone: z.string().trim().min(4).max(40).optional().nullable(),
     customer_name: z.string().trim().min(1).max(120).optional().nullable(),
+    // Phase 2 (2026-05-04): wash-pack redemption. When the cashier
+    // explicitly chooses payment_method='subscription', the client
+    // sends the membership_id to redeem against. The server still
+    // validates ownership + remaining balance inside the txn.
+    membership_id: z.string().trim().min(1).max(60).optional().nullable(),
   });
 
   app.post('/api/pos/orders', requireStaff, async (req, res) => {
@@ -1652,175 +1657,263 @@ export async function registerRoutes(app: Express): Promise<Server> {
       effectiveBranchId = staffBranchId;
     }
 
+    // Sentinel error type so we can surface validation failures with
+    // proper HTTP status codes from inside the transaction body.
+    class PosOrderError extends Error {
+      constructor(public status: number, public code: string) {
+        super(code);
+      }
+    }
+
     try {
-      // 1. Look up the package + flat price (2026-05-04_03 — no size).
-      const pkgRows = (await db.execute(sql`
-        SELECT id, name, price_cents
-          FROM packages
-         WHERE id = ${body.package_id}
-           AND is_active = true
-         LIMIT 1
-      `)).rows as Array<{ id: string; name: string; price_cents: number }>;
-      if (pkgRows.length === 0) {
-        return res.status(400).json({ error: 'package_not_available' });
-      }
-      const pkg = pkgRows[0];
-
-      // 2. Look up + snapshot the requested addons.
-      let addonSnapshots: Array<{ id: string; name: string; price_cents: number }> = [];
-      if (body.addon_ids.length > 0) {
-        const addonRows = (await db.execute(sql`
+      // Everything below — package lookup, customer/vehicle upsert,
+      // ticket allocation, order INSERT, and (when applicable) the
+      // membership redemption — runs in a single DB transaction so a
+      // mid-flow failure can't leak a wash from a customer's pack or
+      // produce an order without its redemption row.
+      const result = await db.transaction(async (tx) => {
+        // 1. Look up the package + flat price (2026-05-04_03 — no size).
+        const pkgRows = (await tx.execute(sql`
           SELECT id, name, price_cents
-            FROM addons_catalog
-           WHERE id = ANY(${body.addon_ids})
+            FROM packages
+           WHERE id = ${body.package_id}
              AND is_active = true
-        `)).rows as Array<{ id: string; name: string; price_cents: number }>;
-        if (addonRows.length !== body.addon_ids.length) {
-          return res.status(400).json({ error: 'addon_not_available' });
-        }
-        addonSnapshots = addonRows;
-      }
-
-      // 3. Compute totals server-side. Never trust client amounts.
-      const addonsTotal = addonSnapshots.reduce((s, a) => s + a.price_cents, 0);
-      const subtotal = pkg.price_cents + addonsTotal;
-      const total = subtotal; // tax/service charge stay 0 until tax wiring lands
-
-      // 4. Allocate the next ticket code for this branch + day.
-      // Format: T-001, T-002, ... Per the unique index
-      // `orders_branch_ticket_day_uniq(branch_id, ticket_code, ticket_day)`.
-      const seqRow = (await db.execute(sql`
-        SELECT COALESCE(
-          MAX( NULLIF(regexp_replace(ticket_code, '\\D', '', 'g'), '')::int ),
-          0
-        ) + 1 AS next_seq
-          FROM orders
-         WHERE branch_id = ${effectiveBranchId}
-           AND ticket_day = (now() AT TIME ZONE 'UTC')::date
-      `)).rows as Array<{ next_seq: number }>;
-      const seq = seqRow[0]?.next_seq ?? 1;
-      const ticketCode = `T-${String(seq).padStart(3, '0')}`;
-
-      // 5. Resolve vehicle + customer (Phase 1).
-      // Strategy:
-      //   a) If client supplied vehicle_id, validate + touch last_seen_at.
-      //   b) Else upsert a car row by normalised plate (orphan if no
-      //      customer_phone). Trunk-owned cars (user_id IS NOT NULL)
-      //      stay bound to their user — we never re-attach.
-      //   c) If customer_phone+name provided, upsert customers row;
-      //      attach to the vehicle ONLY when its customer_id is null.
-      let resolvedVehicleId: number | null = null;
-      let walkinName: string | null = null;
-      const plateUpper = body.plate.toUpperCase();
-      const plateNorm = plateUpper.replace(/\s+/g, '');
-
-      // (c) customer upsert (if phone given)
-      let posCustomerId: number | null = null;
-      if (body.customer_phone && body.customer_name) {
-        const cu = (await db.execute(sql`
-          INSERT INTO customers (phone, name)
-          VALUES (${body.customer_phone}, ${body.customer_name})
-          ON CONFLICT (phone) DO UPDATE
-             SET name = EXCLUDED.name
-          RETURNING id, name
-        `)).rows[0] as any;
-        posCustomerId = cu.id;
-        walkinName = cu.name;
-      } else if (body.customer_name) {
-        walkinName = body.customer_name;
-      }
-
-      // (a) explicit vehicle_id wins
-      if (body.vehicle_id) {
-        const v = (await db.execute(sql`
-          SELECT id, customer_id FROM cars WHERE id = ${body.vehicle_id} LIMIT 1
-        `)).rows as any[];
-        if (v.length === 0) {
-          return res.status(400).json({ error: 'vehicle_not_found' });
-        }
-        resolvedVehicleId = v[0].id;
-        await db.execute(sql`
-          UPDATE cars SET
-            customer_id  = COALESCE(customer_id, ${posCustomerId}),
-            last_seen_at = now()
-           WHERE id = ${resolvedVehicleId}
-        `);
-        if (!walkinName && v[0].customer_id) {
-          const cn = (await db.execute(sql`
-            SELECT name FROM customers WHERE id = ${v[0].customer_id} LIMIT 1
-          `)).rows[0] as any;
-          walkinName = cn?.name ?? null;
-        }
-      } else {
-        // (b) upsert by normalised plate
-        const existing = (await db.execute(sql`
-          SELECT id, user_id, customer_id
-            FROM cars
-           WHERE UPPER(REGEXP_REPLACE(license_plate, '\s+', '', 'g')) = ${plateNorm}
-           ORDER BY (CASE WHEN customer_id = ${posCustomerId ?? -1} THEN 0 ELSE 1 END) ASC,
-                    COALESCE(last_seen_at, 'epoch'::timestamptz) DESC,
-                    id DESC
            LIMIT 1
-        `)).rows as any[];
-        if (existing.length > 0) {
-          const ex = existing[0];
-          await db.execute(sql`
+        `)).rows as Array<{ id: string; name: string; price_cents: number }>;
+        if (pkgRows.length === 0) {
+          throw new PosOrderError(400, 'package_not_available');
+        }
+        const pkg = pkgRows[0];
+
+        // 2. Look up + snapshot the requested addons.
+        let addonSnapshots: Array<{ id: string; name: string; price_cents: number }> = [];
+        if (body.addon_ids.length > 0) {
+          const addonRows = (await tx.execute(sql`
+            SELECT id, name, price_cents
+              FROM addons_catalog
+             WHERE id = ANY(${body.addon_ids})
+               AND is_active = true
+          `)).rows as Array<{ id: string; name: string; price_cents: number }>;
+          if (addonRows.length !== body.addon_ids.length) {
+            throw new PosOrderError(400, 'addon_not_available');
+          }
+          addonSnapshots = addonRows;
+        }
+
+        // 3. Compute totals server-side. Never trust client amounts.
+        const addonsTotal = addonSnapshots.reduce((s, a) => s + a.price_cents, 0);
+        const subtotal = pkg.price_cents + addonsTotal;
+
+        // 4. Allocate the next ticket code for this branch + day.
+        const seqRow = (await tx.execute(sql`
+          SELECT COALESCE(
+            MAX( NULLIF(regexp_replace(ticket_code, '\\D', '', 'g'), '')::int ),
+            0
+          ) + 1 AS next_seq
+            FROM orders
+           WHERE branch_id = ${effectiveBranchId}
+             AND ticket_day = (now() AT TIME ZONE 'UTC')::date
+        `)).rows as Array<{ next_seq: number }>;
+        const seq = seqRow[0]?.next_seq ?? 1;
+        const ticketCode = `T-${String(seq).padStart(3, '0')}`;
+
+        // 5. Resolve vehicle + customer (Phase 1).
+        let resolvedVehicleId: number | null = null;
+        let walkinName: string | null = null;
+        const plateUpper = body.plate.toUpperCase();
+        const plateNorm = plateUpper.replace(/\s+/g, '');
+
+        // (c) customer upsert (if phone given)
+        let posCustomerId: number | null = null;
+        if (body.customer_phone && body.customer_name) {
+          const cu = (await tx.execute(sql`
+            INSERT INTO customers (phone, name)
+            VALUES (${body.customer_phone}, ${body.customer_name})
+            ON CONFLICT (phone) DO UPDATE
+               SET name = EXCLUDED.name
+            RETURNING id, name
+          `)).rows[0] as any;
+          posCustomerId = cu.id;
+          walkinName = cu.name;
+        } else if (body.customer_name) {
+          walkinName = body.customer_name;
+        }
+
+        // (a) explicit vehicle_id wins
+        if (body.vehicle_id) {
+          const v = (await tx.execute(sql`
+            SELECT id, customer_id FROM cars WHERE id = ${body.vehicle_id} LIMIT 1
+          `)).rows as any[];
+          if (v.length === 0) {
+            throw new PosOrderError(400, 'vehicle_not_found');
+          }
+          resolvedVehicleId = v[0].id;
+          await tx.execute(sql`
             UPDATE cars SET
               customer_id  = COALESCE(customer_id, ${posCustomerId}),
               last_seen_at = now()
-             WHERE id = ${ex.id}
+             WHERE id = ${resolvedVehicleId}
           `);
-          resolvedVehicleId = ex.id;
+          if (!walkinName && v[0].customer_id) {
+            const cn = (await tx.execute(sql`
+              SELECT name FROM customers WHERE id = ${v[0].customer_id} LIMIT 1
+            `)).rows[0] as any;
+            walkinName = cn?.name ?? null;
+          }
+          // For membership lookup later — rebind posCustomerId from car if not already set.
+          if (!posCustomerId && v[0].customer_id) {
+            posCustomerId = v[0].customer_id;
+          }
         } else {
-          const ins = (await db.execute(sql`
-            INSERT INTO cars (license_plate, customer_id, last_seen_at)
-            VALUES (${plateUpper}, ${posCustomerId ?? null}, now())
-            RETURNING id
-          `)).rows[0] as any;
-          resolvedVehicleId = ins.id;
+          // (b) upsert by normalised plate
+          const existing = (await tx.execute(sql`
+            SELECT id, user_id, customer_id
+              FROM cars
+             WHERE UPPER(REGEXP_REPLACE(license_plate, '\s+', '', 'g')) = ${plateNorm}
+             ORDER BY (CASE WHEN customer_id = ${posCustomerId ?? -1} THEN 0 ELSE 1 END) ASC,
+                      COALESCE(last_seen_at, 'epoch'::timestamptz) DESC,
+                      id DESC
+             LIMIT 1
+          `)).rows as any[];
+          if (existing.length > 0) {
+            const ex = existing[0];
+            await tx.execute(sql`
+              UPDATE cars SET
+                customer_id  = COALESCE(customer_id, ${posCustomerId}),
+                last_seen_at = now()
+               WHERE id = ${ex.id}
+            `);
+            resolvedVehicleId = ex.id;
+            if (!posCustomerId && ex.customer_id) posCustomerId = ex.customer_id;
+          } else {
+            const ins = (await tx.execute(sql`
+              INSERT INTO cars (license_plate, customer_id, last_seen_at)
+              VALUES (${plateUpper}, ${posCustomerId ?? null}, now())
+              RETURNING id
+            `)).rows[0] as any;
+            resolvedVehicleId = ins.id;
+          }
         }
-      }
 
-      // 6. Insert order. `id` is text — generate a random one.
-      const orderId = `ord_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 8)}`;
+        // 6. Membership redemption (if payment_method='subscription').
+        // We lock the membership row FOR UPDATE so concurrent redemptions
+        // can't double-spend the last wash. The check enforces:
+        //   - membership exists, status='active', remaining_washes > 0
+        //   - belongs to the resolved customer
+        //   - if pinned to a vehicle, that vehicle matches this order's car
+        //   - if expires_at set, hasn't expired
+        let redeemMembership: { id: string; remaining: number; total: number } | null = null;
+        let discountCents = 0;
+        let chargedTotal = subtotal;
+        if (body.payment_method === 'subscription') {
+          if (!body.membership_id) {
+            throw new PosOrderError(400, 'membership_id_required');
+          }
+          if (!posCustomerId) {
+            throw new PosOrderError(400, 'membership_needs_customer');
+          }
+          const mRows = (await tx.execute(sql`
+            SELECT id, customer_id, vehicle_id, total_washes, remaining_washes, status, expires_at
+              FROM memberships
+             WHERE id = ${body.membership_id}
+             FOR UPDATE
+          `)).rows as Array<{
+            id: string; customer_id: number; vehicle_id: number | null;
+            total_washes: number; remaining_washes: number;
+            status: string; expires_at: string | null;
+          }>;
+          if (mRows.length === 0) throw new PosOrderError(404, 'membership_not_found');
+          const m = mRows[0];
+          if (m.customer_id !== posCustomerId) throw new PosOrderError(403, 'membership_wrong_customer');
+          if (m.status !== 'active') throw new PosOrderError(409, 'membership_not_active');
+          if (m.remaining_washes <= 0) throw new PosOrderError(409, 'membership_exhausted');
+          if (m.expires_at && new Date(m.expires_at) < new Date()) {
+            throw new PosOrderError(409, 'membership_expired');
+          }
+          if (m.vehicle_id != null && m.vehicle_id !== resolvedVehicleId) {
+            throw new PosOrderError(409, 'membership_wrong_vehicle');
+          }
+          redeemMembership = { id: m.id, remaining: m.remaining_washes, total: m.total_washes };
+          // Pack covers the package portion (the wash itself). Addons are
+          // not included and remain payable in cash/whatever — but to keep
+          // Phase 2 simple, the whole subtotal (incl. addons) is treated
+          // as covered. Owner can refine later if desired.
+          discountCents = subtotal;
+          chargedTotal = 0;
+        }
 
-      await db.execute(sql`
-        INSERT INTO orders (
-          id, branch_id, staff_id, plate,
-          package_id, package_name, package_price_cents,
-          addons, subtotal_cents, total_cents,
-          payment_method, payment_ref,
-          ticket_code, status,
-          order_notes, item_notes,
-          vehicle_id, customer_name_walkin
-        ) VALUES (
-          ${orderId}, ${effectiveBranchId}, ${staffId}, ${plateUpper},
-          ${pkg.id}, ${pkg.name}, ${pkg.price_cents},
-          ${JSON.stringify(addonSnapshots)}::jsonb, ${subtotal}, ${total},
-          ${body.payment_method}, ${body.payment_ref ?? null},
-          ${ticketCode}, 'paid',
-          ${body.order_notes ?? null}, ${body.item_notes ?? null},
-          ${resolvedVehicleId}, ${walkinName}
-        )
-      `);
+        // 7. Insert order.
+        const orderId = `ord_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 8)}`;
+        await tx.execute(sql`
+          INSERT INTO orders (
+            id, branch_id, staff_id, plate,
+            package_id, package_name, package_price_cents,
+            addons, subtotal_cents, total_cents, discount_cents,
+            payment_method, payment_ref,
+            ticket_code, status,
+            order_notes, item_notes,
+            vehicle_id, customer_name_walkin
+          ) VALUES (
+            ${orderId}, ${effectiveBranchId}, ${staffId}, ${plateUpper},
+            ${pkg.id}, ${pkg.name}, ${pkg.price_cents},
+            ${JSON.stringify(addonSnapshots)}::jsonb, ${subtotal}, ${chargedTotal}, ${discountCents},
+            ${body.payment_method}, ${body.payment_ref ?? null},
+            ${ticketCode}, 'paid',
+            ${body.order_notes ?? null}, ${body.item_notes ?? null},
+            ${resolvedVehicleId}, ${walkinName}
+          )
+        `);
+
+        // 8. Record redemption + decrement remaining washes.
+        if (redeemMembership) {
+          const redemptionId = `red_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 8)}`;
+          await tx.execute(sql`
+            INSERT INTO membership_redemptions (id, membership_id, order_id, staff_id)
+            VALUES (${redemptionId}, ${redeemMembership.id}, ${orderId}, ${staffId})
+          `);
+          const newRemaining = redeemMembership.remaining - 1;
+          await tx.execute(sql`
+            UPDATE memberships
+               SET remaining_washes = ${newRemaining},
+                   status = ${newRemaining === 0 ? 'exhausted' : 'active'}
+             WHERE id = ${redeemMembership.id}
+          `);
+        }
+
+        return {
+          orderId, ticketCode, pkg, addonSnapshots, subtotal,
+          chargedTotal, discountCents, redeemMembership,
+        };
+      });
 
       res.status(201).json({
         ok: true,
         order: {
-          id: orderId,
-          ticket_code: ticketCode,
+          id: result.orderId,
+          ticket_code: result.ticketCode,
           branch_id: effectiveBranchId,
           plate: body.plate.toUpperCase(),
-          package_name: pkg.name,
-          package_price_cents: pkg.price_cents,
-          addons: addonSnapshots,
-          subtotal_cents: subtotal,
-          total_cents: total,
+          package_name: result.pkg.name,
+          package_price_cents: result.pkg.price_cents,
+          addons: result.addonSnapshots,
+          subtotal_cents: result.subtotal,
+          total_cents: result.chargedTotal,
+          discount_cents: result.discountCents,
           payment_method: body.payment_method,
           status: 'paid',
+          membership: result.redeemMembership
+            ? {
+                id: result.redeemMembership.id,
+                remaining_washes: result.redeemMembership.remaining - 1,
+                total_washes: result.redeemMembership.total,
+              }
+            : null,
         },
       });
     } catch (err: any) {
+      if (err instanceof PosOrderError) {
+        return res.status(err.status).json({ error: err.code });
+      }
       // Most likely failure mode: a near-simultaneous insert grabbed the
       // same ticket sequence. Surface a 409 so the client can retry.
       if (err?.code === '23505') {
@@ -2019,6 +2112,138 @@ export async function registerRoutes(app: Express): Promise<Server> {
     } catch (err) {
       console.error('[pos.vehicles.history] failed:', err);
       res.status(500).json({ error: 'history_failed' });
+    }
+  });
+
+  // ==========================================================================
+  // POS — Memberships (Phase 2, 2026-05-04)
+  // Wash-pack lifecycle: sell, look up active for a customer/vehicle, list.
+  // Redemption itself happens inside POST /api/pos/orders when the cashier
+  // chooses payment_method='subscription' (see that route for the txn).
+  // ==========================================================================
+
+  // GET /api/pos/memberships/active?customer_id=N[&vehicle_id=N]
+  // Returns the customer's current active wash-pack(s). If vehicle_id is
+  // supplied, also includes vehicle-pinned packs that match. Used by the
+  // POS surface to show the "Wash pack: 7/10" badge after a customer is
+  // identified by phone/plate.
+  app.get('/api/pos/memberships/active', requireStaff, async (req, res) => {
+    const customerId = Number(req.query.customer_id);
+    const vehicleId = req.query.vehicle_id ? Number(req.query.vehicle_id) : null;
+    if (!Number.isFinite(customerId) || customerId <= 0) {
+      return res.status(400).json({ error: 'customer_id required' });
+    }
+    try {
+      const rows = (await db.execute(sql`
+        SELECT id, customer_id, vehicle_id, total_washes, remaining_washes,
+               price_cents, status, expires_at, created_at
+          FROM memberships
+         WHERE customer_id = ${customerId}
+           AND status = 'active'
+           AND remaining_washes > 0
+           AND (expires_at IS NULL OR expires_at > now())
+           AND (
+             vehicle_id IS NULL
+             ${vehicleId ? sql`OR vehicle_id = ${vehicleId}` : sql``}
+           )
+         ORDER BY (vehicle_id IS NULL) ASC, created_at ASC
+      `)).rows;
+      res.json({ memberships: rows });
+    } catch (err) {
+      console.error('[pos.memberships.active] failed:', err);
+      res.status(500).json({ error: 'memberships_lookup_failed' });
+    }
+  });
+
+  // POST /api/pos/memberships — sell a wash-pack to a customer.
+  // Body: { customer_id, vehicle_id?, total_washes, price_cents, expires_at?, branch_id }
+  const sellMembershipSchema = z.object({
+    customer_id: z.number().int().positive(),
+    vehicle_id: z.number().int().positive().optional().nullable(),
+    total_washes: z.number().int().positive().max(1000),
+    price_cents: z.number().int().nonnegative().max(1_000_000),
+    expires_at: z.string().datetime().optional().nullable(),
+    branch_id: z.number().int().positive(),
+  });
+  app.post('/api/pos/memberships', requireStaff, async (req, res) => {
+    const parsed = sellMembershipSchema.safeParse(req.body);
+    if (!parsed.success) {
+      return res.status(400).json({ error: 'invalid_request', details: parsed.error.flatten() });
+    }
+    const body = parsed.data;
+    const staffUser = req.staff!.user as any;
+    const staffId = staffUser.id as string;
+    const staffRole = staffUser.role as 'owner' | 'manager' | 'lane' | 'cashier';
+    const staffBranchId = staffUser.branchId as number | null;
+
+    // Same branch enforcement as the order route.
+    const VALID_BRANCH_IDS = [1, 2, 3, 4, 5];
+    let effectiveBranchId: number;
+    if (staffRole === 'owner' || staffRole === 'manager') {
+      if (!VALID_BRANCH_IDS.includes(body.branch_id)) {
+        return res.status(400).json({ error: 'invalid_branch' });
+      }
+      effectiveBranchId = body.branch_id;
+    } else {
+      if (staffBranchId == null) return res.status(400).json({ error: 'staff_no_branch' });
+      effectiveBranchId = staffBranchId;
+    }
+
+    try {
+      // Validate customer + (optional) vehicle exist.
+      const cust = (await db.execute(sql`
+        SELECT id FROM customers WHERE id = ${body.customer_id} LIMIT 1
+      `)).rows[0] as any;
+      if (!cust) return res.status(404).json({ error: 'customer_not_found' });
+      if (body.vehicle_id) {
+        const veh = (await db.execute(sql`
+          SELECT id, customer_id FROM cars WHERE id = ${body.vehicle_id} LIMIT 1
+        `)).rows[0] as any;
+        if (!veh) return res.status(404).json({ error: 'vehicle_not_found' });
+        if (veh.customer_id != null && veh.customer_id !== body.customer_id) {
+          return res.status(409).json({ error: 'vehicle_belongs_to_other_customer' });
+        }
+      }
+
+      const membershipId = `mem_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 8)}`;
+      const row = (await db.execute(sql`
+        INSERT INTO memberships (
+          id, customer_id, vehicle_id, total_washes, remaining_washes,
+          price_cents, status, expires_at, sold_by_staff_id, sold_at_branch_id
+        ) VALUES (
+          ${membershipId}, ${body.customer_id}, ${body.vehicle_id ?? null},
+          ${body.total_washes}, ${body.total_washes},
+          ${body.price_cents}, 'active', ${body.expires_at ?? null},
+          ${staffId}, ${effectiveBranchId}
+        )
+        RETURNING id, customer_id, vehicle_id, total_washes, remaining_washes,
+                  price_cents, status, expires_at, created_at
+      `)).rows[0];
+      res.status(201).json({ ok: true, membership: row });
+    } catch (err) {
+      console.error('[pos.memberships.create] failed:', err);
+      res.status(500).json({ error: 'membership_create_failed' });
+    }
+  });
+
+  // GET /api/pos/memberships?customer_id=N — full history for a customer.
+  app.get('/api/pos/memberships', requireStaff, async (req, res) => {
+    const customerId = Number(req.query.customer_id);
+    if (!Number.isFinite(customerId) || customerId <= 0) {
+      return res.status(400).json({ error: 'customer_id required' });
+    }
+    try {
+      const rows = (await db.execute(sql`
+        SELECT id, vehicle_id, total_washes, remaining_washes, price_cents,
+               status, expires_at, created_at
+          FROM memberships
+         WHERE customer_id = ${customerId}
+         ORDER BY created_at DESC
+      `)).rows;
+      res.json({ memberships: rows });
+    } catch (err) {
+      console.error('[pos.memberships.list] failed:', err);
+      res.status(500).json({ error: 'memberships_list_failed' });
     }
   });
 

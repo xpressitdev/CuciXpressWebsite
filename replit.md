@@ -200,3 +200,26 @@ Two auth systems coexist by design during the Week 1–Week 2 cutover:
 - **Database**: PostgreSQL, Drizzle ORM, Zod (runtime validation), @neondatabase/serverless (serverless PostgreSQL driver).
 - **Development/Build**: TypeScript, Vite, ESBuild, PostCSS.
 - **APIs/Services**: Google Reviews API, Google Maps API, Pocket Pay (payment gateway), ImprovMX (email forwarding for collaboration form).
+   **Phase 2 — wash-pack memberships (`2026-05-04_04_memberships.sql`):**
+   Replaced the unused `subscriptions` stub with a real prepaid wash-
+   pack model: a customer buys N washes up front and the cashier
+   redeems them at the POS over time. New tables `memberships` (pack
+   itself, with `customer_id`, optional `vehicle_id` pin, `total_washes`,
+   `remaining_washes`, `price_cents`, status, expiry, sold-by-who/where
+   audit) and `membership_redemptions` (one row per wash consumed,
+   UNIQUE on `order_id` so an order can't be double-redeemed). The
+   POST /api/pos/orders route was rewritten to run inside a single
+   `db.transaction`: when payment_method='subscription' the txn locks
+   the membership row FOR UPDATE, validates ownership + remaining +
+   vehicle pin + expiry, writes the order with discount_cents=subtotal
+   and total_cents=0, inserts the redemption row, and decrements
+   remaining_washes (flipping status to 'exhausted' at zero). Mid-
+   flow failures roll everything back — no leaked washes, no orphan
+   orders. New endpoints: GET /api/pos/memberships/active (powers the
+   "Wash pack: 7/10 left" pill on the POS matched-vehicle card), POST
+   /api/pos/memberships (sell a pack), GET /api/pos/memberships
+   (history). Cashier sees the pack balance immediately after a plate
+   match resolves a customer; choosing "Subscription" payment shows a
+   green discount line in the order summary and drops the total to B$0.
+   Migration applied to staging and prod the same day; 0 subscriptions
+   rows lost (the stub had never been populated).
