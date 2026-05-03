@@ -1644,7 +1644,29 @@ export async function registerRoutes(app: Express): Promise<Server> {
       });
     }
     const body = parsed.data;
-    const staffId = (req.staff!.user as any).id as string;
+    const staffUser = req.staff!.user as any;
+    const staffId = staffUser.id as string;
+    const staffRole = staffUser.role as 'owner' | 'manager' | 'lane' | 'cashier';
+    const staffBranchId = staffUser.branchId as number | null;
+
+    // Authoritative branch resolution. Lane/cashier are LOCKED to the
+    // branch their account is bound to — they cannot submit orders for
+    // another branch even if the client tampers with the payload.
+    // Owner/manager may pick any branch (they're the ones rotating
+    // between sites or covering shifts).
+    const VALID_BRANCH_IDS = [1, 2, 3, 4, 5];
+    let effectiveBranchId: number;
+    if (staffRole === 'owner' || staffRole === 'manager') {
+      if (!VALID_BRANCH_IDS.includes(body.branch_id)) {
+        return res.status(400).json({ error: 'invalid_branch' });
+      }
+      effectiveBranchId = body.branch_id;
+    } else {
+      if (staffBranchId == null) {
+        return res.status(400).json({ error: 'staff_no_branch' });
+      }
+      effectiveBranchId = staffBranchId;
+    }
 
     try {
       // 1. Look up the package + price for the chosen vehicle size.
@@ -1693,7 +1715,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
           0
         ) + 1 AS next_seq
           FROM orders
-         WHERE branch_id = ${body.branch_id}
+         WHERE branch_id = ${effectiveBranchId}
            AND ticket_day = (now() AT TIME ZONE 'UTC')::date
       `)).rows as Array<{ next_seq: number }>;
       const seq = seqRow[0]?.next_seq ?? 1;
@@ -1711,7 +1733,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
           ticket_code, status,
           order_notes, item_notes
         ) VALUES (
-          ${orderId}, ${body.branch_id}, ${staffId}, ${body.plate.toUpperCase()},
+          ${orderId}, ${effectiveBranchId}, ${staffId}, ${body.plate.toUpperCase()},
           ${pkg.id}, ${pkg.name}, ${pkg.price_cents},
           ${JSON.stringify(addonSnapshots)}::jsonb, ${subtotal}, ${total},
           ${body.payment_method}, ${body.payment_ref ?? null},
@@ -1725,7 +1747,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
         order: {
           id: orderId,
           ticket_code: ticketCode,
-          branch_id: body.branch_id,
+          branch_id: effectiveBranchId,
           plate: body.plate.toUpperCase(),
           package_name: pkg.name,
           package_price_cents: pkg.price_cents,

@@ -19,6 +19,7 @@ import {
   CheckCircle2,
   Loader2,
   LogOut,
+  MapPin,
   Plus,
   ReceiptText,
   ShieldCheck,
@@ -110,6 +111,23 @@ const PAYMENT_LABELS: Record<PaymentMethod, string> = {
   voucher: "Voucher",
 };
 
+// Source of truth for branch id -> display name. Lane/cashier accounts
+// are bound to one of these via staff.branch_id; owner/manager can
+// switch freely via the branch picker.
+const BRANCHES: ReadonlyArray<{ id: number; name: string }> = [
+  { id: 1, name: "Tungku Link" },
+  { id: 2, name: "Salar" },
+  { id: 3, name: "Bengkurong" },
+  { id: 4, name: "Tutong" },
+  { id: 5, name: "Lambak" },
+];
+
+const BRANCH_NAME_BY_ID: Record<number, string> = Object.fromEntries(
+  BRANCHES.map((b) => [b.id, b.name]),
+);
+
+const BRANCH_LS_KEY = "cx.pos.branchId";
+
 function formatBND(cents: number): string {
   return `B$${(cents / 100).toFixed(2)}`;
 }
@@ -139,7 +157,31 @@ export default function POS() {
   // Confirmation state
   const [lastOrder, setLastOrder] = useState<CreatedOrder | null>(null);
 
-  const branchId = staff?.branchId ?? null;
+  // Branch resolution.
+  // - Owner & manager pick a branch via the dropdown; choice persists
+  //   in localStorage so a refresh doesn't kick them back to "no branch".
+  // - Lane & cashier are locked to staff.branchId — the server enforces
+  //   this regardless of what the client sends.
+  const canSwitchBranch =
+    staff?.role === "owner" || staff?.role === "manager";
+
+  const [pickedBranchId, setPickedBranchId] = useState<number | null>(() => {
+    if (typeof window === "undefined") return null;
+    const v = window.localStorage.getItem(BRANCH_LS_KEY);
+    const n = v ? Number.parseInt(v, 10) : NaN;
+    return Number.isInteger(n) && BRANCHES.some((b) => b.id === n) ? n : null;
+  });
+
+  const branchId: number | null = canSwitchBranch
+    ? pickedBranchId
+    : staff?.branchId ?? null;
+
+  const handlePickBranch = (id: number) => {
+    setPickedBranchId(id);
+    if (typeof window !== "undefined") {
+      window.localStorage.setItem(BRANCH_LS_KEY, String(id));
+    }
+  };
 
   const { data: catalog, isLoading: catalogLoading } = useQuery<CatalogResponse>({
     queryKey: ["/api/pos/catalog"],
@@ -385,11 +427,11 @@ export default function POS() {
                   <span className="capitalize" data-testid="text-staff-role">
                     {staff.role}
                   </span>
-                  {staff.branchId !== null && (
+                  {branchId !== null && (
                     <>
                       <span className="text-gray-400">·</span>
                       <span data-testid="text-staff-branch">
-                        Branch {staff.branchId}
+                        {BRANCH_NAME_BY_ID[branchId] ?? `Branch ${branchId}`}
                       </span>
                     </>
                   )}
@@ -407,11 +449,20 @@ export default function POS() {
             </div>
           </div>
 
-          {branchId === null && (
+          {!canSwitchBranch && branchId === null && (
             <Card className="border-amber-300 bg-amber-50">
               <CardContent className="p-4 text-amber-900 text-sm">
                 Your staff account isn't tied to a branch yet. Ask the owner
-                to set <code>staff.branch_id</code> before taking orders.
+                to set your branch before taking orders.
+              </CardContent>
+            </Card>
+          )}
+
+          {canSwitchBranch && branchId === null && (
+            <Card className="border-amber-300 bg-amber-50">
+              <CardContent className="p-4 text-amber-900 text-sm">
+                Pick a branch below to start taking orders. Your choice is
+                remembered on this device.
               </CardContent>
             </Card>
           )}
@@ -419,6 +470,44 @@ export default function POS() {
           <div className="grid lg:grid-cols-3 gap-6">
             {/* --- Left: Order builder ----------------------------------- */}
             <div className="lg:col-span-2 space-y-4">
+              {/* Branch — switcher for owner/manager, locked badge for lane/cashier */}
+              <Card>
+                <CardHeader>
+                  <CardTitle className="text-base flex items-center gap-2">
+                    <MapPin className="w-4 h-4" />
+                    Branch
+                  </CardTitle>
+                </CardHeader>
+                <CardContent>
+                  {canSwitchBranch ? (
+                    <Select
+                      value={branchId !== null ? String(branchId) : ""}
+                      onValueChange={(v) => handlePickBranch(Number(v))}
+                    >
+                      <SelectTrigger data-testid="select-branch">
+                        <SelectValue placeholder="Select a branch…" />
+                      </SelectTrigger>
+                      <SelectContent>
+                        {BRANCHES.map((b) => (
+                          <SelectItem key={b.id} value={String(b.id)}>
+                            {b.name}
+                          </SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                  ) : (
+                    <div
+                      className="text-sm text-gray-700 bg-gray-50 border border-gray-200 rounded-md px-3 py-2"
+                      data-testid="text-locked-branch"
+                    >
+                      {branchId !== null
+                        ? BRANCH_NAME_BY_ID[branchId] ?? `Branch ${branchId}`
+                        : "No branch assigned"}
+                    </div>
+                  )}
+                </CardContent>
+              </Card>
+
               {/* Package picker */}
               <Card>
                 <CardHeader>
