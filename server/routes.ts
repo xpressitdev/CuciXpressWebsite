@@ -619,6 +619,207 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
+  // GET /api/admin/reports/orders/export
+  // Same filters as /api/admin/reports/orders, no pagination. Streams an
+  // .xlsx file with the 25-column "Master Sales Data" layout the owner
+  // already feeds into Power BI:
+  //   Source.Name, ID, Receipt Date, Receipt Time, Store Name, POS Name,
+  //   Employee Name, Is Refund, Original Receipt No, Order Number,
+  //   Customer Name, Payment Type, Subtotal, Discount Total,
+  //   Promocode Discount Total, Service Charge Total, Tax Total,
+  //   Order Total, Paid Amount, Change, Order Notes, Item Notes,
+  //   Extracted_Brand, Extracted_Model, License_Plate
+  // Receipt Date / Time are Excel serial numbers (Asia/Brunei wall clock)
+  // for parity with the KedaiPOS export the user has been uploading.
+  // Hard-capped at 100,000 rows per call.
+  app.get('/api/admin/reports/orders/export', requireStaff, requireStaffRole('owner', 'manager'), async (req, res) => {
+    const branchParam = String(req.query.branch_id ?? 'all').trim();
+    const branchId =
+      branchParam === '' || branchParam === 'all' ? null : Number(branchParam);
+    if (branchId !== null && (!Number.isFinite(branchId) || branchId <= 0)) {
+      return res.status(400).json({ error: 'invalid_branch_id' });
+    }
+    const isDate = (s: string) => /^\d{4}-\d{2}-\d{2}$/.test(s);
+    const fromParam = String(req.query.from ?? '').trim();
+    const toParam = String(req.query.to ?? '').trim();
+    const paymentMethod = String(req.query.payment_method ?? 'all').trim();
+    const staffParam = String(req.query.staff_id ?? 'all').trim();
+    const search = String(req.query.search ?? '').trim();
+
+    try {
+      const todayRow = (await db.execute(
+        sql`SELECT (now() AT TIME ZONE 'Asia/Brunei')::date AS d`,
+      )).rows[0] as { d: string };
+      const from = isDate(fromParam) ? fromParam : todayRow.d;
+      const to = isDate(toParam) ? toParam : from;
+
+      const branchFilter = branchId !== null ? sql`AND o.branch_id = ${branchId}` : sql``;
+      const pmFilter = paymentMethod !== '' && paymentMethod !== 'all'
+        ? sql`AND o.payment_method = ${paymentMethod}` : sql``;
+      const staffFilter = staffParam !== '' && staffParam !== 'all'
+        ? sql`AND o.staff_id = ${staffParam}` : sql``;
+      const searchFilter = search.length >= 2
+        ? sql`AND (o.ticket_code ILIKE ${'%' + search + '%'}
+                OR o.plate       ILIKE ${'%' + search + '%'}
+                OR COALESCE(o.customer_name_walkin,'') ILIKE ${'%' + search + '%'})`
+        : sql``;
+
+      // Cheap count first so we can bail before serialising 100k rows.
+      const countRow = (await db.execute(sql`
+        SELECT COUNT(*)::int AS n
+          FROM orders o
+         WHERE o.ticket_day BETWEEN ${from}::date AND ${to}::date
+           ${branchFilter} ${pmFilter} ${staffFilter} ${searchFilter}
+      `)).rows[0] as { n: number };
+
+      const ROW_CAP = 100_000;
+      if (countRow.n > ROW_CAP) {
+        return res.status(413).json({
+          error: 'too_many_rows',
+          row_count: countRow.n,
+          row_cap: ROW_CAP,
+          hint: 'Narrow the date range or branch filter.',
+        });
+      }
+
+      const rows = (await db.execute(sql`
+        SELECT
+          o.id, o.ticket_code, o.plate, o.created_at,
+          o.payment_method, o.qr_provider, o.status,
+          o.subtotal_cents, o.total_cents, o.paid_amount_cents,
+          o.change_cents, o.discount_cents, o.promo_discount_cents,
+          o.service_charge_cents, o.tax_cents,
+          o.order_notes, o.item_notes,
+          o.original_receipt_no, o.kedaipos_id, o.kedaipos_order_number,
+          o.kedaipos_pos_name, o.customer_name_walkin,
+          b.name AS branch_name,
+          s.name AS staff_name,
+          c.brand AS car_brand, c.model AS car_model
+          FROM orders o
+          LEFT JOIN branches b ON b.id = o.branch_id
+          LEFT JOIN staff    s ON s.id = o.staff_id
+          LEFT JOIN cars     c ON c.id = o.vehicle_id
+         WHERE o.ticket_day BETWEEN ${from}::date AND ${to}::date
+           ${branchFilter} ${pmFilter} ${staffFilter} ${searchFilter}
+         ORDER BY o.created_at ASC
+      `)).rows as Array<any>;
+
+      // Map our internal payment_method to the KedaiPOS labels the
+      // historical xlsx uses, so Power BI dashboards keyed off the
+      // string values keep working unchanged.
+      const paymentLabel = (pm: string, qrProvider: string | null): string => {
+        switch (pm) {
+          case 'cash':          return 'Cash';
+          case 'bank_transfer': return 'Bank Transfer';
+          case 'card':          return 'Card';
+          case 'baiduri_pay':   return 'Baiduripay';
+          case 'voucher':       return 'Voucher';
+          case 'subscription':  return 'Subscription';
+          case 'qr_code':
+            if (qrProvider === 'pocket_pay')          return 'Pocket Payment QR';
+            if (qrProvider === 'pocket_pay_invoice')  return 'Pocket Payment Invoice';
+            if (qrProvider === 'dst_easy' || qrProvider === 'quickpay') return 'Quickpay';
+            if (qrProvider === 'baiduri_ms')          return 'Baiduri MS Payment Request';
+            return 'Pocket Payment QR';
+          default: return pm;
+        }
+      };
+
+      // Excel serial date math, in Asia/Brunei (UTC+8). Excel epoch = 1899-12-30
+      // (the "Lotus leap-year bug" baseline that Excel inherits), which is
+      // 25569 days before the Unix epoch.
+      const EXCEL_EPOCH_OFFSET_DAYS = 25569;
+      const excelDateParts = (utc: Date) => {
+        const bndMs = utc.getTime() + 8 * 3600_000;
+        const days = bndMs / 86_400_000;
+        const dateSerial = Math.floor(days) + EXCEL_EPOCH_OFFSET_DAYS;
+        const timeFrac = days - Math.floor(days);
+        return { dateSerial, timeFrac };
+      };
+
+      const dash = (v: any) => (v === null || v === undefined || v === '' ? '-' : v);
+      const cents = (n: number | null | undefined) => (n == null ? 0 : n / 100);
+
+      const xlsxMod = await import('xlsx');
+      const XLSX = (xlsxMod as any).default ?? xlsxMod;
+
+      const HEADERS = [
+        'Source.Name', 'ID', 'Receipt Date', 'Receipt Time', 'Store Name',
+        'POS Name', 'Employee Name', 'Is Refund', 'Original Receipt No',
+        'Order Number', 'Customer Name', 'Payment Type', 'Subtotal',
+        'Discount Total', 'Promocode Discount Total', 'Service Charge Total',
+        'Tax Total', 'Order Total', 'Paid Amount', 'Change', 'Order Notes',
+        'Item Notes', 'Extracted_Brand', 'Extracted_Model', 'License_Plate',
+      ];
+
+      const aoa: any[][] = [HEADERS];
+      for (const r of rows) {
+        const { dateSerial, timeFrac } = excelDateParts(new Date(r.created_at));
+        aoa.push([
+          'cucixpress_live_export',
+          r.kedaipos_id ?? r.id,
+          dateSerial,
+          timeFrac,
+          dash(r.branch_name),
+          dash(r.kedaipos_pos_name ?? 'Default'),
+          dash(r.staff_name),
+          r.status === 'refunded' ? 'Yes' : 'No',
+          dash(r.original_receipt_no),
+          dash(r.kedaipos_order_number ?? r.ticket_code),
+          dash(r.customer_name_walkin),
+          paymentLabel(r.payment_method, r.qr_provider),
+          cents(r.subtotal_cents),
+          cents(r.discount_cents),
+          cents(r.promo_discount_cents),
+          cents(r.service_charge_cents),
+          cents(r.tax_cents),
+          cents(r.total_cents),
+          cents(r.paid_amount_cents),
+          cents(r.change_cents),
+          dash(r.order_notes),
+          dash(r.item_notes),
+          dash(r.car_brand),
+          dash(r.car_model),
+          dash(r.plate),
+        ]);
+      }
+
+      const ws = XLSX.utils.aoa_to_sheet(aoa);
+      // Format columns C (Receipt Date) and D (Receipt Time) as date/time
+      // so Power BI / Excel render them correctly.
+      const range = XLSX.utils.decode_range(ws['!ref']);
+      for (let R = 1; R <= range.e.r; R++) {
+        const dateCell = ws[XLSX.utils.encode_cell({ r: R, c: 2 })];
+        const timeCell = ws[XLSX.utils.encode_cell({ r: R, c: 3 })];
+        if (dateCell) { dateCell.t = 'n'; dateCell.z = 'yyyy-mm-dd'; }
+        if (timeCell) { timeCell.t = 'n'; timeCell.z = 'hh:mm:ss'; }
+      }
+      ws['!cols'] = HEADERS.map((h) => ({ wch: Math.min(28, Math.max(10, h.length + 2)) }));
+
+      const wb = XLSX.utils.book_new();
+      XLSX.utils.book_append_sheet(wb, ws, 'cuci xpress');
+      const buf: Buffer = XLSX.write(wb, { type: 'buffer', bookType: 'xlsx' });
+
+      const pad = (n: number) => String(n).padStart(2, '0');
+      const stamp = (() => {
+        const d = new Date();
+        return `${d.getUTCFullYear()}${pad(d.getUTCMonth() + 1)}${pad(d.getUTCDate())}_${pad(d.getUTCHours())}${pad(d.getUTCMinutes())}`;
+      })();
+      const filename = `cucixpress_master_sales_${from}_to_${to}_${stamp}.xlsx`;
+
+      res.setHeader(
+        'Content-Type',
+        'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+      );
+      res.setHeader('Content-Disposition', `attachment; filename="${filename}"`);
+      res.setHeader('Content-Length', String(buf.length));
+      res.end(buf);
+    } catch (err) {
+      console.error('[admin.reports.orders.export] failed:', err);
+      res.status(500).json({ error: 'export_failed' });
+    }
+  });
+
   // Test Google API key endpoint
   app.get("/api/test-google-api", async (req, res) => {
     try {

@@ -39,6 +39,7 @@ import {
   ClipboardList,
   RefreshCw,
   Search,
+  Download,
 } from "lucide-react";
 import { Link } from "wouter";
 import { motion } from "framer-motion";
@@ -742,6 +743,54 @@ function OrdersReportTab() {
     setPage(1);
   };
 
+  // Bulk export to .xlsx — reuses the same filters as the table.
+  // We hit the export endpoint via fetch (so we can surface
+  // server-side errors like "too many rows") and trigger a
+  // download from the response Blob.
+  const [isExporting, setIsExporting] = useState(false);
+  const onExport = async () => {
+    const sp = new URLSearchParams();
+    sp.set("branch_id", branchId);
+    sp.set("from", from);
+    sp.set("to", to);
+    sp.set("payment_method", paymentMethod);
+    sp.set("staff_id", staffId);
+    if (search.trim().length >= 2) sp.set("search", search.trim());
+    setIsExporting(true);
+    try {
+      const res = await fetch(`/api/admin/reports/orders/export?${sp.toString()}`, {
+        credentials: "include",
+      });
+      if (!res.ok) {
+        let msg = "Export failed.";
+        try {
+          const body = await res.json();
+          if (body?.error === "too_many_rows") {
+            msg = `Too many rows (${body.row_count?.toLocaleString?.() ?? "?"}). Narrow the date range or branch and try again.`;
+          } else if (body?.error) {
+            msg = body.error;
+          }
+        } catch { /* non-JSON response, keep generic message */ }
+        alert(msg);
+        return;
+      }
+      const blob = await res.blob();
+      const dispo = res.headers.get("content-disposition") ?? "";
+      const m = /filename="?([^";]+)"?/i.exec(dispo);
+      const filename = m?.[1] ?? `cucixpress_master_sales_${from}_to_${to}.xlsx`;
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = filename;
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+      URL.revokeObjectURL(url);
+    } finally {
+      setIsExporting(false);
+    }
+  };
+
   const summary: Array<{ label: string; value: string; testId: string }> = totals
     ? [
         { label: "Transactions",       value: String(totals.transactions),              testId: "report-tile-tx" },
@@ -816,12 +865,23 @@ function OrdersReportTab() {
               />
             </div>
           </div>
-          <div className="flex gap-2 mt-4">
+          <div className="flex gap-2 mt-4 flex-wrap">
             <Button onClick={onApplyFilters} disabled={isFetching} data-testid="button-report-search">
               <Search className="w-4 h-4 mr-1" />
               Search
             </Button>
             <Button variant="outline" onClick={onReset} data-testid="button-report-reset">Reset</Button>
+            <Button
+              variant="outline"
+              onClick={onExport}
+              disabled={isExporting || isFetching}
+              className="ml-auto"
+              data-testid="button-report-export"
+              title="Download an .xlsx file with the same fields as the KedaiPOS Master Sales export, ready for Power BI."
+            >
+              <Download className={`w-4 h-4 mr-1 ${isExporting ? "animate-pulse" : ""}`} />
+              {isExporting ? "Preparing…" : "Export to Excel"}
+            </Button>
           </div>
         </CardContent>
       </Card>

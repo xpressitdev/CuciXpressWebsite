@@ -745,3 +745,42 @@ Subscriptions tabs.
 Phase 4 follow-up: fixed `refundOrder` mutation in `pos.tsx` —
 `apiRequest` returns the raw `Response`, so we now `await res.json()`
 inside the mutation to actually consume the body.
+
+---
+
+## Phase 5a addendum — Bulk export to Excel for Power BI (no schema change)
+
+`GET /api/admin/reports/orders/export` — same query string as
+`/api/admin/reports/orders` (branch, date range, payment method,
+staff, search), no pagination. Streams an `.xlsx` file with the
+**25-column "Master Sales Data"** layout the owner already feeds
+into Power BI:
+
+```
+Source.Name, ID, Receipt Date, Receipt Time, Store Name, POS Name,
+Employee Name, Is Refund, Original Receipt No, Order Number,
+Customer Name, Payment Type, Subtotal, Discount Total,
+Promocode Discount Total, Service Charge Total, Tax Total,
+Order Total, Paid Amount, Change, Order Notes, Item Notes,
+Extracted_Brand, Extracted_Model, License_Plate
+```
+
+Receipt Date / Time emitted as Excel serials in Asia/Brunei wall
+clock (parity with the historical KedaiPOS xlsx). Payment methods
+are mapped back to KedaiPOS labels (`cash` → "Cash",
+`bank_transfer` → "Bank Transfer", `qr_code` + provider →
+"Pocket Payment QR" / "Quickpay" / "Baiduri MS Payment Request",
+etc.) so existing Power BI dashboards keyed on string values keep
+working unchanged. Refunded rows are emitted as a single line with
+`Is Refund=Yes` and `Order Total` carrying the refund amount —
+matching how our refund flow stores them (we don't generate a
+separate negative row).
+
+Hard-capped at 100,000 rows per call → 413 with
+`{ error: 'too_many_rows', row_count, row_cap, hint }` if exceeded.
+Surfaced in the Order Report tab as a "Export to Excel" button next
+to Search/Reset; the client downloads via Blob and gets the
+auto-generated filename `cucixpress_master_sales_<from>_to_<to>_<utc>.xlsx`.
+
+Owner/manager only via `requireStaffRole`. Uses the existing
+`xlsx@^0.18.5` package — no new deps.

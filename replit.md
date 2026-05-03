@@ -286,7 +286,7 @@ Two auth systems coexist by design during the Week 1–Week 2 cutover:
    prompt for v1 — Phase 7 visual refresh will replace with a
    proper modal. Migration applied to staging and prod 2026-05-04.
 
-   **Phase 5a — Owner Dashboard + Order Report (no migration):**
+   **Phase 5a — Owner Dashboard + Order Report + bulk Excel export (no migration):**
    Two new admin endpoints over the existing tables:
    `GET /api/admin/dashboard` returns 12 KPI tiles (today's
    transactions, sales, avg, items sold, refund count, total
@@ -310,3 +310,18 @@ Two auth systems coexist by design during the Week 1–Week 2 cutover:
    was casting the raw Response to the parsed shape; it now does
    `await res.json()` so the success toast actually reads
    `data.order.ticket_code`.
+
+   **Phase 5a addendum — Power BI export.** New
+   `GET /api/admin/reports/orders/export` endpoint streams an
+   `.xlsx` matching the 25-column "Master Sales Data" layout the
+   owner already uses for Power BI (Source.Name, ID, Receipt Date,
+   Receipt Time, Store Name, POS Name, Employee Name, Is Refund,
+   Original Receipt No, Order Number, Customer Name, Payment Type,
+   Subtotal, Discount Total, Promocode Discount Total, Service
+   Charge Total, Tax Total, Order Total, Paid Amount, Change, Order
+   Notes, Item Notes, Extracted_Brand, Extracted_Model, License_
+   Plate). Same filters as the Order Report. Receipt Date/Time are
+   Excel serials in Asia/Brunei. Payment methods are remapped to
+   KedaiPOS labels so dashboards keep working unchanged. Hard-capped
+   at 100,000 rows per export (413 + JSON hint when exceeded).
+   Surfaced as an "Export to Excel" button on the Order Report tab.
