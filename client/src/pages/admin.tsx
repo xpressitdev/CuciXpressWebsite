@@ -138,7 +138,7 @@ export default function Admin() {
 
   if (authLoading) {
     return (
-      <div className="min-h-screen bg-gray-50">
+      <div className="cuci-page-bg">
         <Navigation />
         <main className="pt-20 pb-16">
           <div className="max-w-6xl mx-auto px-4 sm:px-6 lg:px-8">
@@ -157,7 +157,7 @@ export default function Admin() {
 
   if (!isAuthenticated) {
     return (
-      <div className="min-h-screen bg-gray-50">
+      <div className="cuci-page-bg">
         <Navigation />
         <main className="pt-20 pb-16">
           <div className="max-w-md mx-auto px-4 sm:px-6 lg:px-8">
@@ -179,7 +179,7 @@ export default function Admin() {
   const unreadCount = submissions.filter(s => !s.isRead).length;
 
   return (
-    <div className="min-h-screen bg-gray-50">
+    <div className="cuci-page-bg">
       <Navigation />
       <main className="pt-20 pb-16">
         <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 space-y-8">
@@ -192,12 +192,15 @@ export default function Admin() {
             </Link>
             <div className="flex items-center justify-between flex-wrap gap-4">
               <div>
-                <h1 className="text-3xl font-bold text-gray-900">Admin Dashboard</h1>
-                <p className="text-gray-600 mt-2">
+                <div className="cuci-eyebrow mb-2">Cuci Xpress · Staff console</div>
+                <h1 className="text-4xl md:text-5xl font-extrabold tracking-tight text-gray-900">
+                  Admin <span className="text-cuci-primary">dashboard</span>
+                </h1>
+                <p className="text-gray-600 mt-2 text-base">
                   Sales overview, order reports, and signup management.
                 </p>
                 {staff && (
-                  <div className="mt-3 inline-flex items-center gap-2 text-sm text-gray-700 bg-cuci-primary/5 border border-cuci-primary/20 rounded-full px-3 py-1">
+                  <div className="mt-4 inline-flex items-center gap-2 text-sm font-semibold text-gray-800 bg-white border-2 border-black rounded-full px-3 py-1.5">
                     <ShieldCheck className="w-4 h-4 text-cuci-primary" />
                     <span data-testid="text-staff-name">{staff.name}</span>
                     <span className="text-gray-400">·</span>
@@ -205,15 +208,14 @@ export default function Admin() {
                   </div>
                 )}
               </div>
-              <Button
-                variant="outline"
+              <button
                 onClick={logout}
-                className="flex items-center gap-2"
+                className="cuci-cta bg-white text-gray-900 px-5 py-2.5 rounded-full inline-flex items-center gap-2 text-sm"
                 data-testid="button-staff-logout"
               >
                 <LogOut className="w-4 h-4" />
                 Logout
-              </Button>
+              </button>
             </div>
           </div>
 
@@ -239,8 +241,11 @@ export default function Admin() {
             return (
           <Tabs defaultValue="dashboard" className="w-full">
             <TabsList
-              className="grid w-full"
-              style={{ gridTemplateColumns: `repeat(${colSm}, minmax(0, 1fr))` }}
+              className="grid w-full bg-white border-2 border-black rounded-xl p-1 h-auto"
+              style={{
+                gridTemplateColumns: `repeat(${colSm}, minmax(0, 1fr))`,
+                boxShadow: "3px 3px 0px 0px rgba(0,0,0,0.9)",
+              }}
             >
               <TabsTrigger value="dashboard" className="flex items-center gap-2" data-testid="tab-dashboard">
                 <BarChart3 className="w-4 h-4" />
@@ -656,12 +661,12 @@ function DashboardTab() {
               {tileDefs.map((t) => (
                 <div
                   key={t.label}
-                  className="rounded-lg border p-4 flex flex-col gap-2"
+                  className="cuci-kpi flex flex-col gap-2"
                   data-testid={t.testId}
                 >
-                  <span className="text-xs text-gray-600">{t.label}</span>
+                  <span className="cuci-eyebrow">{t.label}</span>
                   <span
-                    className={`inline-flex w-fit items-center rounded-full px-3 py-1 text-sm font-semibold ring-1 ${toneClass[t.tone]}`}
+                    className={`inline-flex w-fit items-center rounded-full px-3 py-1 text-sm font-extrabold border-2 border-black ${toneClass[t.tone]}`}
                   >
                     {t.value}
                   </span>

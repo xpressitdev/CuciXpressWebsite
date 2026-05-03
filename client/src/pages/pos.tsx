@@ -668,7 +668,7 @@ export default function POS() {
 
   if (authLoading) {
     return (
-      <div className="min-h-screen bg-gray-50 flex items-center justify-center">
+      <div className="cuci-page-bg flex items-center justify-center">
         <Loader2 className="w-8 h-8 animate-spin text-cuci-primary" />
       </div>
     );
@@ -676,7 +676,7 @@ export default function POS() {
 
   if (!isAuthenticated) {
     return (
-      <div className="min-h-screen bg-gray-50">
+      <div className="cuci-page-bg">
         <main className="pt-20 pb-16">
           <div className="max-w-md mx-auto px-4">
             <AdminLogin onLogin={login} />
@@ -690,65 +690,71 @@ export default function POS() {
 
   if (lastOrder) {
     return (
-      <div className="min-h-screen bg-gray-50">
+      <div className="cuci-page-bg">
         <main className="pt-12 pb-16">
           <div className="max-w-2xl mx-auto px-4">
-            <Card className="shadow-lg" data-testid="card-order-confirmation">
-              <CardHeader className="text-center">
-                <div className="mx-auto w-16 h-16 bg-green-100 rounded-full flex items-center justify-center mb-3">
+            <div className="cuci-card p-8" data-testid="card-order-confirmation">
+              <div className="text-center">
+                <div className="mx-auto w-16 h-16 rounded-full border-2 border-black bg-green-100 flex items-center justify-center mb-4">
                   <CheckCircle2 className="w-9 h-9 text-green-600" />
                 </div>
-                <CardTitle className="text-2xl">Order Confirmed</CardTitle>
-                <p className="text-gray-600">Ticket issued — hand to lane</p>
-              </CardHeader>
-              <CardContent className="space-y-4">
-                <div className="text-center">
-                  <div className="text-5xl font-bold tracking-wider text-cuci-primary"
-                       data-testid="text-ticket-code">
-                    {lastOrder.ticket_code}
-                  </div>
-                  <div className="mt-2 text-lg font-semibold text-gray-900"
-                       data-testid="text-ticket-plate">
-                    {lastOrder.plate}
-                  </div>
-                </div>
-                <Separator />
-                <div className="space-y-2 text-sm">
-                  <div className="flex justify-between">
-                    <span className="text-gray-600">{lastOrder.package_name}</span>
-                    <span>{formatBND(lastOrder.package_price_cents)}</span>
-                  </div>
-                  {lastOrder.addons.map((a) => (
-                    <div key={a.id} className="flex justify-between text-gray-600">
-                      <span>+ {a.name}</span>
-                      <span>{formatBND(a.price_cents)}</span>
-                    </div>
-                  ))}
-                  <Separator />
-                  <div className="flex justify-between text-lg font-bold">
-                    <span>Total</span>
-                    <span data-testid="text-ticket-total">
-                      {formatBND(lastOrder.total_cents)}
-                    </span>
-                  </div>
-                  <div className="flex justify-between text-gray-600">
-                    <span>Paid via</span>
-                    <span className="capitalize">
-                      {PAYMENT_LABELS[lastOrder.payment_method]}
-                    </span>
-                  </div>
-                </div>
-                <Button
-                  onClick={resetForNew}
-                  className="w-full"
-                  size="lg"
-                  data-testid="button-new-order"
+                <div className="cuci-eyebrow mb-2">Ticket issued</div>
+                <h2 className="text-3xl font-extrabold tracking-tight text-gray-900">
+                  Order <span className="text-cuci-primary">confirmed</span>
+                </h2>
+                <p className="text-gray-600 mt-2 text-sm">Hand the ticket to the lane.</p>
+              </div>
+
+              <div className="mt-6 mb-6 rounded-xl border-2 border-black bg-gradient-to-br from-cuci-primary/10 to-cuci-secondary/10 p-6 text-center">
+                <div
+                  className="text-6xl font-extrabold tracking-wider text-cuci-primary"
+                  data-testid="text-ticket-code"
                 >
-                  <Plus className="w-4 h-4 mr-2" />
-                  New Order
-                </Button>
-              </CardContent>
-            </Card>
+                  {lastOrder.ticket_code}
+                </div>
+                <div
+                  className="mt-2 text-xl font-bold text-gray-900"
+                  data-testid="text-ticket-plate"
+                >
+                  {lastOrder.plate}
+                </div>
+              </div>
+
+              <div className="space-y-2 text-sm">
+                <div className="flex justify-between">
+                  <span className="text-gray-700">{lastOrder.package_name}</span>
+                  <span className="font-semibold">{formatBND(lastOrder.package_price_cents)}</span>
+                </div>
+                {lastOrder.addons.map((a) => (
+                  <div key={a.id} className="flex justify-between text-gray-600">
+                    <span>+ {a.name}</span>
+                    <span>{formatBND(a.price_cents)}</span>
+                  </div>
+                ))}
+                <div className="border-t-2 border-dashed border-gray-300 my-3" />
+                <div className="flex justify-between text-lg font-extrabold">
+                  <span>Total</span>
+                  <span data-testid="text-ticket-total">
+                    {formatBND(lastOrder.total_cents)}
+                  </span>
+                </div>
+                <div className="flex justify-between text-gray-600">
+                  <span>Paid via</span>
+                  <span className="capitalize font-semibold">
+                    {PAYMENT_LABELS[lastOrder.payment_method]}
+                  </span>
+                </div>
+              </div>
+
+              <button
+                onClick={resetForNew}
+                className="cuci-cta bg-cuci-primary text-white w-full rounded-lg px-4 py-3 mt-6 inline-flex items-center justify-center gap-2 text-base"
+                data-testid="button-new-order"
+              >
+                <Plus className="w-5 h-5" />
+                New order
+              </button>
+            </div>
           </div>
         </main>
       </div>
@@ -759,7 +765,7 @@ export default function POS() {
 
   if (catalogLoading || !catalog) {
     return (
-      <div className="min-h-screen bg-gray-50 flex items-center justify-center">
+      <div className="cuci-page-bg flex items-center justify-center">
         <div className="text-center">
           <Loader2 className="w-8 h-8 animate-spin text-cuci-primary mx-auto mb-3" />
           <p className="text-gray-600">Loading catalog…</p>
@@ -770,7 +776,7 @@ export default function POS() {
 
   if (catalog.packages.length === 0) {
     return (
-      <div className="min-h-screen bg-gray-50 flex items-center justify-center px-4">
+      <div className="cuci-page-bg flex items-center justify-center px-4">
         <Card className="max-w-md">
           <CardContent className="p-6 text-center">
             <p className="text-gray-700">
@@ -785,23 +791,26 @@ export default function POS() {
   // ---- Main POS form -------------------------------------------------------
 
   return (
-    <div className="min-h-screen bg-gray-50">
+    <div className="cuci-page-bg">
       <main className="pt-6 pb-16">
         <div className="max-w-6xl mx-auto px-4 space-y-6">
-          {/* Header */}
+          {/* Header — eyebrow + duotone, brutalist staff chip + CTAs. */}
           <div className="flex items-center justify-between flex-wrap gap-3">
-            <div className="space-y-1">
+            <div className="space-y-2">
               <Link href="/" className="inline-block">
-                <button className="flex items-center text-sm text-gray-600 hover:text-cuci-primary transition-colors">
+                <button className="flex items-center text-sm text-gray-600 hover:text-cuci-primary transition-colors font-semibold">
                   <ArrowLeft className="w-4 h-4 mr-1" />
                   Back
                 </button>
               </Link>
-              <h1 className="text-2xl font-bold text-gray-900">Point of Sale</h1>
+              <div className="cuci-eyebrow">Cashier · Cuci Xpress</div>
+              <h1 className="text-3xl md:text-4xl font-extrabold tracking-tight text-gray-900">
+                Point of <span className="text-cuci-primary">sale</span>
+              </h1>
             </div>
-            <div className="flex items-center gap-3">
+            <div className="flex items-center gap-2 flex-wrap">
               {staff && (
-                <div className="inline-flex items-center gap-2 text-sm text-gray-700 bg-cuci-primary/5 border border-cuci-primary/20 rounded-full px-3 py-1">
+                <div className="inline-flex items-center gap-2 text-sm font-semibold text-gray-800 bg-white border-2 border-black rounded-full px-3 py-1.5">
                   <ShieldCheck className="w-4 h-4 text-cuci-primary" />
                   <span data-testid="text-staff-name">{staff.name}</span>
                   <span className="text-gray-400">·</span>
@@ -822,24 +831,22 @@ export default function POS() {
                   can pull the dashboard, payment-method breakdown, and Excel
                   export. Same staff session, no second login. */}
               <Link href="/admin">
-                <Button
-                  variant="outline"
-                  size="sm"
+                <button
+                  className="cuci-cta bg-white text-gray-900 px-4 py-2 rounded-full inline-flex items-center gap-2 text-sm"
                   data-testid="button-pos-eod-report"
                 >
-                  <BarChart3 className="w-4 h-4 mr-1" />
-                  End-of-Day Report
-                </Button>
+                  <BarChart3 className="w-4 h-4" />
+                  End-of-Day
+                </button>
               </Link>
-              <Button
-                variant="outline"
-                size="sm"
+              <button
                 onClick={logout}
+                className="cuci-cta bg-white text-gray-900 px-4 py-2 rounded-full inline-flex items-center gap-2 text-sm"
                 data-testid="button-staff-logout"
               >
-                <LogOut className="w-4 h-4 mr-1" />
+                <LogOut className="w-4 h-4" />
                 Logout
-              </Button>
+              </button>
             </div>
           </div>
 
