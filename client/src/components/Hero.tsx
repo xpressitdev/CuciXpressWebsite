@@ -30,23 +30,9 @@ export default function Hero() {
           >
             <h1 className="text-4xl md:text-6xl font-black tracking-tight text-gray-900 leading-[1.05] mb-6">
               We've cleaned over{" "}
-              <span
-                className="bg-clip-text text-transparent"
-                style={{
-                  backgroundImage:
-                    "linear-gradient(to right, hsl(257, 74%, 66%), hsl(36, 100%, 50%))",
-                }}
-              >
-                120,000
-              </span>{" "}
+              <span className="cuci-rainbow-text">120,000</span>{" "}
               cars.
-              <span
-                className="block bg-clip-text text-transparent"
-                style={{
-                  backgroundImage:
-                    "linear-gradient(to right, hsl(257, 74%, 66%), hsl(36, 100%, 50%))",
-                }}
-              >
+              <span className="cuci-rainbow-text block">
                 And we're just getting started.
               </span>
             </h1>
