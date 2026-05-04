@@ -81,16 +81,11 @@ export const formatDateTime = (iso: string) => {
   return `${date} ${time}`;
 };
 
-export const PACKAGE_BADGE: Record<string, string> = {
-  basic: "bg-purple-100 text-purple-700",
-  full: "bg-purple-100 text-purple-700",
-  premium: "bg-amber-100 text-amber-700",
-};
-
+// Handoff rule: orange for Premium · purple for Full · gray for Basic
 export const packageBadgeClass = (name: string) => {
   const lower = name.toLowerCase();
   if (lower.includes("premium")) return "bg-amber-100 text-amber-700";
-  if (lower.includes("basic")) return "bg-blue-100 text-blue-700";
+  if (lower.includes("basic")) return "bg-gray-100 text-gray-700";
   return "bg-purple-100 text-purple-700";
 };
 
