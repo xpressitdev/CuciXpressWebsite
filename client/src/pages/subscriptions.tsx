@@ -195,6 +195,175 @@ export default function Subscriptions() {
             <div className="grid md:grid-cols-3 gap-6">
               {PLANS.map((plan, i) => {
                 const Icon = plan.icon;
+
+                // --- Premium gradient render branch (Unlimited Xpress) ---
+                // Spec: glowing 3-stop gradient + brutalist offset + soft bloom,
+                // glossy radial highlight, diagonal shimmer streak, 5 white
+                // twinkles, ★ MOST PICKED badge, big white price.
+                if (plan.popular) {
+                  const TWINKLES = [
+                    { top: 24,  left: "70%", size: 16, delay: "0s"   },
+                    { top: 140, left: "20%", size: 11, delay: "0.3s" },
+                    { top: 90,  left: "85%", size: 10, delay: "0.6s" },
+                    { top: 280, left: "78%", size: 14, delay: "1.2s" },
+                    { top: 360, left: "12%", size: 12, delay: "1.8s" },
+                  ];
+                  return (
+                    <motion.div
+                      key={plan.id}
+                      initial={{ opacity: 0, y: 24 }}
+                      whileInView={{ opacity: 1, y: 0 }}
+                      transition={{ duration: 0.45, delay: i * 0.08 }}
+                      viewport={{ once: true }}
+                      className="relative overflow-hidden flex flex-col md:-translate-y-2"
+                      style={{
+                        background:
+                          "linear-gradient(135deg, #7C5CE7 0%, #B47CF7 45%, #FF9500 100%)",
+                        border: "2px solid #000",
+                        borderRadius: 20,
+                        padding: 32,
+                        boxShadow:
+                          "8px 8px 0 0 rgba(0,0,0,0.92), 0 0 60px rgba(255,149,0,0.45), 0 0 100px rgba(124,92,231,0.35)",
+                      }}
+                      data-testid={`plan-card-${plan.id}`}
+                    >
+                      {/* Glossy double-radial highlight */}
+                      <div className="cuci-gloss" aria-hidden />
+                      {/* Diagonal shimmer streak */}
+                      <div className="cuci-shimmer-wrap" aria-hidden />
+                      {/* Twinkle stars */}
+                      {TWINKLES.map((t, ti) => (
+                        <svg
+                          key={ti}
+                          className="cuci-twinkle"
+                          width={t.size}
+                          height={t.size}
+                          viewBox="0 0 24 24"
+                          style={{ top: t.top, left: t.left, animationDelay: t.delay }}
+                          aria-hidden
+                        >
+                          <path
+                            d="M12 0 L13.5 10.5 L24 12 L13.5 13.5 L12 24 L10.5 13.5 L0 12 L10.5 10.5 Z"
+                            fill="#fff"
+                          />
+                        </svg>
+                      ))}
+
+                      {/* ★ MOST PICKED badge */}
+                      <div
+                        className="absolute"
+                        style={{
+                          top: -12,
+                          right: 24,
+                          background: "#FF9500",
+                          color: "#000",
+                          border: "2px solid #000",
+                          borderRadius: 999,
+                          padding: "4px 12px",
+                          fontSize: 11,
+                          fontWeight: 800,
+                          letterSpacing: 1,
+                          textTransform: "uppercase",
+                          zIndex: 3,
+                        }}
+                      >
+                        ★ Most picked
+                      </div>
+
+                      {/* Foreground content */}
+                      <div className="relative flex flex-col flex-1" style={{ zIndex: 1 }}>
+                        <div
+                          className="w-12 h-12 rounded-xl border-2 border-black flex items-center justify-center mb-5"
+                          style={{ background: "rgba(255,255,255,0.18)" }}
+                        >
+                          <Icon className="w-6 h-6 text-white" strokeWidth={2.5} />
+                        </div>
+
+                        {/* Tier label — soft yellow per spec */}
+                        <div
+                          style={{
+                            fontSize: 13,
+                            fontWeight: 800,
+                            color: "#FFE89E",
+                            textTransform: "uppercase",
+                            letterSpacing: 1.5,
+                            marginBottom: 6,
+                          }}
+                        >
+                          Member · Unlimited
+                        </div>
+
+                        <h3 className="text-2xl font-extrabold mb-1" style={{ color: "#fff" }}>
+                          {plan.name}
+                        </h3>
+                        <p className="text-sm mb-6" style={{ color: "rgba(255,255,255,0.85)" }}>
+                          {plan.tagline}
+                        </p>
+
+                        {/* Price — big & bold per spec */}
+                        <div className="flex items-baseline justify-center gap-2 mb-7">
+                          <span
+                            style={{
+                              fontSize: 64,
+                              fontWeight: 900,
+                              color: "#fff",
+                              letterSpacing: "-2.5px",
+                              textShadow: "0 4px 20px rgba(0,0,0,0.18)",
+                              lineHeight: 1,
+                            }}
+                          >
+                            {plan.price}
+                          </span>
+                          <span
+                            style={{
+                              fontSize: 14,
+                              fontWeight: 600,
+                              color: "rgba(255,255,255,0.9)",
+                            }}
+                          >
+                            {plan.cadence}
+                          </span>
+                        </div>
+
+                        <ul className="space-y-2.5 mb-7 flex-1">
+                          {plan.features.map((f) => (
+                            <li
+                              key={f}
+                              className="flex items-center gap-2.5 text-sm"
+                              style={{ color: "#fff" }}
+                            >
+                              <span
+                                className="flex items-center justify-center flex-shrink-0"
+                                style={{
+                                  width: 20,
+                                  height: 20,
+                                  borderRadius: "50%",
+                                  background: "#fff",
+                                }}
+                              >
+                                <Check className="w-3 h-3" strokeWidth={4} style={{ color: "#7C5CE7" }} />
+                              </span>
+                              <span>{f}</span>
+                            </li>
+                          ))}
+                        </ul>
+
+                        <Button
+                          onClick={() => setOpenPlan(plan)}
+                          className="w-full cuci-cta rounded-lg"
+                          style={{ background: "#fff", color: "#7C5CE7" }}
+                          data-testid={`button-subscribe-${plan.id}`}
+                        >
+                          <span className="mr-1">✦</span>
+                          Subscribe
+                          <ArrowRight className="w-4 h-4 ml-1" />
+                        </Button>
+                      </div>
+                    </motion.div>
+                  );
+                }
+
+                // --- Default white card render branch (Family + Corporate) ---
                 return (
                   <motion.div
                     key={plan.id}
@@ -202,16 +371,9 @@ export default function Subscriptions() {
                     whileInView={{ opacity: 1, y: 0 }}
                     transition={{ duration: 0.45, delay: i * 0.08 }}
                     viewport={{ once: true }}
-                    className={`relative cuci-card p-7 flex flex-col ${
-                      plan.popular ? "ring-2 ring-cuci-secondary md:-translate-y-2" : ""
-                    }`}
+                    className="relative cuci-card p-7 flex flex-col"
                     data-testid={`plan-card-${plan.id}`}
                   >
-                    {plan.popular && (
-                      <div className="absolute -top-3 left-1/2 -translate-x-1/2 bg-cuci-secondary text-black text-xs font-extrabold uppercase tracking-wider px-3 py-1 rounded-full border-2 border-black">
-                        Most popular
-                      </div>
-                    )}
                     <div
                       className={`w-12 h-12 rounded-xl border-2 border-black ${plan.accent} flex items-center justify-center mb-5`}
                     >
@@ -221,8 +383,8 @@ export default function Subscriptions() {
                       {plan.name}
                     </h3>
                     <p className="text-sm text-gray-500 mb-5">{plan.tagline}</p>
-                    <div className="flex items-baseline gap-1 mb-6">
-                      <span className="text-4xl font-black tracking-tight text-cuci-primary">
+                    <div className="flex items-baseline justify-center gap-1 mb-6">
+                      <span className="text-5xl font-black tracking-tight text-cuci-primary">
                         {plan.price}
                       </span>
                       <span className="text-sm text-gray-500 font-medium">
@@ -242,11 +404,7 @@ export default function Subscriptions() {
                     </ul>
                     <Button
                       onClick={() => setOpenPlan(plan)}
-                      className={`w-full cuci-cta ${
-                        plan.popular
-                          ? "bg-cuci-secondary text-black"
-                          : "bg-cuci-primary text-white"
-                      } rounded-lg`}
+                      className="w-full cuci-cta bg-cuci-primary text-white rounded-lg"
                       data-testid={`button-subscribe-${plan.id}`}
                     >
                       {plan.custom ? "Contact sales" : "Subscribe"}

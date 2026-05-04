@@ -183,6 +183,50 @@ html {
   75%, 100% { transform: scale(2); opacity: 0; }
 }
 
+/* --- Premium "Unlimited Xpress" plan card effects (Phase 11) ---
+   See the popular-card render branch in client/src/pages/subscriptions.tsx
+   for usage. Spec was hand-authored by the design ask. */
+.cuci-gloss {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  background:
+    radial-gradient(circle at 25% 15%, rgba(255, 255, 255, 0.55), transparent 38%),
+    radial-gradient(circle at 80% 90%, rgba(255, 255, 255, 0.25), transparent 45%);
+}
+.cuci-shimmer-wrap {
+  position: absolute;
+  top: -40px;
+  left: -40px;
+  right: -40px;
+  bottom: -40px;
+  pointer-events: none;
+  background: linear-gradient(
+    115deg,
+    transparent 38%,
+    rgba(255, 255, 255, 0.55) 48%,
+    rgba(255, 255, 255, 0) 58%
+  );
+  mix-blend-mode: overlay;
+  animation: cxshimmer 3.6s ease-in-out infinite;
+}
+@keyframes cxshimmer {
+  0%   { transform: translateX(-60%); opacity: 0; }
+  30%  { opacity: 1; }
+  60%  { opacity: 1; }
+  100% { transform: translateX(60%);  opacity: 0; }
+}
+.cuci-twinkle {
+  position: absolute;
+  pointer-events: none;
+  animation: cxtwinkle 2.4s ease-in-out infinite;
+  z-index: 2;
+}
+@keyframes cxtwinkle {
+  0%, 100% { transform: scale(0.4) rotate(0deg);  opacity: 0.3; }
+  50%      { transform: scale(1.2) rotate(45deg); opacity: 1;   }
+}
+
 /* Press-down interaction shared by all CTA buttons in the
    neo-brutalist style. Pair with the existing inline shadow. */
 .cuci-cta {

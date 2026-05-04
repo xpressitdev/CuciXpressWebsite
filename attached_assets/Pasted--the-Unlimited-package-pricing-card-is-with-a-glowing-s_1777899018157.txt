@@ -1,0 +1,83 @@
+> the Unlimited package pricing card is with a glowing, sparkling, animated treatment. Match the spec exactly.
+>
+> **Background gradient**
+> `linear-gradient(135deg, #7C5CE7 0%, #B47CF7 45%, #FF9500 100%)`
+> (purple → lilac → orange, diagonal)
+>
+> **Card shape**
+> - `border: 2px solid #000`
+> - `border-radius: 20px`
+> - `padding: 32px`
+> - `position: relative; overflow: hidden;` (required so effects clip cleanly)
+>
+> **Drop shadow + outer glow** (combine three layers in one `box-shadow`):
+> ```
+> box-shadow:
+>   8px 8px 0 0 rgba(0,0,0,0.92),
+>   0 0 60px rgba(255,149,0,0.45),
+>   0 0 100px rgba(124,92,231,0.35);
+> ```
+> First layer = hard brutalist offset shadow. Second + third = soft orange + purple bloom.
+>
+> **Glossy highlight overlay** (absolute child, `inset: 0`, `pointer-events: none`):
+> ```
+> background:
+>   radial-gradient(circle at 25% 15%, rgba(255,255,255,0.55), transparent 38%),
+>   radial-gradient(circle at 80% 90%, rgba(255,255,255,0.25), transparent 45%);
+> ```
+>
+> **Diagonal shimmer streak** (absolute child, slightly oversized so it sweeps off-card):
+> ```
+> position: absolute; top: -40px; left: -40px; right: -40px; bottom: -40px;
+> background: linear-gradient(115deg,
+>   transparent 38%,
+>   rgba(255,255,255,0.55) 48%,
+>   rgba(255,255,255,0.0) 58%);
+> mix-blend-mode: overlay;
+> pointer-events: none;
+> animation: cxshimmer 3.6s ease-in-out infinite;
+> ```
+>
+> **Twinkle stars** — 5 small SVG sparkles scattered absolutely on the card. Each is the same 4-point star path, sized 8–14px, with a staggered animation delay (0s, 0.3s, 0.6s, 1.2s, 1.8s). SVG path:
+> ```html
+> <svg viewBox="0 0 24 24">
+>   <path d="M12 0 L13.5 10.5 L24 12 L13.5 13.5 L12 24 L10.5 13.5 L0 12 L10.5 10.5 Z" fill="#fff" />
+> </svg>
+> ```
+>
+> **Keyframes** (put in global CSS):
+> ```css
+> @keyframes cxshimmer {
+>   0%   { transform: translateX(-60%); opacity: 0; }
+>   30%  { opacity: 1; }
+>   60%  { opacity: 1; }
+>   100% { transform: translateX(60%);  opacity: 0; }
+> }
+> @keyframes cxtwinkle {
+>   0%, 100% { transform: scale(0.4) rotate(0deg);  opacity: 0.3; }
+>   50%      { transform: scale(1.2) rotate(45deg); opacity: 1;   }
+> }
+> ```
+> Apply `animation: cxtwinkle 2.4s ease-in-out <delay>s infinite;` to each star.
+>
+> **Top-right badge**
+> Floating "★ MOST PICKED" pill: orange `#FF9500` background, black text, `2px solid #000`, `border-radius: 999px`, positioned at `top: -12px; right: 24px;`, `z-index: 2`.
+>
+> **Card content z-order**
+> Wrap all text content (price, features, CTA) in a `<div style="position: relative; z-index: 1;">` so it sits above the gradient/shimmer overlays.
+>
+> **Text styles inside the card**
+> - Tier label: 13px, weight 800, color `#FFE89E`, uppercase, `letter-spacing: 1.5px`
+> - Price: 64px, weight 900, color `#fff`, `letter-spacing: -2.5px`, `text-shadow: 0 4px 20px rgba(0,0,0,0.18)`
+> - Feature row checkmarks: white circle bg, purple `#7C5CE7` checkmark
+> - CTA button: white bg, purple text, prefix with "✦"
+>
+> Render in React (or plain HTML — your choice). Make it self-contained and drop-in.
+---
+Reference colors (the brand)
+Token	Hex	Use
+primary	`#7C5CE7`	Purple — main brand
+primary-soft	`#B47CF7`	Lilac — gradient mid-stop
+secondary	`#FF9500`	Orange — accent + badge
+highlight	`#FFE89E`	Soft yellow — tier label
+ink	`#0A0A0A`	Black — borders + shadows
