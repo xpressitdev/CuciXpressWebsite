@@ -1176,18 +1176,33 @@ export default function POS() {
                         <Label className="text-xs text-gray-600">
                           Customer (optional)
                         </Label>
-                        <button
-                          type="button"
-                          onClick={() => {
-                            setShowCustomerForm(false);
-                            setCustomerPhone("");
-                            setCustomerName("");
-                          }}
-                          className="text-xs text-gray-400 hover:text-gray-700"
-                          data-testid="button-hide-customer-form"
-                        >
-                          Remove
-                        </button>
+                        <div className="flex items-center gap-3">
+                          {vehicleHistory?.customer?.id &&
+                            (staff?.role === "owner" || staff?.role === "manager") && (
+                              <a
+                                href={`/admin?tab=customers&id=${vehicleHistory.customer.id}`}
+                                target="_blank"
+                                rel="noopener noreferrer"
+                                className="text-xs text-cuci-primary hover:underline inline-flex items-center gap-1"
+                                data-testid="link-view-customer-profile"
+                              >
+                                <User className="w-3 h-3" />
+                                View profile
+                              </a>
+                            )}
+                          <button
+                            type="button"
+                            onClick={() => {
+                              setShowCustomerForm(false);
+                              setCustomerPhone("");
+                              setCustomerName("");
+                            }}
+                            className="text-xs text-gray-400 hover:text-gray-700"
+                            data-testid="button-hide-customer-form"
+                          >
+                            Remove
+                          </button>
+                        </div>
                       </div>
                       <div className="grid grid-cols-2 gap-2">
                         <Input
@@ -1204,6 +1219,12 @@ export default function POS() {
                           data-testid="input-customer-name"
                         />
                       </div>
+                      {vehicleHistory?.customer && (
+                        <p className="text-xs text-gray-500">
+                          {vehicleHistory.total_visits ?? 0} previous visit{vehicleHistory.total_visits === 1 ? "" : "s"}
+                          {vehicleHistory.total_spent_cents ? ` · B$${(vehicleHistory.total_spent_cents / 100).toFixed(2)} lifetime` : ""}
+                        </p>
+                      )}
                     </div>
                   )}
                 </CardContent>

@@ -1241,6 +1241,241 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
+  // ==========================================================================
+  // Phase 10 — Customers + Branches CRM
+  // Customer list/profile/edit (owner+manager) and branch CRUD (owner only).
+  // No new tables; uses existing customers / cars / orders / branches.
+  // ==========================================================================
+
+  // GET /api/admin/customers?search=&branch_id=&page=&per_page=
+  // List customers with last-visit + total spend, paginated.
+  app.get('/api/admin/customers', requireStaff, requireStaffRole('owner', 'manager'), async (req, res) => {
+    const search = String(req.query.search ?? '').trim();
+    const branchParam = String(req.query.branch_id ?? 'all').trim();
+    const branchId =
+      branchParam === '' || branchParam === 'all' ? null : Number(branchParam);
+    if (branchId !== null && (!Number.isFinite(branchId) || branchId <= 0)) {
+      return res.status(400).json({ error: 'invalid_branch_id' });
+    }
+    const page = Math.max(1, Number(req.query.page ?? 1) || 1);
+    const perPage = Math.min(100, Math.max(10, Number(req.query.per_page ?? 25) || 25));
+    const offset = (page - 1) * perPage;
+
+    const searchFilter = search.length >= 2
+      ? sql`AND (
+              c.name  ILIKE ${'%' + search + '%'}
+           OR c.phone ILIKE ${'%' + search + '%'}
+           OR EXISTS (
+                SELECT 1 FROM cars car
+                 WHERE car.customer_id = c.id
+                   AND UPPER(REGEXP_REPLACE(car.license_plate, '\\s+', '', 'g'))
+                       LIKE ${'%' + search.toUpperCase().replace(/\s+/g, '') + '%'}
+              )
+          )`
+      : sql``;
+    const branchFilter = branchId !== null
+      ? sql`AND EXISTS (SELECT 1 FROM orders o JOIN cars car2 ON car2.id = o.vehicle_id WHERE car2.customer_id = c.id AND o.branch_id = ${branchId})`
+      : sql``;
+
+    try {
+      const countRow = (await db.execute(sql`
+        SELECT COUNT(*)::int AS n FROM customers c
+         WHERE 1=1 ${searchFilter} ${branchFilter}
+      `)).rows[0] as { n: number };
+
+      const rows = (await db.execute(sql`
+        SELECT c.id, c.phone, c.name, c.notes, c.created_at,
+               (SELECT COUNT(*)::int FROM cars car WHERE car.customer_id = c.id)                                                AS vehicle_count,
+               (SELECT COUNT(*)::int FROM orders o JOIN cars car ON car.id = o.vehicle_id WHERE car.customer_id = c.id AND o.status <> 'refunded')                AS visits,
+               (SELECT COALESCE(SUM(o.total_cents),0)::bigint FROM orders o JOIN cars car ON car.id = o.vehicle_id WHERE car.customer_id = c.id AND o.status <> 'refunded') AS total_spent_cents,
+               (SELECT MAX(o.created_at)         FROM orders o JOIN cars car ON car.id = o.vehicle_id WHERE car.customer_id = c.id) AS last_visit_at
+          FROM customers c
+         WHERE 1=1 ${searchFilter} ${branchFilter}
+         ORDER BY (SELECT MAX(o.created_at) FROM orders o JOIN cars car ON car.id = o.vehicle_id WHERE car.customer_id = c.id) DESC NULLS LAST,
+                  c.created_at DESC
+         LIMIT ${perPage} OFFSET ${offset}
+      `)).rows.map((r: any) => ({
+        ...r,
+        total_spent_cents: Number(r.total_spent_cents ?? 0),
+      }));
+
+      const branches = (await db.execute(sql`SELECT id, name FROM branches ORDER BY name`)).rows;
+
+      res.json({
+        rows,
+        page,
+        per_page: perPage,
+        total_count: countRow.n,
+        branches,
+        filter: { search, branch_id: branchId },
+      });
+    } catch (err) {
+      console.error('[admin.customers.list] failed:', err);
+      res.status(500).json({ error: 'list_failed' });
+    }
+  });
+
+  // GET /api/admin/customers/:id — full profile (vehicles + recent orders + LTV).
+  app.get('/api/admin/customers/:id', requireStaff, requireStaffRole('owner', 'manager'), async (req, res) => {
+    const id = Number(req.params.id);
+    if (!Number.isFinite(id) || id <= 0) return res.status(400).json({ error: 'invalid_id' });
+    try {
+      const cust = (await db.execute(sql`
+        SELECT id, phone, name, notes, user_id, created_at
+          FROM customers WHERE id = ${id} LIMIT 1
+      `)).rows[0] as any;
+      if (!cust) return res.status(404).json({ error: 'not_found' });
+
+      const vehicles = (await db.execute(sql`
+        SELECT id, license_plate, brand, model, color, "type", last_seen_at,
+               (SELECT COUNT(*)::int FROM orders o WHERE o.vehicle_id = cars.id AND o.status <> 'refunded') AS visit_count,
+               (SELECT COALESCE(SUM(o.total_cents),0)::bigint FROM orders o WHERE o.vehicle_id = cars.id AND o.status <> 'refunded') AS spent_cents
+          FROM cars
+         WHERE customer_id = ${id}
+         ORDER BY COALESCE(last_seen_at, 'epoch'::timestamptz) DESC, id DESC
+      `)).rows.map((r: any) => ({ ...r, spent_cents: Number(r.spent_cents ?? 0) }));
+
+      const orders = (await db.execute(sql`
+        SELECT o.id, o.ticket_code, o.plate, o.created_at, o.payment_method,
+               o.package_name, o.total_cents, o.status, o.refunded_at,
+               b.name AS branch_name, s.name AS staff_name
+          FROM orders o
+          LEFT JOIN branches b ON b.id = o.branch_id
+          LEFT JOIN staff    s ON s.id = o.staff_id
+         WHERE o.vehicle_id IN (SELECT id FROM cars WHERE customer_id = ${id})
+         ORDER BY o.created_at DESC
+         LIMIT 100
+      `)).rows;
+
+      const stats = (await db.execute(sql`
+        SELECT COUNT(*) FILTER (WHERE o.status <> 'refunded')::int AS visits,
+               COUNT(*) FILTER (WHERE o.status =  'refunded')::int AS refund_count,
+               COALESCE(SUM(CASE WHEN o.status <> 'refunded' THEN o.total_cents ELSE 0 END),0)::bigint AS spent_cents,
+               MIN(o.created_at) AS first_visit_at,
+               MAX(o.created_at) AS last_visit_at,
+               COUNT(DISTINCT o.branch_id)::int AS branch_count
+          FROM orders o
+         WHERE o.vehicle_id IN (SELECT id FROM cars WHERE customer_id = ${id})
+      `)).rows[0] as any;
+
+      res.json({
+        customer: cust,
+        vehicles,
+        orders,
+        stats: {
+          visits: Number(stats.visits ?? 0),
+          refund_count: Number(stats.refund_count ?? 0),
+          spent_cents: Number(stats.spent_cents ?? 0),
+          first_visit_at: stats.first_visit_at,
+          last_visit_at: stats.last_visit_at,
+          branch_count: Number(stats.branch_count ?? 0),
+        },
+      });
+    } catch (err) {
+      console.error('[admin.customers.detail] failed:', err);
+      res.status(500).json({ error: 'detail_failed' });
+    }
+  });
+
+  // PATCH /api/admin/customers/:id — edit name + notes.
+  app.patch('/api/admin/customers/:id', requireStaff, requireStaffRole('owner', 'manager'), async (req, res) => {
+    const id = Number(req.params.id);
+    if (!Number.isFinite(id) || id <= 0) return res.status(400).json({ error: 'invalid_id' });
+    const schema = z.object({
+      name: z.string().trim().min(1).max(120).optional(),
+      notes: z.string().trim().max(2000).nullable().optional(),
+    });
+    const parsed = schema.safeParse(req.body);
+    if (!parsed.success) return res.status(400).json({ error: 'invalid_request', details: parsed.error.flatten() });
+    const { name, notes } = parsed.data;
+    try {
+      const rows = (await db.execute(sql`
+        UPDATE customers SET
+          name       = COALESCE(${name ?? null}, name),
+          notes      = CASE WHEN ${notes === undefined} THEN notes ELSE ${notes ?? null} END,
+          updated_at = NOW()
+         WHERE id = ${id}
+        RETURNING id, phone, name, notes, user_id, created_at, updated_at
+      `)).rows;
+      if (rows.length === 0) return res.status(404).json({ error: 'not_found' });
+      res.json({ customer: rows[0] });
+    } catch (err) {
+      console.error('[admin.customers.update] failed:', err);
+      res.status(500).json({ error: 'update_failed' });
+    }
+  });
+
+  // GET /api/admin/branches/full — owner branch list with full columns + counts.
+  app.get('/api/admin/branches/full', requireStaff, requireStaffRole('owner', 'manager'), async (_req, res) => {
+    try {
+      const rows = (await db.execute(sql`
+        SELECT b.id, b.name, b.location, b.google_maps_url, b.google_maps_embed_url,
+               b.review_url, b.is_open, b.queue_count, b.last_queue_update,
+               (SELECT COUNT(*)::int FROM staff  s WHERE s.branch_id  = b.id AND s.is_active = true) AS staff_count,
+               (SELECT COUNT(*)::int FROM orders o WHERE o.branch_id = b.id) AS order_count
+          FROM branches b
+         ORDER BY b.name
+      `)).rows;
+      res.json({ rows });
+    } catch (err) {
+      console.error('[admin.branches.full] failed:', err);
+      res.status(500).json({ error: 'list_failed' });
+    }
+  });
+
+  const branchBodySchema = z.object({
+    name: z.string().trim().min(1).max(120),
+    location: z.string().trim().min(1).max(255),
+    google_maps_url: z.string().trim().url().max(1000),
+    google_maps_embed_url: z.string().trim().url().max(2000),
+    review_url: z.string().trim().url().max(1000),
+    is_open: z.boolean().optional(),
+  });
+
+  app.post('/api/admin/branches', requireStaff, requireStaffRole('owner'), async (req, res) => {
+    const parsed = branchBodySchema.safeParse(req.body);
+    if (!parsed.success) return res.status(400).json({ error: 'invalid_request', details: parsed.error.flatten() });
+    const b = parsed.data;
+    try {
+      const rows = (await db.execute(sql`
+        INSERT INTO branches (name, location, google_maps_url, google_maps_embed_url, review_url, is_open)
+        VALUES (${b.name}, ${b.location}, ${b.google_maps_url}, ${b.google_maps_embed_url}, ${b.review_url}, ${b.is_open ?? true})
+        RETURNING id, name, location, google_maps_url, google_maps_embed_url, review_url, is_open
+      `)).rows;
+      res.status(201).json({ branch: rows[0] });
+    } catch (err) {
+      console.error('[admin.branches.create] failed:', err);
+      res.status(500).json({ error: 'create_failed' });
+    }
+  });
+
+  app.patch('/api/admin/branches/:id', requireStaff, requireStaffRole('owner'), async (req, res) => {
+    const id = Number(req.params.id);
+    if (!Number.isFinite(id) || id <= 0) return res.status(400).json({ error: 'invalid_id' });
+    const schema = branchBodySchema.partial();
+    const parsed = schema.safeParse(req.body);
+    if (!parsed.success) return res.status(400).json({ error: 'invalid_request', details: parsed.error.flatten() });
+    const b = parsed.data;
+    try {
+      const rows = (await db.execute(sql`
+        UPDATE branches SET
+          name                  = COALESCE(${b.name ?? null}, name),
+          location              = COALESCE(${b.location ?? null}, location),
+          google_maps_url       = COALESCE(${b.google_maps_url ?? null}, google_maps_url),
+          google_maps_embed_url = COALESCE(${b.google_maps_embed_url ?? null}, google_maps_embed_url),
+          review_url            = COALESCE(${b.review_url ?? null}, review_url),
+          is_open               = COALESCE(${b.is_open ?? null}, is_open)
+         WHERE id = ${id}
+        RETURNING id, name, location, google_maps_url, google_maps_embed_url, review_url, is_open
+      `)).rows;
+      if (rows.length === 0) return res.status(404).json({ error: 'not_found' });
+      res.json({ branch: rows[0] });
+    } catch (err) {
+      console.error('[admin.branches.update] failed:', err);
+      res.status(500).json({ error: 'update_failed' });
+    }
+  });
+
   app.get('/api/admin/catalog/packages', requireStaff, requireStaffRole('owner'), async (_req, res) => {
     try {
       const rows = (await db.execute(sql`

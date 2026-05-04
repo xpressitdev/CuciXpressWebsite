@@ -52,12 +52,16 @@ import {
   LineChart as LineChartIcon,
   Printer,
   Building2,
+  UserCircle2,
+  MapPinned,
 } from "lucide-react";
 import { Link } from "wouter";
 import { motion } from "framer-motion";
 import { apiRequest } from "@/lib/queryClient";
 import { useStaffAuth } from "@/hooks/useStaffAuth";
 import type { CollaborationSubmission, SubscriptionSignup } from "@shared/schema";
+import CustomersTab from "@/components/admin/CustomersTab";
+import BranchesTab from "@/components/admin/BranchesTab";
 import {
   AreaChart,
   Area,
@@ -238,10 +242,12 @@ export default function Admin() {
             const isManagerOrOwner = role === "owner" || role === "manager";
             const visibleTabs = [
               "dashboard",
+              "trends",
               "orders",
               "payments",
               "best-selling",
-              ...(isOwner ? ["catalog"] : []),
+              ...(isManagerOrOwner ? ["customers"] : []),
+              ...(isOwner ? ["branches", "catalog"] : []),
               ...(isManagerOrOwner ? ["shifts", "collaborations", "subscriptions"] : []),
             ];
             const colMd = visibleTabs.length;
@@ -275,6 +281,18 @@ export default function Admin() {
                 <TrendingUp className="w-4 h-4" />
                 Best Selling
               </TabsTrigger>
+              {isManagerOrOwner && (
+                <TabsTrigger value="customers" className="flex items-center gap-2" data-testid="tab-customers">
+                  <UserCircle2 className="w-4 h-4" />
+                  Customers
+                </TabsTrigger>
+              )}
+              {isOwner && (
+                <TabsTrigger value="branches" className="flex items-center gap-2" data-testid="tab-branches">
+                  <MapPinned className="w-4 h-4" />
+                  Branches
+                </TabsTrigger>
+              )}
               {isOwner && (
                 <TabsTrigger value="catalog" className="flex items-center gap-2" data-testid="tab-catalog">
                   <PackageIcon className="w-4 h-4" />
@@ -325,6 +343,18 @@ export default function Admin() {
             <TabsContent value="best-selling" className="mt-6">
               <BestSellingTab />
             </TabsContent>
+
+            {isManagerOrOwner && (
+              <TabsContent value="customers" className="mt-6">
+                <CustomersTab />
+              </TabsContent>
+            )}
+
+            {isOwner && (
+              <TabsContent value="branches" className="mt-6">
+                <BranchesTab />
+              </TabsContent>
+            )}
 
             {isOwner && (
               <TabsContent value="catalog" className="mt-6">
