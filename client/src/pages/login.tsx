@@ -1,6 +1,6 @@
 import { useState, useEffect } from "react";
 import { useLocation, Link } from "wouter";
-import { useQuery } from "@tanstack/react-query";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { Phone, KeyRound, ArrowLeft, Loader2 } from "lucide-react";
 import Navigation from "@/components/Navigation";
 import Footer from "@/components/Footer";
@@ -24,6 +24,7 @@ const REASON_TEXT: Record<string, string> = {
 export default function LoginPage() {
   const [, navigate] = useLocation();
   const { toast } = useToast();
+  const queryClient = useQueryClient();
   // If already signed in, send them straight to /dashboard.
   const { data: who } = useQuery<{ authenticated: boolean }>({
     queryKey: ["/api/auth/whoami"],
@@ -94,6 +95,10 @@ export default function LoginPage() {
         return;
       }
       toast({ title: "Welcome!", description: "You're signed in." });
+      // Refetch whoami before navigating, otherwise the dashboard reads
+      // the stale {authenticated: false} from cache and bounces us back.
+      await queryClient.invalidateQueries({ queryKey: ["/api/auth/whoami"] });
+      await queryClient.refetchQueries({ queryKey: ["/api/auth/whoami"] });
       navigate("/dashboard");
     } finally {
       setBusy(false);
