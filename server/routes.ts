@@ -2857,12 +2857,25 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
     const stats = (await db.execute(sql`
       SELECT
-        (SELECT COUNT(*)::int FROM orders WHERE customer_id = ${userId} AND status = 'done') AS total_done,
+        (SELECT COUNT(*)::int FROM orders
+           WHERE customer_id = ${userId} AND status = 'done') AS total_done,
         (SELECT COALESCE(SUM(total_cents),0)::int FROM orders
            WHERE customer_id = ${userId} AND status IN ('done','paid','washing','queued')) AS total_spent_cents,
         (SELECT COALESCE(SUM(remaining_washes),0)::int FROM memberships m
            JOIN customers cu ON cu.id = m.customer_id
-           WHERE cu.user_id = ${userId} AND m.status = 'active') AS remaining_washes
+           WHERE cu.user_id = ${userId} AND m.status = 'active') AS remaining_washes,
+        (SELECT COUNT(*)::int FROM orders
+           WHERE customer_id = ${userId}
+             AND status = 'done'
+             AND date_trunc('month', created_at AT TIME ZONE 'Asia/Brunei')
+                 = date_trunc('month', (now() AT TIME ZONE 'Asia/Brunei'))) AS washes_this_month,
+        (SELECT COUNT(*)::int FROM orders
+           WHERE customer_id = ${userId}
+             AND status = 'done'
+             AND date_trunc('month', created_at AT TIME ZONE 'Asia/Brunei')
+                 = date_trunc('month', (now() AT TIME ZONE 'Asia/Brunei') - interval '1 month')) AS washes_last_month,
+        (SELECT MIN(created_at) FROM orders
+           WHERE customer_id = ${userId}) AS member_since
     `)).rows[0] as any;
     res.json({ profile, stats });
   });
@@ -2897,14 +2910,93 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
   app.get('/api/customer/cars', requireLuciaUser, async (req, res) => {
     const userId = Number(req.lucia!.user!.id);
+    // Per-car total wash count uses a left join + group by on plate so a
+    // brand-new car (no orders yet) still shows up with total_washes=0.
     const rows = (await db.execute(sql`
-      SELECT id, license_plate, brand, model, color, last_seen_at
-      FROM cars
-      WHERE user_id = ${userId}
-         OR customer_id = (SELECT id FROM customers WHERE user_id = ${userId} LIMIT 1)
-      ORDER BY last_seen_at DESC NULLS LAST, id DESC
+      SELECT c.id, c.license_plate, c.brand, c.model, c.color, c.last_seen_at,
+             COALESCE(o.total_washes, 0)::int AS total_washes
+      FROM cars c
+      LEFT JOIN (
+        SELECT plate, COUNT(*)::int AS total_washes
+        FROM orders
+        WHERE customer_id = ${userId} AND status = 'done'
+        GROUP BY plate
+      ) o ON o.plate = c.license_plate
+      WHERE c.user_id = ${userId}
+         OR c.customer_id = (SELECT id FROM customers WHERE user_id = ${userId} LIMIT 1)
+      ORDER BY c.last_seen_at DESC NULLS LAST, c.id DESC
     `)).rows;
     res.json({ cars: rows });
+  });
+
+  // POST /api/customer/cars — customer adds one of their vehicles.
+  // Plate is normalised to upper-case + trimmed; we de-dupe so the same
+  // customer can't have the same plate twice on their list.
+  const customerCarSchema = z.object({
+    license_plate: z.string().trim().min(1).max(20),
+    brand: z.string().trim().max(60).optional().nullable(),
+    model: z.string().trim().max(60).optional().nullable(),
+    color: z.string().trim().max(40).optional().nullable(),
+  });
+  app.post('/api/customer/cars', requireLuciaUser, async (req, res) => {
+    const parsed = customerCarSchema.safeParse(req.body);
+    if (!parsed.success) {
+      return res.status(400).json({ ok: false, reason: 'invalid_request' });
+    }
+    const userId = Number(req.lucia!.user!.id);
+    const plate = parsed.data.license_plate.toUpperCase().replace(/\s+/g, ' ').trim();
+    try {
+      const cust = (await db.execute(sql`
+        SELECT id FROM customers WHERE user_id = ${userId} LIMIT 1
+      `)).rows[0] as { id: number } | undefined;
+      const dupe = (await db.execute(sql`
+        SELECT id FROM cars
+        WHERE license_plate = ${plate}
+          AND (user_id = ${userId} OR customer_id = ${cust?.id ?? null})
+        LIMIT 1
+      `)).rows[0];
+      if (dupe) return res.status(409).json({ ok: false, reason: 'duplicate_plate' });
+      const inserted = (await db.execute(sql`
+        INSERT INTO cars (user_id, customer_id, license_plate, brand, model, color)
+        VALUES (${userId}, ${cust?.id ?? null}, ${plate},
+                ${parsed.data.brand ?? null}, ${parsed.data.model ?? null}, ${parsed.data.color ?? null})
+        RETURNING id, license_plate, brand, model, color, last_seen_at
+      `)).rows[0];
+      res.json({ ok: true, car: inserted });
+    } catch (err) {
+      console.error('[customer/cars POST] failed', err);
+      res.status(500).json({ ok: false, reason: 'server_error' });
+    }
+  });
+
+  // PATCH /api/customer/cars/:id — edit brand/model/color on a vehicle
+  // the signed-in customer owns. Plate is intentionally NOT editable
+  // (it's the join key into orders).
+  app.patch('/api/customer/cars/:id', requireLuciaUser, async (req, res) => {
+    const id = Number(req.params.id);
+    if (!Number.isFinite(id)) return res.status(400).json({ ok: false, reason: 'bad_id' });
+    const parsed = customerCarSchema.partial().safeParse(req.body);
+    if (!parsed.success) {
+      return res.status(400).json({ ok: false, reason: 'invalid_request' });
+    }
+    const userId = Number(req.lucia!.user!.id);
+    try {
+      const updated = (await db.execute(sql`
+        UPDATE cars SET
+          brand = COALESCE(${parsed.data.brand ?? null}, brand),
+          model = COALESCE(${parsed.data.model ?? null}, model),
+          color = COALESCE(${parsed.data.color ?? null}, color)
+        WHERE id = ${id}
+          AND (user_id = ${userId}
+               OR customer_id = (SELECT id FROM customers WHERE user_id = ${userId} LIMIT 1))
+        RETURNING id, license_plate, brand, model, color, last_seen_at
+      `)).rows[0];
+      if (!updated) return res.status(404).json({ ok: false, reason: 'not_found' });
+      res.json({ ok: true, car: updated });
+    } catch (err) {
+      console.error('[customer/cars PATCH] failed', err);
+      res.status(500).json({ ok: false, reason: 'server_error' });
+    }
   });
 
   // === Google OAuth (Task 1.5) ============================================
