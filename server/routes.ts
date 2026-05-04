@@ -396,44 +396,70 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
-  // Subscription signup endpoint
+  // Subscription signup / plan-intent endpoint.
+  // Phase 11: same endpoint now handles both the legacy waitlist email and the
+  // new "Subscribe" CTA on the /subscriptions product page (which sends an
+  // optional `plan` and `phone`). Behaviour is upsert-by-email so a previous
+  // waitlist subscriber can come back and choose a plan without erroring.
   app.post("/api/subscription-signup", async (req, res) => {
     try {
       const data = insertSubscriptionSignupSchema.parse(req.body);
-      
-      // Check if email already exists
-      const existingSignup = await db
+      const userId = req.lucia?.user ? Number(req.lucia.user.id) : null;
+
+      const existing = await db
         .select()
         .from(subscriptionSignups)
         .where(eq(subscriptionSignups.email, data.email))
         .limit(1);
-      
-      if (existingSignup.length > 0) {
-        return res.status(400).json({ 
-          success: false, 
-          message: "This email is already registered for updates." 
+
+      let signup;
+      let isNew = false;
+      if (existing.length > 0) {
+        // Upsert: keep the email, update plan/phone/user_id if newly provided.
+        const prev = existing[0];
+        const [updated] = await db
+          .update(subscriptionSignups)
+          .set({
+            plan: data.plan ?? prev.plan,
+            phone: data.phone ?? prev.phone,
+            userId: userId ?? prev.userId,
+          })
+          .where(eq(subscriptionSignups.id, prev.id))
+          .returning();
+        signup = updated;
+      } else {
+        const [created] = await db
+          .insert(subscriptionSignups)
+          .values({ ...data, userId: userId ?? data.userId ?? null })
+          .returning();
+        signup = created;
+        isNew = true;
+      }
+
+      // Only fire the legacy "waitlist" email for brand-new email captures
+      // without a plan attached — keeps the noise down for plan intents which
+      // staff will follow up on by phone.
+      let emailSent = false;
+      if (isNew && !data.plan) {
+        emailSent = await sendSubscriptionNotification({
+          email: data.email,
+          submittedAt: new Date().toISOString(),
         });
       }
-      
-      // Save to database
-      const [signup] = await db.insert(subscriptionSignups).values(data).returning();
-      
-      // Send email notification
-      const emailSent = await sendSubscriptionNotification({
-        email: data.email,
-        submittedAt: new Date().toISOString(),
-      });
-      
-      console.log("New subscription signup saved:", {
+
+      console.log("Subscription signup saved:", {
         id: signup.id,
         email: data.email,
+        plan: signup.plan,
         emailSent,
         timestamp: signup.createdAt,
       });
-      
-      res.json({ 
-        success: true, 
-        message: "Thank you! We'll notify you when our subscription service launches." 
+
+      res.json({
+        success: true,
+        message: data.plan
+          ? "Got it — we'll text you within 24 hours to activate your plan."
+          : "Thank you! We'll notify you when our subscription service launches.",
       });
     } catch (error) {
       console.error("Error processing subscription signup:", error);

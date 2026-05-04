@@ -185,6 +185,10 @@ export const subscriptionSignups = pgTable("subscription_signups", {
   email: text("email").notNull().unique(),
   isNotified: boolean("is_notified").default(false).notNull(),
   createdAt: timestamp("created_at").defaultNow().notNull(),
+  // Phase 11: subscriptions product page captures plan + phone + (optional) user_id
+  plan: text("plan"),
+  phone: text("phone"),
+  userId: integer("user_id").references(() => users.id),
 });
 
 export const serviceHistory = pgTable("service_history", {

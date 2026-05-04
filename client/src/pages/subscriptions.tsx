@@ -1,260 +1,391 @@
-import { useState } from "react";
-import { useMutation } from "@tanstack/react-query";
+import { useEffect, useState } from "react";
+import { useMutation, useQuery } from "@tanstack/react-query";
 import { motion } from "framer-motion";
-import { ChevronDown, ChevronUp } from "lucide-react";
+import { Check, Crown, Users, Building2, ShieldCheck, ArrowRight } from "lucide-react";
 import Navigation from "@/components/Navigation";
 import Footer from "@/components/Footer";
-import { PricingContainer } from "@/components/ui/pricing-container";
+import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog";
 import { apiRequest } from "@/lib/queryClient";
 import { useToast } from "@/hooks/use-toast";
 
-const pricingPlans = [
+// --- Plan catalog (mirrors the handoff /tmp/handoff/.../landing.jsx tease) ---
+type Plan = {
+  id: "unlimited" | "family" | "corporate";
+  name: string;
+  price: string;
+  cadence: string;
+  tagline: string;
+  features: string[];
+  icon: typeof Crown;
+  accent: string; // tailwind bg shade for icon chip + popular ring
+  popular?: boolean;
+  custom?: boolean; // corporate → no self-serve, contact sales
+};
+
+const PLANS: Plan[] = [
   {
-    name: "Unlimited Xpress Wash",
-    monthlyPrice: 60,
-    yearlyPrice: 648,
+    id: "unlimited",
+    name: "Unlimited Xpress",
+    price: "BND 60",
+    cadence: "/ month",
+    tagline: "Single car · all branches",
     features: [
       "Unlimited exterior washes",
       "1 registered vehicle",
-      "Limit: 1 wash per day",
-      "Rain Re-Wash Guarantee",
-      "All locations included",
-      "Wash history tracking"
+      "1 wash per day cap",
+      "Rain re-wash guarantee",
+      "All 4 branches included",
     ],
-    accent: "#6C5CE7",
-    rotation: -2,
+    icon: Crown,
+    accent: "bg-cuci-primary",
   },
   {
-    name: "Multi-Car Family Plan", 
-    monthlyPrice: 150,
-    yearlyPrice: 1620,
+    id: "family",
+    name: "Multi-Car Family",
+    price: "BND 150",
+    cadence: "/ month",
+    tagline: "Up to 3 cars in one household",
     features: [
       "Up to 3 vehicles covered",
       "1 wash per day per vehicle",
       "Unlimited monthly washes",
-      "Rain Re-Wash Guarantee",
       "Shared plan management",
-      "Easy multi-plate registration"
+      "Rain re-wash guarantee",
     ],
-    isPopular: true,
-    accent: "#FFA500",
-    rotation: 1,
+    icon: Users,
+    accent: "bg-cuci-secondary",
+    popular: true,
   },
   {
-    name: "Corporate Plan",
-    monthlyPrice: 0, 
-    yearlyPrice: 0,
+    id: "corporate",
+    name: "Corporate Fleet",
+    price: "Custom",
+    cadence: "5+ vehicles",
+    tagline: "Monthly billing · usage reports",
     features: [
-      "Custom pricing (5+ vehicles)",
-      "Monthly or prepaid billing",
+      "Custom pricing for fleets",
       "Priority fleet access",
       "Detailed usage reports",
-      "Custom onboarding support",
-      "Rain Re-Wash included"
+      "Dedicated onboarding",
+      "Rain re-wash included",
     ],
-    accent: "#22C55E",
-    rotation: -1,
-    isCustom: true,
+    icon: Building2,
+    accent: "bg-emerald-500",
+    custom: true,
   },
 ];
 
-export default function Subscriptions() {
-  const [email, setEmail] = useState("");
-  const [showPlannedPackages, setShowPlannedPackages] = useState(false);
-  const { toast } = useToast();
+type CustomerMe = {
+  profile: {
+    email: string | null;
+    phone_number: string | null;
+    customer_phone: string | null;
+    first_name: string | null;
+  };
+};
 
-  const subscriptionMutation = useMutation({
-    mutationFn: (email: string) => apiRequest('POST', '/api/subscription-signup', { email }),
-    onSuccess: () => {
-      setEmail("");
+export default function Subscriptions() {
+  const { toast } = useToast();
+  const [openPlan, setOpenPlan] = useState<Plan | null>(null);
+  const [email, setEmail] = useState("");
+  const [phone, setPhone] = useState("");
+
+  // Prefill when logged in. /api/customer/me returns 401 if not logged in —
+  // react-query just leaves data undefined and we keep the inputs empty.
+  const { data: me } = useQuery<CustomerMe>({
+    queryKey: ["/api/customer/me"],
+    retry: false,
+  });
+
+  useEffect(() => {
+    if (openPlan && me?.profile) {
+      setEmail((prev) => prev || me.profile.email || "");
+      setPhone(
+        (prev) => prev || me.profile.phone_number || me.profile.customer_phone || "",
+      );
+    }
+  }, [openPlan, me]);
+
+  const subscribeMutation = useMutation({
+    mutationFn: (payload: { email: string; phone: string; plan: string }) =>
+      apiRequest("POST", "/api/subscription-signup", payload),
+    onSuccess: async (res: any) => {
+      const data = await res.json().catch(() => ({}));
       toast({
-        title: "Thanks for signing up!",
-        description: "We'll notify you when our subscription service launches.",
+        title: openPlan?.custom ? "Thanks — we'll be in touch" : "You're on the list",
+        description:
+          data?.message ||
+          "Got it — we'll text you within 24 hours to activate your plan.",
       });
+      setOpenPlan(null);
+      setEmail("");
+      setPhone("");
     },
     onError: (error: any) => {
-      const errorMessage = error?.message || "Failed to sign up. Please try again.";
       toast({
-        title: "Sign up failed",
-        description: errorMessage,
+        title: "Something went wrong",
+        description: error?.message || "Please try again in a moment.",
         variant: "destructive",
       });
     },
   });
 
-  const handleSubscriptionSubmit = (e: React.FormEvent) => {
+  const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
+    if (!openPlan) return;
     if (!email.trim()) {
       toast({
         title: "Email required",
-        description: "Please enter your email address.",
+        description: "We need an email to confirm your subscription.",
         variant: "destructive",
       });
       return;
     }
-    subscriptionMutation.mutate(email);
+    subscribeMutation.mutate({
+      email: email.trim(),
+      phone: phone.trim(),
+      plan: openPlan.id,
+    });
   };
 
   return (
     <div className="min-h-screen">
       <Navigation />
       <main className="cuci-page-bg pt-20 pb-16">
-        {/* Hero — eyebrow + duotone headline mirrors /queue & /login. */}
-        <section className="py-20">
+        {/* --- Hero --- */}
+        <section className="py-16 md:py-20">
           <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 text-center">
             <motion.div
               initial={{ opacity: 0, y: 30 }}
               animate={{ opacity: 1, y: 0 }}
               transition={{ duration: 0.6 }}
             >
-              <div className="cuci-eyebrow mb-4">Memberships · Coming soon</div>
+              <div className="cuci-eyebrow mb-4">Memberships</div>
               <h1 className="text-4xl md:text-6xl font-extrabold tracking-tight text-gray-900 mb-6">
-                Wash as much<br />as you <span className="text-cuci-primary">drive</span>
+                Wash as much<br />
+                as you <span className="text-cuci-primary">drive</span>
                 <span className="text-cuci-secondary">.</span>
               </h1>
-              <p className="text-xl text-gray-600 mb-8 max-w-3xl mx-auto leading-relaxed">
-                One flat monthly fee. Drive in any branch, any time. Rain re-wash on us — designed for Brunei's everyday drivers, families and fleets.
+              <p className="text-lg md:text-xl text-gray-600 mb-2 max-w-3xl mx-auto leading-relaxed">
+                One flat monthly fee. Drive into any branch, any time. Rain re-wash on us — designed for Brunei's everyday drivers, families and fleets.
+              </p>
+              <p className="text-sm text-gray-500">
+                Pay-as-you-go average is <span className="font-bold">BND 15</span> per wash. Most members break even after 4 visits.
               </p>
             </motion.div>
           </div>
         </section>
 
-        {/* Subscription Section */}
-        <section className="pb-20">
-          <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
-            {/* Not Yet Live Banner — brutalist card, gradient backdrop. */}
-            <motion.div
-              initial={{ opacity: 0, y: 20 }}
-              whileInView={{ opacity: 1, y: 0 }}
-              transition={{ duration: 0.6 }}
-              viewport={{ once: true }}
-              className="text-center mb-12 max-w-3xl mx-auto"
-            >
-              <div
-                className="cuci-card p-8 md:p-10"
-                style={{
-                  background:
-                    "linear-gradient(135deg, hsl(257, 74%, 97%) 0%, hsl(36, 100%, 96%) 100%)",
-                }}
-              >
-                <div className="cuci-eyebrow mb-3">Join the waitlist</div>
-                <h3 className="text-3xl font-extrabold tracking-tight text-gray-900 mb-4">
-                  We're <span className="text-cuci-primary">almost ready</span>.
-                </h3>
-                <p className="text-base text-gray-600 mb-6 max-w-xl mx-auto leading-relaxed">
-                  We're finalising our exterior-wash subscription plans for Brunei's climate. Drop your email — we'll ping you the moment they go live.
-                </p>
-                <form onSubmit={handleSubscriptionSubmit} className="flex flex-col sm:flex-row gap-3 justify-center items-stretch max-w-md mx-auto mb-5">
-                  <input
-                    type="email"
-                    value={email}
-                    onChange={(e) => setEmail(e.target.value)}
-                    placeholder="you@email.com"
-                    required
-                    disabled={subscriptionMutation.isPending}
-                    className="flex-1 px-4 py-3 border-2 border-black rounded-lg bg-white focus:outline-none focus:ring-2 focus:ring-cuci-primary disabled:opacity-50 text-base"
-                  />
-                  <button
-                    type="submit"
-                    disabled={subscriptionMutation.isPending}
-                    className="cuci-cta bg-cuci-primary text-white px-6 py-3 rounded-lg whitespace-nowrap disabled:opacity-50 text-base"
+        {/* --- Plan grid --- */}
+        <section className="pb-12">
+          <div className="max-w-6xl mx-auto px-4 sm:px-6 lg:px-8">
+            <div className="grid md:grid-cols-3 gap-6">
+              {PLANS.map((plan, i) => {
+                const Icon = plan.icon;
+                return (
+                  <motion.div
+                    key={plan.id}
+                    initial={{ opacity: 0, y: 24 }}
+                    whileInView={{ opacity: 1, y: 0 }}
+                    transition={{ duration: 0.45, delay: i * 0.08 }}
+                    viewport={{ once: true }}
+                    className={`relative cuci-card p-7 flex flex-col ${
+                      plan.popular ? "ring-2 ring-cuci-secondary md:-translate-y-2" : ""
+                    }`}
+                    data-testid={`plan-card-${plan.id}`}
                   >
-                    {subscriptionMutation.isPending ? 'Signing up…' : 'Notify me →'}
-                  </button>
-                </form>
-
-                <button
-                  onClick={() => setShowPlannedPackages(!showPlannedPackages)}
-                  className="inline-flex items-center gap-2 text-cuci-primary hover:text-cuci-primary-dark font-bold transition-colors mx-auto text-sm"
-                >
-                  {showPlannedPackages ? "Hide" : "Preview"} planned packages
-                  {showPlannedPackages ? (
-                    <ChevronUp className="w-4 h-4" />
-                  ) : (
-                    <ChevronDown className="w-4 h-4" />
-                  )}
-                </button>
-              </div>
-            </motion.div>
-
-            {showPlannedPackages && (
-              <motion.div
-                initial={{ opacity: 0, height: 0 }}
-                animate={{ opacity: 1, height: "auto" }}
-                exit={{ opacity: 0, height: 0 }}
-                transition={{ duration: 0.5 }}
-                className="overflow-hidden"
-              >
-                <PricingContainer
-                  title="Subscription Packages"
-                  plans={pricingPlans}
-                  className="max-w-6xl mx-auto"
-                />
-              </motion.div>
-            )}
-
-            <motion.div
-              initial={{ opacity: 0, y: 30 }}
-              whileInView={{ opacity: 1, y: 0 }}
-              transition={{ duration: 0.6, delay: 0.4 }}
-              viewport={{ once: true }}
-              className="text-center mt-16"
-            >
-              <div className="cuci-eyebrow mb-3">Why subscribe</div>
-              <h3 className="text-3xl font-extrabold tracking-tight text-gray-900 mb-10">
-                Three reasons our regulars never go back.
-              </h3>
-              <div className="grid md:grid-cols-3 gap-5 max-w-5xl mx-auto mb-10">
-                {[
-                  { emoji: '💧', title: 'Consistent care', body: 'Regular cleaning keeps your car looking sharp every week.', accent: 'bg-cuci-primary/10' },
-                  { emoji: '💰', title: 'Cost savings', body: 'Pays for itself after 5 washes vs. drive-in pricing.', accent: 'bg-cuci-secondary/15' },
-                  { emoji: '⏰', title: 'Convenience', body: 'Set it once. Drive in any branch, any time. No appointments.', accent: 'bg-green-100' },
-                ].map((b) => (
-                  <div key={b.title} className="cuci-kpi text-left">
-                    <div className={`w-12 h-12 rounded-full border-2 border-black ${b.accent} flex items-center justify-center mb-4`}>
-                      <span className="text-2xl">{b.emoji}</span>
+                    {plan.popular && (
+                      <div className="absolute -top-3 left-1/2 -translate-x-1/2 bg-cuci-secondary text-black text-xs font-extrabold uppercase tracking-wider px-3 py-1 rounded-full border-2 border-black">
+                        Most popular
+                      </div>
+                    )}
+                    <div
+                      className={`w-12 h-12 rounded-xl border-2 border-black ${plan.accent} flex items-center justify-center mb-5`}
+                    >
+                      <Icon className="w-6 h-6 text-white" strokeWidth={2.5} />
                     </div>
-                    <h4 className="font-extrabold text-gray-900 mb-1.5 text-lg">{b.title}</h4>
-                    <p className="text-gray-600 text-sm leading-relaxed">{b.body}</p>
+                    <h3 className="text-xl font-extrabold text-gray-900 mb-1">
+                      {plan.name}
+                    </h3>
+                    <p className="text-sm text-gray-500 mb-5">{plan.tagline}</p>
+                    <div className="flex items-baseline gap-1 mb-6">
+                      <span className="text-4xl font-black tracking-tight text-cuci-primary">
+                        {plan.price}
+                      </span>
+                      <span className="text-sm text-gray-500 font-medium">
+                        {plan.cadence}
+                      </span>
+                    </div>
+                    <ul className="space-y-2.5 mb-7 flex-1">
+                      {plan.features.map((f) => (
+                        <li
+                          key={f}
+                          className="flex items-start gap-2.5 text-sm text-gray-700"
+                        >
+                          <Check className="w-4 h-4 text-cuci-primary mt-0.5 flex-shrink-0" strokeWidth={3} />
+                          <span>{f}</span>
+                        </li>
+                      ))}
+                    </ul>
+                    <Button
+                      onClick={() => setOpenPlan(plan)}
+                      className={`w-full cuci-cta ${
+                        plan.popular
+                          ? "bg-cuci-secondary text-black"
+                          : "bg-cuci-primary text-white"
+                      } rounded-lg`}
+                      data-testid={`button-subscribe-${plan.id}`}
+                    >
+                      {plan.custom ? "Contact sales" : "Subscribe"}
+                      <ArrowRight className="w-4 h-4 ml-1" />
+                    </Button>
+                  </motion.div>
+                );
+              })}
+            </div>
+            <p className="text-center text-xs text-gray-500 mt-6 flex items-center justify-center gap-1.5">
+              <ShieldCheck className="w-3.5 h-3.5" />
+              All plans include rain re-wash guarantee · cancel anytime
+            </p>
+          </div>
+        </section>
+
+        {/* --- Why subscribe --- */}
+        <section className="py-16">
+          <div className="max-w-5xl mx-auto px-4 sm:px-6 lg:px-8 text-center">
+            <div className="cuci-eyebrow mb-3">Why subscribe</div>
+            <h3 className="text-3xl font-extrabold tracking-tight text-gray-900 mb-10">
+              Three reasons our regulars never go back.
+            </h3>
+            <div className="grid md:grid-cols-3 gap-5">
+              {[
+                {
+                  emoji: "💧",
+                  title: "Consistent care",
+                  body: "Regular cleaning keeps your car looking sharp every week.",
+                  accent: "bg-cuci-primary/10",
+                },
+                {
+                  emoji: "💰",
+                  title: "Cost savings",
+                  body: "Pays for itself after 4 washes vs. drive-in pricing.",
+                  accent: "bg-cuci-secondary/15",
+                },
+                {
+                  emoji: "⏰",
+                  title: "Convenience",
+                  body: "Set it once. Drive in any branch, any time. No appointments.",
+                  accent: "bg-emerald-100",
+                },
+              ].map((b) => (
+                <div key={b.title} className="cuci-kpi text-left">
+                  <div
+                    className={`w-12 h-12 rounded-full border-2 border-black ${b.accent} flex items-center justify-center mb-4`}
+                  >
+                    <span className="text-2xl">{b.emoji}</span>
                   </div>
-                ))}
-              </div>
-
-              <p className="text-gray-600 mb-8 text-base">
-                All plans include our rain re-wash guarantee and flexible cancellation.
-              </p>
-
-              <div className="flex flex-col sm:flex-row gap-3 justify-center">
-                <motion.button
-                  whileTap={{ scale: 0.97 }}
-                  onClick={() => {
-                    window.scrollTo({ top: 0, behavior: 'smooth' });
-                  }}
-                  className="cuci-cta bg-cuci-primary text-white px-7 py-3 rounded-full"
-                >
-                  Sign up for updates
-                </motion.button>
-                <motion.button
-                  whileTap={{ scale: 0.97 }}
-                  onClick={() => {
-                    window.location.href = '/';
-                    setTimeout(() => {
-                      const element = document.getElementById('locations');
-                      if (element) {
-                        element.scrollIntoView({ behavior: 'smooth' });
-                      }
-                    }, 100);
-                  }}
-                  className="cuci-cta bg-white text-gray-900 px-7 py-3 rounded-full"
-                >
-                  Find our locations
-                </motion.button>
-              </div>
-            </motion.div>
+                  <h4 className="font-extrabold text-gray-900 mb-1.5 text-lg">
+                    {b.title}
+                  </h4>
+                  <p className="text-gray-600 text-sm leading-relaxed">{b.body}</p>
+                </div>
+              ))}
+            </div>
           </div>
         </section>
       </main>
       <Footer />
+
+      {/* --- Subscribe / Contact dialog --- */}
+      <Dialog open={openPlan !== null} onOpenChange={(o) => !o && setOpenPlan(null)}>
+        <DialogContent className="sm:max-w-md" data-testid="dialog-subscribe">
+          <DialogHeader>
+            <DialogTitle>
+              {openPlan?.custom ? "Tell us about your fleet" : `Subscribe to ${openPlan?.name}`}
+            </DialogTitle>
+            <DialogDescription>
+              {openPlan?.custom
+                ? "Drop your details and our team will reach out within one business day."
+                : "Drop your details — our team will text you within 24 hours to activate the plan and arrange your first wash."}
+            </DialogDescription>
+          </DialogHeader>
+          <form onSubmit={handleSubmit} className="space-y-4">
+            <div className="space-y-1.5">
+              <Label htmlFor="sub-email">Email</Label>
+              <Input
+                id="sub-email"
+                type="email"
+                value={email}
+                onChange={(e) => setEmail(e.target.value)}
+                placeholder="you@email.com"
+                required
+                disabled={subscribeMutation.isPending}
+                data-testid="input-subscribe-email"
+              />
+            </div>
+            <div className="space-y-1.5">
+              <Label htmlFor="sub-phone">
+                Phone <span className="text-gray-400 font-normal">(recommended)</span>
+              </Label>
+              <Input
+                id="sub-phone"
+                type="tel"
+                value={phone}
+                onChange={(e) => setPhone(e.target.value)}
+                placeholder="+673 ..."
+                disabled={subscribeMutation.isPending}
+                data-testid="input-subscribe-phone"
+              />
+            </div>
+            {openPlan && !openPlan.custom && (
+              <div className="rounded-lg bg-gray-50 border border-gray-200 px-4 py-3 text-sm">
+                <div className="flex items-center justify-between">
+                  <span className="font-bold text-gray-900">{openPlan.name}</span>
+                  <span className="font-extrabold text-cuci-primary">
+                    {openPlan.price}
+                    <span className="text-xs font-medium text-gray-500 ml-1">
+                      {openPlan.cadence}
+                    </span>
+                  </span>
+                </div>
+                <p className="text-xs text-gray-500 mt-1">{openPlan.tagline}</p>
+              </div>
+            )}
+            <DialogFooter className="gap-2 sm:gap-0">
+              <Button
+                type="button"
+                variant="outline"
+                onClick={() => setOpenPlan(null)}
+                disabled={subscribeMutation.isPending}
+              >
+                Cancel
+              </Button>
+              <Button
+                type="submit"
+                disabled={subscribeMutation.isPending}
+                className="bg-cuci-primary text-white"
+                data-testid="button-subscribe-submit"
+              >
+                {subscribeMutation.isPending
+                  ? "Sending…"
+                  : openPlan?.custom
+                  ? "Send enquiry"
+                  : "Reserve my spot"}
+              </Button>
+            </DialogFooter>
+          </form>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }
