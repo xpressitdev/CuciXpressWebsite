@@ -166,8 +166,9 @@ function NoPlanCard() {
         Subscribe to unlimited or a wash pack to lock in savings.
       </p>
       <Link
-        href="/#subscriptions"
+        href="/subscriptions"
         className="mt-auto self-start mt-6 px-4 py-2.5 bg-cuci-primary text-white rounded-lg font-bold border-2 border-black"
+        data-testid="link-see-plans"
       >
         See plans
       </Link>
