@@ -195,27 +195,31 @@ html {
     radial-gradient(circle at 80% 90%, rgba(255, 255, 255, 0.25), transparent 45%);
 }
 /* Vibrant gradient text that matches the Unlimited Xpress card.
-   The animated `background-position` shift creates a slow shimmer
-   across the letterforms (sweep ~6s). */
+   A narrow near-white highlight band is injected into the gradient and
+   slid across the text every 2.8s for an unmistakable shine sweep. */
 .cuci-rainbow-text {
   background-image: linear-gradient(
-    110deg,
+    100deg,
     #7C5CE7 0%,
-    #B47CF7 35%,
-    #FF9500 70%,
+    #B47CF7 18%,
+    #FFFFFF 30%,
+    #FFE89E 38%,
+    #FF9500 48%,
+    #B47CF7 65%,
+    #7C5CE7 82%,
     #B47CF7 100%
   );
-  background-size: 220% 100%;
-  background-position: 0% 50%;
+  background-size: 300% 100%;
+  background-position: 100% 50%;
   -webkit-background-clip: text;
           background-clip: text;
   -webkit-text-fill-color: transparent;
           color: transparent;
-  animation: cxrainbow 6s ease-in-out infinite;
+  animation: cxrainbow 2.8s linear infinite;
 }
 @keyframes cxrainbow {
-  0%, 100% { background-position:   0% 50%; }
-  50%      { background-position: 100% 50%; }
+  0%   { background-position: 100% 50%; }
+  100% { background-position:   0% 50%; }
 }
 .cuci-shimmer-wrap {
   position: absolute;
