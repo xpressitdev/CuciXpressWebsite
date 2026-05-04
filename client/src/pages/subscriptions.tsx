@@ -192,6 +192,15 @@ export default function Subscriptions() {
             <div className="grid md:grid-cols-3 gap-6">
               {PLANS.map((plan, i) => {
                 const Icon = plan.icon;
+                // Hand-tuned twinkle positions per card so they stay clear of
+                // text. Coordinates are % of the card to scale on any width.
+                const twinkles = [
+                  { top: "8%",  left: "12%", size: 12, delay: "0s"   },
+                  { top: "18%", left: "82%", size: 14, delay: "0.7s" },
+                  { top: "46%", left: "6%",  size: 10, delay: "1.3s" },
+                  { top: "62%", left: "88%", size: 11, delay: "0.4s" },
+                  { top: "85%", left: "20%", size: 13, delay: "1.8s" },
+                ];
                 return (
                   <motion.div
                     key={plan.id}
@@ -199,56 +208,83 @@ export default function Subscriptions() {
                     whileInView={{ opacity: 1, y: 0 }}
                     transition={{ duration: 0.45, delay: i * 0.08 }}
                     viewport={{ once: true }}
-                    className={`relative cuci-card p-7 flex flex-col ${
+                    className={`relative overflow-hidden cuci-card p-7 flex flex-col ${
                       plan.popular ? "ring-2 ring-cuci-secondary md:-translate-y-2" : ""
                     }`}
                     data-testid={`plan-card-${plan.id}`}
                   >
+                    {/* Diagonal shimmer streak — clipped to card via wrapper. */}
+                    <div className="cuci-shimmer-wrap" aria-hidden />
+                    {/* Twinkles — pure SVG sparkles, decorative only. */}
+                    {twinkles.map((t, ti) => (
+                      <svg
+                        key={ti}
+                        className="cuci-twinkle"
+                        width={t.size}
+                        height={t.size}
+                        viewBox="0 0 24 24"
+                        style={{ top: t.top, left: t.left, animationDelay: t.delay }}
+                        aria-hidden
+                      >
+                        <path
+                          d="M12 0 L13.5 10.5 L24 12 L13.5 13.5 L12 24 L10.5 13.5 L0 12 L10.5 10.5 Z"
+                          fill={plan.popular ? "#FFA500" : "#7C5CE7"}
+                        />
+                      </svg>
+                    ))}
+
                     {plan.popular && (
-                      <div className="absolute -top-3 left-1/2 -translate-x-1/2 bg-cuci-secondary text-black text-xs font-extrabold uppercase tracking-wider px-3 py-1 rounded-full border-2 border-black">
+                      <div className="absolute -top-3 left-1/2 -translate-x-1/2 bg-cuci-secondary text-black text-xs font-extrabold uppercase tracking-wider px-3 py-1 rounded-full border-2 border-black z-10">
                         Most popular
                       </div>
                     )}
-                    <div
-                      className={`w-12 h-12 rounded-xl border-2 border-black ${plan.accent} flex items-center justify-center mb-5`}
-                    >
-                      <Icon className="w-6 h-6 text-white" strokeWidth={2.5} />
+
+                    {/* Foreground content sits above shimmer/twinkles. */}
+                    <div className="relative z-[3] flex flex-col flex-1">
+                      <div
+                        className={`w-12 h-12 rounded-xl border-2 border-black ${plan.accent} flex items-center justify-center mb-5`}
+                      >
+                        <Icon className="w-6 h-6 text-white" strokeWidth={2.5} />
+                      </div>
+                      <h3 className="text-xl font-extrabold text-gray-900 mb-1">
+                        {plan.name}
+                      </h3>
+                      <p className="text-sm text-gray-500 mb-5">{plan.tagline}</p>
+
+                      {/* Price — centered per Phase 11 design ask. */}
+                      <div className="flex items-baseline justify-center gap-1 mb-6 text-center">
+                        <span className="text-5xl font-black tracking-tight text-cuci-primary">
+                          {plan.price}
+                        </span>
+                        <span className="text-sm text-gray-500 font-medium">
+                          {plan.cadence}
+                        </span>
+                      </div>
+
+                      <ul className="space-y-2.5 mb-7 flex-1">
+                        {plan.features.map((f) => (
+                          <li
+                            key={f}
+                            className="flex items-start gap-2.5 text-sm text-gray-700"
+                          >
+                            <Check className="w-4 h-4 text-cuci-primary mt-0.5 flex-shrink-0" strokeWidth={3} />
+                            <span>{f}</span>
+                          </li>
+                        ))}
+                      </ul>
+                      <Button
+                        onClick={() => setOpenPlan(plan)}
+                        className={`w-full cuci-cta ${
+                          plan.popular
+                            ? "bg-cuci-secondary text-black"
+                            : "bg-cuci-primary text-white"
+                        } rounded-lg`}
+                        data-testid={`button-subscribe-${plan.id}`}
+                      >
+                        {plan.custom ? "Contact sales" : "Subscribe"}
+                        <ArrowRight className="w-4 h-4 ml-1" />
+                      </Button>
                     </div>
-                    <h3 className="text-xl font-extrabold text-gray-900 mb-1">
-                      {plan.name}
-                    </h3>
-                    <p className="text-sm text-gray-500 mb-5">{plan.tagline}</p>
-                    <div className="flex items-baseline gap-1 mb-6">
-                      <span className="text-4xl font-black tracking-tight text-cuci-primary">
-                        {plan.price}
-                      </span>
-                      <span className="text-sm text-gray-500 font-medium">
-                        {plan.cadence}
-                      </span>
-                    </div>
-                    <ul className="space-y-2.5 mb-7 flex-1">
-                      {plan.features.map((f) => (
-                        <li
-                          key={f}
-                          className="flex items-start gap-2.5 text-sm text-gray-700"
-                        >
-                          <Check className="w-4 h-4 text-cuci-primary mt-0.5 flex-shrink-0" strokeWidth={3} />
-                          <span>{f}</span>
-                        </li>
-                      ))}
-                    </ul>
-                    <Button
-                      onClick={() => setOpenPlan(plan)}
-                      className={`w-full cuci-cta ${
-                        plan.popular
-                          ? "bg-cuci-secondary text-black"
-                          : "bg-cuci-primary text-white"
-                      } rounded-lg`}
-                      data-testid={`button-subscribe-${plan.id}`}
-                    >
-                      {plan.custom ? "Contact sales" : "Subscribe"}
-                      <ArrowRight className="w-4 h-4 ml-1" />
-                    </Button>
                   </motion.div>
                 );
               })}
