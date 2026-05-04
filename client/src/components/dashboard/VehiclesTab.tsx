@@ -135,11 +135,16 @@ export function VehiclesTab({ cars }: Props) {
               className="bg-white rounded-2xl border border-gray-200 p-4 relative"
               data-testid={`card-vehicle-${c.id}`}
             >
-              {idx === 0 && (
-                <span className="absolute top-3 left-3 text-[10px] uppercase font-bold bg-cuci-primary/10 text-cuci-primary px-2 py-0.5 rounded">
-                  Primary
-                </span>
-              )}
+              <span
+                className={
+                  "absolute top-3 left-3 text-[10px] uppercase font-bold px-2 py-0.5 rounded " +
+                  (idx === 0
+                    ? "bg-cuci-primary/10 text-cuci-primary"
+                    : "bg-gray-100 text-gray-600")
+                }
+              >
+                {idx === 0 ? "Default" : "Family"}
+              </span>
               <button
                 onClick={() => startEdit(c)}
                 className="absolute top-3 right-3 p-1.5 rounded hover:bg-gray-100"

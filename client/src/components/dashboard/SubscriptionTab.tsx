@@ -7,6 +7,7 @@ interface Props {
   cars: CarRow[];
   washesThisMonth: number;
   washesLastMonth: number;
+  savedThisCycleCents: number;
 }
 
 export function SubscriptionTab({
@@ -14,6 +15,7 @@ export function SubscriptionTab({
   cars,
   washesThisMonth,
   washesLastMonth,
+  savedThisCycleCents,
 }: Props) {
   const active = memberships.find((m) => m.status === "active");
   const past = memberships.filter((m) => m.status !== "active");
@@ -24,14 +26,7 @@ export function SubscriptionTab({
     return avg.toFixed(1);
   })();
 
-  // Rough savings estimate: assume each wash on the plan would have cost
-  // BND 8 pay-as-you-go (basic). Replace with real package prices later.
-  const PAY_AS_YOU_GO_CENTS = 800;
-  const savingsCents = Math.max(
-    0,
-    washesThisMonth * PAY_AS_YOU_GO_CENTS -
-      (active ? Math.round(active.price_cents) : 0),
-  );
+  const savingsCents = savedThisCycleCents;
 
   return (
     <div className="space-y-5">

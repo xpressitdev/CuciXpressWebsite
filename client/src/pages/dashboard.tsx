@@ -118,6 +118,7 @@ export default function DashboardPage() {
               cars={cars}
               washesThisMonth={me.stats.washes_this_month}
               washesLastMonth={me.stats.washes_last_month}
+              savedThisCycleCents={me.stats.saved_this_cycle_cents}
             />
           )}
           {tab === "receipts" && <ReceiptsTab orders={orders} />}

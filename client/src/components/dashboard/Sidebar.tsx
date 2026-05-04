@@ -1,6 +1,14 @@
-import { Home, Clock, Car, CreditCard, Receipt, LogOut } from "lucide-react";
+import { Home, Clock, Car, Crown, Receipt, LogOut, ChevronUp } from "lucide-react";
 import { Link } from "wouter";
 import { Button } from "@/components/ui/button";
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuLabel,
+  DropdownMenuSeparator,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu";
 
 export type DashTab =
   | "overview"
@@ -22,7 +30,7 @@ const items: { id: DashTab; label: string; icon: any }[] = [
   { id: "overview", label: "Overview", icon: Home },
   { id: "history", label: "Wash history", icon: Clock },
   { id: "vehicles", label: "My vehicles", icon: Car },
-  { id: "subscription", label: "Subscription", icon: CreditCard },
+  { id: "subscription", label: "Subscription", icon: Crown },
   { id: "receipts", label: "Receipts", icon: Receipt },
 ];
 
@@ -78,32 +86,42 @@ export function DashSidebar({
         })}
       </nav>
 
-      <div className="p-4 border-t border-gray-200">
-        <div className="flex items-center gap-3 mb-3">
-          <div className="w-10 h-10 rounded-full bg-gradient-to-br from-cuci-primary to-cuci-secondary text-white grid place-items-center font-bold text-sm">
-            {initials || "?"}
-          </div>
-          <div className="min-w-0">
-            <p
-              className="text-sm font-bold text-gray-900 truncate"
-              data-testid="text-dash-username"
+      <div className="p-3 border-t border-gray-200">
+        <DropdownMenu>
+          <DropdownMenuTrigger asChild>
+            <button
+              className="w-full flex items-center gap-3 p-2 rounded-lg hover:bg-gray-50 text-left"
+              data-testid="button-dash-account"
             >
-              {fullName}
-            </p>
-            <p className="text-xs text-gray-500 truncate">{membershipLabel}</p>
-          </div>
-        </div>
-        <Button
-          variant="outline"
-          size="sm"
-          onClick={onLogout}
-          disabled={loggingOut}
-          className="w-full"
-          data-testid="button-dash-logout"
-        >
-          <LogOut className="w-3.5 h-3.5 mr-1.5" />
-          Sign out
-        </Button>
+              <div className="w-9 h-9 rounded-full bg-gradient-to-br from-cuci-primary to-cuci-secondary text-white grid place-items-center font-bold text-xs shrink-0">
+                {initials || "?"}
+              </div>
+              <div className="min-w-0 flex-1">
+                <p
+                  className="text-[13px] font-bold text-gray-900 truncate"
+                  data-testid="text-dash-username"
+                >
+                  {fullName}
+                </p>
+                <p className="text-[11px] text-gray-500 truncate">{membershipLabel}</p>
+              </div>
+              <ChevronUp className="w-4 h-4 text-gray-400 shrink-0" />
+            </button>
+          </DropdownMenuTrigger>
+          <DropdownMenuContent align="end" side="top" className="w-56">
+            <DropdownMenuLabel>My account</DropdownMenuLabel>
+            <DropdownMenuSeparator />
+            <DropdownMenuItem
+              onClick={onLogout}
+              disabled={loggingOut}
+              className="text-red-600 focus:text-red-600"
+              data-testid="button-dash-logout"
+            >
+              <LogOut className="w-3.5 h-3.5 mr-2" />
+              Sign out
+            </DropdownMenuItem>
+          </DropdownMenuContent>
+        </DropdownMenu>
       </div>
     </aside>
   );

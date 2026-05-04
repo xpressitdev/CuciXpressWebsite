@@ -115,11 +115,15 @@ export function OverviewTab({ me, orders, memberships, fullName, onChangeTab }: 
           testId="kpi-washes-month"
         />
         <KpiTile
-          label="Total spent"
-          value={formatBND(me.stats.total_spent_cents)}
+          label="Saved with subscription"
+          value={
+            activeMembership
+              ? formatBND(me.stats.saved_this_cycle_cents)
+              : formatBND(0)
+          }
           color="text-emerald-600"
-          sub="across all packages"
-          testId="kpi-total-spent"
+          sub={activeMembership ? "vs pay-as-you-go" : "no active plan"}
+          testId="kpi-saved"
         />
         <KpiTile
           label="Lifetime washes"
@@ -129,11 +133,15 @@ export function OverviewTab({ me, orders, memberships, fullName, onChangeTab }: 
           testId="kpi-lifetime"
         />
         <KpiTile
-          label="Washes remaining"
-          value={String(me.stats.remaining_washes)}
+          label="Loyalty points"
+          value={me.stats.loyalty_points.toLocaleString()}
           color="text-cuci-secondary"
-          sub={activeMembership ? "on active plan" : "no active plan"}
-          testId="kpi-remaining"
+          sub={
+            me.stats.loyalty_points >= 1300
+              ? "Free Premium unlocked!"
+              : `${1300 - me.stats.loyalty_points} to free Premium`
+          }
+          testId="kpi-loyalty"
         />
       </div>
 
@@ -161,7 +169,7 @@ export function OverviewTab({ me, orders, memberships, fullName, onChangeTab }: 
                   className="flex items-center gap-3 py-2.5 px-2 rounded-lg hover:bg-gray-50"
                   data-testid={`row-recent-${o.id}`}
                 >
-                  <div className="w-8 h-8 rounded-full bg-cuci-primary/10 grid place-items-center shrink-0">
+                  <div className="w-10 h-10 rounded-[10px] bg-cuci-primary/10 grid place-items-center shrink-0">
                     <Droplet className="w-4 h-4 text-cuci-primary" />
                   </div>
                   <div className="min-w-0 flex-1">

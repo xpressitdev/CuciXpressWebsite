@@ -21,6 +21,8 @@ export interface MeResp {
     washes_this_month: number;
     washes_last_month: number;
     member_since: string | null;
+    loyalty_points: number;
+    saved_this_cycle_cents: number;
   };
 }
 

@@ -2875,9 +2875,33 @@ export async function registerRoutes(app: Express): Promise<Server> {
              AND date_trunc('month', created_at AT TIME ZONE 'Asia/Brunei')
                  = date_trunc('month', (now() AT TIME ZONE 'Asia/Brunei') - interval '1 month')) AS washes_last_month,
         (SELECT MIN(created_at) FROM orders
-           WHERE customer_id = ${userId}) AS member_since
+           WHERE customer_id = ${userId}) AS member_since,
+        (SELECT COALESCE(SUM(price_cents),0)::int FROM memberships m
+           JOIN customers cu ON cu.id = m.customer_id
+           WHERE cu.user_id = ${userId} AND m.status = 'active') AS active_membership_cost_cents
     `)).rows[0] as any;
-    res.json({ profile, stats });
+
+    const totalDone = Number(stats.total_done ?? 0);
+    const washesThisMonth = Number(stats.washes_this_month ?? 0);
+    const activeMembershipCost = Number(stats.active_membership_cost_cents ?? 0);
+    const BASELINE_WASH_CENTS = 1500; // BND 15 — pay-as-you-go average across packages
+    const grossThisCycle = washesThisMonth * BASELINE_WASH_CENTS;
+    const savedThisCycle =
+      activeMembershipCost > 0 ? Math.max(0, grossThisCycle - activeMembershipCost) : 0;
+
+    res.json({
+      profile,
+      stats: {
+        total_done: totalDone,
+        total_spent_cents: Number(stats.total_spent_cents ?? 0),
+        remaining_washes: Number(stats.remaining_washes ?? 0),
+        washes_this_month: washesThisMonth,
+        washes_last_month: Number(stats.washes_last_month ?? 0),
+        member_since: stats.member_since ?? null,
+        loyalty_points: totalDone * 20,
+        saved_this_cycle_cents: savedThisCycle,
+      },
+    });
   });
 
   app.get('/api/customer/orders', requireLuciaUser, async (req, res) => {
