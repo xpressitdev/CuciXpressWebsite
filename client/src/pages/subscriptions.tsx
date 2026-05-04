@@ -209,47 +209,20 @@ export default function Subscriptions() {
                     { top: 360, left: "12%", size: 12, delay: "1.8s" },
                   ];
                   return (
+                    // Outer wrapper has NO overflow:hidden so the floating
+                    // badge can poke above the card without being clipped.
                     <motion.div
                       key={plan.id}
                       initial={{ opacity: 0, y: 24 }}
                       whileInView={{ opacity: 1, y: 0 }}
                       transition={{ duration: 0.45, delay: i * 0.08 }}
                       viewport={{ once: true }}
-                      className="relative overflow-hidden flex flex-col md:-translate-y-2"
-                      style={{
-                        background:
-                          "linear-gradient(135deg, #7C5CE7 0%, #B47CF7 45%, #FF9500 100%)",
-                        border: "2px solid #000",
-                        borderRadius: 20,
-                        padding: 32,
-                        boxShadow:
-                          "8px 8px 0 0 rgba(0,0,0,0.92), 0 0 60px rgba(255,149,0,0.45), 0 0 100px rgba(124,92,231,0.35)",
-                      }}
+                      className="relative md:-translate-y-2"
                       data-testid={`plan-card-${plan.id}`}
                     >
-                      {/* Glossy double-radial highlight */}
-                      <div className="cuci-gloss" aria-hidden />
-                      {/* Diagonal shimmer streak */}
-                      <div className="cuci-shimmer-wrap" aria-hidden />
-                      {/* Twinkle stars */}
-                      {TWINKLES.map((t, ti) => (
-                        <svg
-                          key={ti}
-                          className="cuci-twinkle"
-                          width={t.size}
-                          height={t.size}
-                          viewBox="0 0 24 24"
-                          style={{ top: t.top, left: t.left, animationDelay: t.delay }}
-                          aria-hidden
-                        >
-                          <path
-                            d="M12 0 L13.5 10.5 L24 12 L13.5 13.5 L12 24 L10.5 13.5 L0 12 L10.5 10.5 Z"
-                            fill="#fff"
-                          />
-                        </svg>
-                      ))}
-
-                      {/* ★ MOST PICKED badge */}
+                      {/* ★ MOST PICKED badge — lives on the OUTER wrapper so
+                          the gradient card's overflow:hidden (needed for the
+                          shimmer streak) doesn't slice it in half. */}
                       <div
                         className="absolute"
                         style={{
@@ -264,14 +237,50 @@ export default function Subscriptions() {
                           fontWeight: 800,
                           letterSpacing: 1,
                           textTransform: "uppercase",
-                          zIndex: 3,
+                          zIndex: 5,
+                          whiteSpace: "nowrap",
                         }}
                       >
                         ★ Most picked
                       </div>
 
-                      {/* Foreground content */}
-                      <div className="relative flex flex-col flex-1" style={{ zIndex: 1 }}>
+                      {/* Inner gradient card — clips the shimmer/gloss/twinkles. */}
+                      <div
+                        className="relative overflow-hidden flex flex-col h-full"
+                        style={{
+                          background:
+                            "linear-gradient(135deg, #7C5CE7 0%, #B47CF7 45%, #FF9500 100%)",
+                          border: "2px solid #000",
+                          borderRadius: 20,
+                          padding: 32,
+                          boxShadow:
+                            "8px 8px 0 0 rgba(0,0,0,0.92), 0 0 60px rgba(255,149,0,0.45), 0 0 100px rgba(124,92,231,0.35)",
+                        }}
+                      >
+                        {/* Glossy double-radial highlight */}
+                        <div className="cuci-gloss" aria-hidden />
+                        {/* Diagonal shimmer streak */}
+                        <div className="cuci-shimmer-wrap" aria-hidden />
+                        {/* Twinkle stars */}
+                        {TWINKLES.map((t, ti) => (
+                          <svg
+                            key={ti}
+                            className="cuci-twinkle"
+                            width={t.size}
+                            height={t.size}
+                            viewBox="0 0 24 24"
+                            style={{ top: t.top, left: t.left, animationDelay: t.delay }}
+                            aria-hidden
+                          >
+                            <path
+                              d="M12 0 L13.5 10.5 L24 12 L13.5 13.5 L12 24 L10.5 13.5 L0 12 L10.5 10.5 Z"
+                              fill="#fff"
+                            />
+                          </svg>
+                        ))}
+
+                        {/* Foreground content */}
+                        <div className="relative flex flex-col flex-1" style={{ zIndex: 1 }}>
                         <div
                           className="w-12 h-12 rounded-xl border-2 border-black flex items-center justify-center mb-5"
                           style={{ background: "rgba(255,255,255,0.18)" }}
@@ -358,6 +367,7 @@ export default function Subscriptions() {
                           Subscribe
                           <ArrowRight className="w-4 h-4 ml-1" />
                         </Button>
+                        </div>
                       </div>
                     </motion.div>
                   );
