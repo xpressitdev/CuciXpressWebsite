@@ -194,6 +194,37 @@ export default function LoginPage() {
               >
                 {busy ? <Loader2 className="w-5 h-5 animate-spin" /> : "Verify & sign in"}
               </Button>
+
+              {import.meta.env.DEV && (
+                <button
+                  type="button"
+                  onClick={async () => {
+                    try {
+                      const r = await fetch(
+                        `/api/dev/last-otp?phone=${encodeURIComponent(phone.trim().replace(/\s+/g, ""))}`,
+                      );
+                      const d = await r.json();
+                      if (d.ok && /^\d{6}$/.test(d.code)) {
+                        setCode(d.code);
+                        toast({ title: "Dev code filled", description: `Code: ${d.code}` });
+                      } else {
+                        toast({
+                          title: "No dev code yet",
+                          description: "Send a code first — the dev console also prints it.",
+                          variant: "destructive",
+                        });
+                      }
+                    } catch {
+                      toast({ title: "Could not read dev code", variant: "destructive" });
+                    }
+                  }}
+                  className="w-full text-xs text-amber-700 bg-amber-50 border border-amber-300 rounded-md py-2 hover:bg-amber-100"
+                  data-testid="button-login-dev-fill"
+                >
+                  🔧 Dev only: reveal &amp; auto-fill the OTP
+                </button>
+              )}
+
               <button
                 type="button"
                 onClick={() => {

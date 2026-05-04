@@ -2724,6 +2724,31 @@ export async function registerRoutes(app: Express): Promise<Server> {
     name: z.string().min(1).max(100).optional(),
   });
 
+  // GET /api/dev/last-otp?phone=...
+  // DEV ONLY: returns the most recent mock OTP (read from /tmp/last_otp.json
+  // which the otp module writes on every send). Returns 404 in production.
+  // Lets you log in as a customer without a real WhatsApp delivery.
+  app.get('/api/dev/last-otp', async (req, res) => {
+    if (process.env.NODE_ENV === 'production') {
+      return res.status(404).json({ ok: false, reason: 'not_available' });
+    }
+    try {
+      const fs = await import('node:fs/promises');
+      const raw = await fs.readFile('/tmp/last_otp.json', 'utf8');
+      const data = JSON.parse(raw) as { identifier: string; purpose: string; code: string; at: string };
+      // Loose digits-only match so '+', spaces, and URL-decoded '+' all
+      // resolve to the same number. Dev only — no security concern.
+      const digits = (s: string) => s.replace(/\D+/g, '');
+      const wanted = digits(String(req.query.phone ?? ''));
+      if (wanted && digits(data.identifier) !== wanted) {
+        return res.status(404).json({ ok: false, reason: 'no_match', last_identifier: data.identifier });
+      }
+      res.json({ ok: true, ...data });
+    } catch (err) {
+      res.status(404).json({ ok: false, reason: 'no_code_yet' });
+    }
+  });
+
   app.post('/api/auth/customer/login/start', async (req, res) => {
     const parsed = phoneStartSchema.safeParse(req.body);
     if (!parsed.success) {
