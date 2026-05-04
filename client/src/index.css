@@ -183,50 +183,6 @@ html {
   75%, 100% { transform: scale(2); opacity: 0; }
 }
 
-/* Shimmer + twinkle for premium plan cards (Phase 11 subscriptions).
-   `cuci-shimmer-wrap` clips the diagonal streak to the card.
-   `cuci-twinkle` pulses a single sparkle SVG at a fixed position. */
-.cuci-shimmer-wrap {
-  position: absolute;
-  inset: 0;
-  pointer-events: none;
-  overflow: hidden;
-  border-radius: inherit;
-}
-.cuci-shimmer-wrap::after {
-  content: "";
-  position: absolute;
-  top: -60%;
-  left: -40%;
-  right: -40%;
-  bottom: -60%;
-  background: linear-gradient(
-    115deg,
-    transparent 38%,
-    rgba(124, 92, 231, 0.18) 47%,
-    rgba(255, 255, 255, 0.55) 50%,
-    rgba(255, 165, 0, 0.18) 53%,
-    transparent 62%
-  );
-  animation: cxshimmer 4.2s ease-in-out infinite;
-  mix-blend-mode: overlay;
-}
-@keyframes cxshimmer {
-  0%   { transform: translateX(-110%); }
-  60%  { transform: translateX(110%); }
-  100% { transform: translateX(110%); }
-}
-.cuci-twinkle {
-  position: absolute;
-  pointer-events: none;
-  animation: cxtwinkle 2.4s ease-in-out infinite;
-  z-index: 2;
-}
-@keyframes cxtwinkle {
-  0%, 100% { opacity: 0.15; transform: scale(0.7); }
-  50%      { opacity: 1;    transform: scale(1.1); }
-}
-
 /* Press-down interaction shared by all CTA buttons in the
    neo-brutalist style. Pair with the existing inline shadow. */
 .cuci-cta {
