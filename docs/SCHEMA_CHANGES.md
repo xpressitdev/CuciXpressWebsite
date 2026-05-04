@@ -872,3 +872,68 @@ API surface:
   `branch_id` and re-keys the query so a branch switch refetches.
 
 Add-ons remain global per owner direction (universal upsells).
+
+---
+
+## 2026-05-04_10 — Web checkout → CRM wiring (Phase 12a)
+
+Until now, when a customer paid online via the trunk's `/checkout`
+flow we sent them to Pocket Pay but wrote **nothing** to our DB.
+`/api/save-customer` was a console.log no-op, and `/api/process-payment`
+only round-tripped to Pocket Pay. Result: staff couldn't see prepaid
+orders in the POS; the customer dashboard's wash history showed only
+in-store walk-ins; memberships, loyalty, and CRM were blind to online
+payments.
+
+Three small, additive schema changes unblock the wiring (no rewrite
+of the payment flow itself):
+
+1. **`orders.status` allows `'pending_payment'`** alongside the
+   existing six values. `/api/process-payment` inserts a row with
+   this status the moment a Pocket Pay link is created, so the
+   wash exists in the CRM immediately. `/api/payment-callback`
+   flips it to `'paid'` (success) or `'voided'` (failure /
+   cancelled).
+2. **`orders.ticket_code` is now nullable** so a `pending_payment`
+   row can exist before staff allocates a T-NNN lane ticket (which
+   still happens at QR-scan time, identical to the in-store flow).
+   The existing UNIQUE INDEX on `(branch_id, ticket_code, ticket_day)`
+   already permits multiple NULLs (Postgres btree default).
+3. **Partial UNIQUE index `idx_orders_pocket_pay_payment_ref`** on
+   `payment_ref WHERE qr_provider='pocket_pay'`. Makes the Pocket
+   Pay callback idempotent — a re-delivered callback gets a 23505
+   on duplicate insert attempts and a no-op on the status flip
+   (gated by `status='pending_payment'`). Cash/card `payment_ref`
+   values (KedaiPOS receipt numbers etc.) are unaffected by the
+   partial gate.
+
+Customer + vehicle linkage mirrors the existing POS upsert path
+(`/api/pos/orders`):
+- `customers` upsert by phone (preserves existing name on conflict;
+  new rows get a `"Online: <plate>"` placeholder name).
+- `cars` upsert by normalised plate, linked to the customer, with
+  `last_seen_at` bumped.
+- `orders` row inserted with `customer_id`, `vehicle_id`, `plate`,
+  `package_id` (resolved by name or amount-cents match against the
+  packages catalog), `qr_provider='pocket_pay'`, and
+  `payment_ref=<pocket_pay order_id>`.
+
+The DB write is wrapped in try/catch — a hiccup must NOT break the
+customer's payment flow, because they already have a working Pocket
+Pay link by that point. Failed inserts log loudly and can be
+backfilled from Pocket Pay's transaction list later.
+
+The customer dashboard (`/api/customer/orders`, joining via
+`cars.customer_id`) **auto-populates** with online washes the
+moment a customer signs up later with the same phone — no dashboard
+endpoint changes needed.
+
+**Not in this phase (deliberately):**
+- Staff QR-scan-in (`/api/verify-qr`) still uses the old mock data
+  path. Phase 12c will rewrite it to look up the order by
+  `payment_ref`, allocate a T-NNN ticket, and flip status to
+  `'queued'` — putting the prepaid wash into the same lane queue
+  as a walk-in.
+- A status-poll cron for `pending_payment` rows older than 24h.
+  For now they stay visible in the CRM and can be reconciled by
+  hand.

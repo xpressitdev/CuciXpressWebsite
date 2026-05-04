@@ -460,7 +460,11 @@ export const orders = pgTable("orders", {
   total_cents: integer("total_cents").notNull(),
   payment_method: text("payment_method").notNull(),
   payment_ref: text("payment_ref"),
-  ticket_code: text("ticket_code").notNull(),
+  // Phase 12a (2026-05-04_10): nullable so web-checkout rows that
+  // start as `status='pending_payment'` can exist without a lane
+  // ticket. Staff allocates T-NNN at scan-in time. The unique
+  // index on (branch_id, ticket_code, ticket_day) permits NULLs.
+  ticket_code: text("ticket_code"),
   // ticket_day: app-supplied bucket for the daily uniqueness constraint.
   // Defaults to the UTC date at insert time when omitted.
   ticket_day: date("ticket_day")

@@ -2108,6 +2108,51 @@ export async function registerRoutes(app: Express): Promise<Server> {
         });
       }
 
+      // ── Phase 12a: resolve branch + package BEFORE calling Pocket Pay ──
+      // Frontend sends a slug like "tungku" / "salar" — map to branches.id
+      // (1=Tungku, 2=Salar, 3=Bengkurong, 4=Tutong, 5=Lambak; seeded set).
+      // If the slug doesn't match, we fail fast — the customer's plate +
+      // phone shouldn't be associated with the wrong branch.
+      const BRANCH_ID_BY_SLUG: Record<string, number> = {
+        tungku: 1,
+        salar: 2,
+        bengkurong: 3,
+        tutong: 4,
+        lambak: 5,
+      };
+      const branchSlug = String(paymentData.selectedBranch || '').toLowerCase();
+      const branchId = BRANCH_ID_BY_SLUG[branchSlug];
+      if (!branchId) {
+        return res.status(400).json({
+          success: false,
+          message: `Unknown branch: ${paymentData.selectedBranch}`,
+        });
+      }
+
+      // Resolve package: try exact name match first, fall back to amount
+      // match (BND price → cents). package_id is nullable on orders, so
+      // a no-match case still inserts cleanly using the snapshot fields.
+      const amountCents = Math.round(Number(paymentData.amount) * 100);
+      const pkgRows = (await db.execute(sql`
+        SELECT id, name, price_cents
+          FROM packages
+         WHERE is_active = true
+           AND (LOWER(name) = LOWER(${paymentData.serviceName})
+                OR price_cents = ${amountCents})
+         ORDER BY (LOWER(name) = LOWER(${paymentData.serviceName})) DESC,
+                  price_cents ASC
+         LIMIT 1
+      `)).rows as Array<{ id: string; name: string; price_cents: number }>;
+      const matchedPkg = pkgRows[0] ?? null;
+      const packageId   = matchedPkg?.id ?? null;
+      const packageName = matchedPkg?.name ?? String(paymentData.serviceName);
+      const priceCents  = matchedPkg?.price_cents ?? amountCents;
+
+      // Normalise plate (mirrors POS upsert in /api/pos/orders).
+      const plateUpper = String(paymentData.carPlate).toUpperCase();
+      const plateNorm  = plateUpper.replace(/\s+/g, '');
+      const phoneStr   = String(paymentData.phone).trim();
+
       // Process payment through Pocket Pay
       const result = await processPocketPayPayment(paymentData);
       
@@ -2122,6 +2167,84 @@ export async function registerRoutes(app: Express): Promise<Server> {
           service: paymentData.serviceName,
           branch: paymentData.selectedBranch
         });
+
+        // ── Phase 12a: upsert customer + car + insert pending_payment order
+        // so the wash exists in the CRM the moment the link is generated.
+        // The Pocket Pay callback (below) flips status to 'paid' (or
+        // 'voided' on failure) by looking up payment_ref. All inside one
+        // transaction so a partial failure can't half-write the customer.
+        // Wrapped in try/catch — a DB hiccup must NOT break the customer's
+        // payment flow; they already have a working Pocket Pay link.
+        try {
+          await db.transaction(async (tx) => {
+            const fallbackName = `Online: ${plateUpper}`;
+            // Upsert customer by phone. ON CONFLICT bumps updated_at only —
+            // we don't overwrite an existing customer's real name with our
+            // "Online: <plate>" placeholder.
+            const cuRows = (await tx.execute(sql`
+              INSERT INTO customers (phone, name)
+              VALUES (${phoneStr}, ${fallbackName})
+              ON CONFLICT (phone) DO UPDATE
+                 SET updated_at = now()
+              RETURNING id
+            `)).rows as Array<{ id: number }>;
+            const customerId = cuRows[0]?.id ?? null;
+
+            // Upsert car by normalised plate, link it to the customer.
+            // Same dedup ordering as the POS path so we hit the same row.
+            let vehicleId: number | null = null;
+            const existing = (await tx.execute(sql`
+              SELECT id FROM cars
+               WHERE UPPER(REGEXP_REPLACE(license_plate, '\s+', '', 'g')) = ${plateNorm}
+               ORDER BY (CASE WHEN customer_id = ${customerId ?? -1} THEN 0 ELSE 1 END) ASC,
+                        COALESCE(last_seen_at, 'epoch'::timestamptz) DESC,
+                        id DESC
+               LIMIT 1
+            `)).rows as Array<{ id: number }>;
+            if (existing.length > 0) {
+              vehicleId = existing[0].id;
+              await tx.execute(sql`
+                UPDATE cars SET
+                  customer_id  = COALESCE(customer_id, ${customerId}),
+                  last_seen_at = now()
+                 WHERE id = ${vehicleId}
+              `);
+            } else {
+              const ins = (await tx.execute(sql`
+                INSERT INTO cars (license_plate, customer_id, last_seen_at)
+                VALUES (${plateUpper}, ${customerId}, now())
+                RETURNING id
+              `)).rows as Array<{ id: number }>;
+              vehicleId = ins[0]?.id ?? null;
+            }
+
+            // Insert the pending_payment order. ticket_code stays NULL —
+            // staff allocates a T-NNN ticket at QR-scan time. payment_ref
+            // is the Pocket Pay order_id (the field we get back in the
+            // callback) so the partial-unique-index makes the callback
+            // idempotent.
+            const orderId = `ord_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 8)}`;
+            await tx.execute(sql`
+              INSERT INTO orders (
+                id, branch_id, plate, vehicle_id, customer_id,
+                package_id, package_name, package_price_cents,
+                addons, subtotal_cents, total_cents,
+                payment_method, payment_ref, qr_provider,
+                status, customer_name_walkin
+              ) VALUES (
+                ${orderId}, ${branchId}, ${plateUpper}, ${vehicleId}, ${customerId},
+                ${packageId}, ${packageName}, ${priceCents},
+                '[]'::jsonb, ${priceCents}, ${priceCents},
+                'qr_code', ${result.order_id}, 'pocket_pay',
+                'pending_payment', ${fallbackName}
+              )
+            `);
+          });
+        } catch (dbErr) {
+          // Don't block the payment flow on a DB hiccup — log loudly so
+          // we can backfill from Pocket Pay's transaction list later.
+          console.error('Phase 12a: failed to record pending_payment order (continuing):', dbErr);
+        }
 
         // Create order in KedaiPOS system (async - don't wait)
         kedaiPOSIntegration.createOrder({
@@ -2369,7 +2492,33 @@ export async function registerRoutes(app: Express): Promise<Server> {
       console.log('Payment callback received:', callbackData);
       
       const result = handlePaymentCallback(callbackData);
-      
+
+      // ── Phase 12a: flip the pending_payment order to 'paid' (callback
+      // success) or 'voided' (failure/cancellation) by looking up the
+      // Pocket Pay order_id. The partial unique index on payment_ref
+      // (WHERE qr_provider='pocket_pay') makes this idempotent — Pocket
+      // Pay can re-deliver the callback safely. We only flip rows still
+      // in 'pending_payment' so a manual override (refund, void) sticks.
+      const ppOrderId = callbackData?.order_id ?? result?.order_id ?? null;
+      if (ppOrderId) {
+        const newStatus = result.success ? 'paid' : 'voided';
+        try {
+          await db.execute(sql`
+            UPDATE orders
+               SET status       = ${newStatus},
+                   completed_at = CASE WHEN ${newStatus} = 'paid' THEN now() ELSE completed_at END
+             WHERE qr_provider = 'pocket_pay'
+               AND payment_ref = ${String(ppOrderId)}
+               AND status      = 'pending_payment'
+          `);
+        } catch (dbErr) {
+          // Non-blocking: callback ack still goes back to Pocket Pay.
+          // Pending row stays visible in the CRM as 'pending_payment'
+          // and can be reconciled by hand or by a future status-poll cron.
+          console.error('Phase 12a: failed to flip order status from callback (non-blocking):', dbErr);
+        }
+      }
+
       if (result.success) {
         res.json({ status: 'OK', message: 'Callback processed' });
       } else {
