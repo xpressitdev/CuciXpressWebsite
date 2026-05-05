@@ -3713,13 +3713,16 @@ export async function registerRoutes(app: Express): Promise<Server> {
             (${redemptionId}, ${userId}, ${voucherId}, ${LOYALTY_PKG_ID}, ${branchId})
         `);
 
-        // Punch the 4 receipts.
-        const ids = eligibleRows.map(r => r.id);
-        await tx.execute(sql`
-          UPDATE orders SET loyalty_consumed_in = ${redemptionId}
-           WHERE id = ANY(${ids}::text[])
-             AND loyalty_consumed_in IS NULL
-        `);
+        // Punch the 4 receipts. Loop instead of ANY(array) — Drizzle's
+        // sql tag binds JS arrays as a record tuple, not a text[], which
+        // breaks the cast. 4 rows max so the loop cost is negligible.
+        for (const row of eligibleRows) {
+          await tx.execute(sql`
+            UPDATE orders SET loyalty_consumed_in = ${redemptionId}
+             WHERE id = ${row.id}
+               AND loyalty_consumed_in IS NULL
+          `);
+        }
 
         return {
           http: 201,
