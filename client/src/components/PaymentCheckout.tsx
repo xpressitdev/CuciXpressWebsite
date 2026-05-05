@@ -7,11 +7,20 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Badge } from "@/components/ui/badge";
-import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
-import { CreditCard, Lock, ArrowLeft, User, UserPlus, History, CheckCircle } from "lucide-react";
-import { SiGoogle } from "react-icons/si";
+import { CreditCard, Lock, ArrowLeft, History, CheckCircle, Phone, KeyRound, Loader2 } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
 import { useAuth, type User as AuthUser } from "@/hooks/useAuth";
+
+const OTP_REASON_TEXT: Record<string, string> = {
+  invalid_request: "That number doesn't look right. Please try again.",
+  invalid_purpose: "Sign-in is temporarily unavailable.",
+  invalid_identifier: "That phone number is invalid.",
+  no_active_code: "No active code. Please request a new one.",
+  expired: "That code has expired. Please request a new one.",
+  too_many_attempts: "Too many wrong tries. Request a new code.",
+  wrong_code: "That code is incorrect.",
+  server_error: "Something went wrong on our side. Please retry.",
+};
 
 interface PaymentCheckoutProps {
   selectedService?: {
@@ -25,59 +34,18 @@ interface PaymentCheckoutProps {
 
 export default function PaymentCheckout({ selectedService, onBack }: PaymentCheckoutProps) {
   const { toast } = useToast();
-  const { user, isAuthenticated, login, register, logout, isLoading, checkAuthStatus } = useAuth();
-
-  // After a Google round-trip, the server redirects us back here with
-  // `?google_oauth=ok|cancelled|failed`. Pick that up, refresh the auth
-  // hook so the modal closes / form auto-fills, surface a toast, and
-  // strip the marker from the URL so a refresh doesn't re-trigger it.
-  useEffect(() => {
-    const params = new URLSearchParams(window.location.search);
-    const status = params.get('google_oauth');
-    if (!status) return;
-
-    if (status === 'ok') {
-      checkAuthStatus().then(() => {
-        setShowAuth(false);
-        toast({
-          title: 'Signed in with Google',
-          description: 'Your details are filled in — finish your booking below.',
-        });
-      });
-    } else if (status === 'cancelled') {
-      toast({
-        title: 'Sign-in cancelled',
-        description: 'You can try again or register with a username and password.',
-      });
-    } else {
-      toast({
-        title: 'Google sign-in failed',
-        description: 'Something went wrong. Please try again or use a username and password.',
-        variant: 'destructive',
-      });
-    }
-
-    params.delete('google_oauth');
-    const qs = params.toString();
-    const cleaned = window.location.pathname + (qs ? `?${qs}` : '') + window.location.hash;
-    window.history.replaceState(null, '', cleaned);
-  }, []); // eslint-disable-line react-hooks/exhaustive-deps
-
-  const handleGoogleSignIn = () => {
-    // Round-trip the user back to wherever they currently are. The
-    // server validates this strictly to prevent open-redirects.
-    const returnTo = window.location.pathname + window.location.search + window.location.hash;
-    window.location.href = `/api/auth/google?return_to=${encodeURIComponent(returnTo)}`;
-  };
+  const { user, isAuthenticated, logout, isLoading, checkAuthStatus } = useAuth();
 
   const [isProcessing, setIsProcessing] = useState(false);
   const [showAuth, setShowAuth] = useState(false);
-  const [authMode, setAuthMode] = useState<'login' | 'register'>('login');
-  const [authData, setAuthData] = useState({
-    username: '',
-    password: '',
-    email: ''
-  });
+  // Phone+OTP sign-in state (replaces the old username/password/Google
+  // tri-modal). Identical flow to /login, just inline in the checkout
+  // modal so the customer never has to leave this page.
+  const [otpStep, setOtpStep] = useState<'phone' | 'code'>('phone');
+  const [otpPhone, setOtpPhone] = useState('');
+  const [otpName, setOtpName] = useState('');
+  const [otpCode, setOtpCode] = useState('');
+  const [otpBusy, setOtpBusy] = useState(false);
   const [formData, setFormData] = useState({
     carPlate: "",
     phone: "",
@@ -110,60 +78,88 @@ export default function PaymentCheckout({ selectedService, onBack }: PaymentChec
     setFormData(prev => ({ ...prev, [field]: value }));
   };
 
-  const handleAuthInputChange = (field: string, value: string) => {
-    setAuthData(prev => ({ ...prev, [field]: value }));
+  // Phone+OTP — matches /login.tsx behaviour exactly. Mints the same
+  // Lucia cx_session cookie, so after a successful verify the rest of
+  // the checkout works identically to a customer who arrived from
+  // /dashboard already logged in.
+  const sendOtp = async () => {
+    if (!otpPhone.trim()) return;
+    setOtpBusy(true);
+    try {
+      const res = await fetch('/api/auth/customer/login/start', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        credentials: 'include',
+        body: JSON.stringify({ phone: otpPhone }),
+      });
+      const data = await res.json();
+      if (!res.ok || !data.ok) {
+        toast({
+          title: 'Could not send code',
+          description: OTP_REASON_TEXT[data.reason] ?? 'Please try again.',
+          variant: 'destructive',
+        });
+        return;
+      }
+      toast({ title: 'Code sent', description: 'Check your messages for a 6-digit code.' });
+      setOtpStep('code');
+    } finally {
+      setOtpBusy(false);
+    }
   };
 
-  const handleAuthSubmit = async (e: React.FormEvent) => {
-    e.preventDefault();
-    
-    if (authMode === 'login') {
-      const result = await login(authData.username, authData.password);
-      if (result.success) {
-        setShowAuth(false);
+  const verifyOtp = async () => {
+    if (!/^\d{6}$/.test(otpCode)) {
+      toast({ title: 'Enter the 6-digit code', variant: 'destructive' });
+      return;
+    }
+    setOtpBusy(true);
+    try {
+      const res = await fetch('/api/auth/customer/login/verify', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        credentials: 'include',
+        body: JSON.stringify({
+          phone: otpPhone,
+          code: otpCode,
+          name: otpName.trim() || undefined,
+        }),
+      });
+      const data = await res.json();
+      if (!res.ok || !data.ok) {
         toast({
-          title: "Welcome back!",
-          description: "Successfully logged in. Your details will be auto-filled.",
+          title: 'Could not sign in',
+          description: OTP_REASON_TEXT[data.reason] ?? 'Please try again.',
+          variant: 'destructive',
         });
-      } else {
-        toast({
-          title: "Login Failed",
-          description: result.error || "Invalid username or password",
-          variant: "destructive"
-        });
+        return;
       }
-    } else {
-      const result = await register(authData.username, authData.password, authData.email, 'car_wash');
-      if (result.success) {
-        setShowAuth(false);
-        toast({
-          title: "Account Created!",
-          description: "Welcome to Cuci Xpress! Your account has been created successfully.",
-        });
-      } else {
-        toast({
-          title: "Registration Failed",
-          description: result.error || "Failed to create account",
-          variant: "destructive"
-        });
-      }
+      // Refresh the auth hook so isAuthenticated flips to true and the
+      // form auto-fills from the (now-known) profile.
+      await checkAuthStatus();
+      setShowAuth(false);
+      setOtpStep('phone');
+      setOtpCode('');
+      toast({ title: 'Welcome!', description: "You're signed in." });
+    } finally {
+      setOtpBusy(false);
     }
   };
 
 
+  // Email is no longer required — the QR receipt goes via WhatsApp
+  // (and is shown on the success page + saved to /dashboard). We still
+  // accept an email if the customer types one, for a paper-trail.
   const validateForm = () => {
-    const required = ['carPlate', 'phone', 'selectedBranch', 'email'];
+    const required = ['carPlate', 'phone', 'selectedBranch'];
     return required.every(field => formData[field as keyof typeof formData]);
   };
 
   const handlePayment = async () => {
     if (!validateForm()) {
-      const missingEmail = !formData.email;
       toast({
         title: "Missing Information",
-        description: missingEmail
-          ? "Please enter your email address — your payment receipt will be sent there."
-          : "Please fill in all required fields (car plate, phone, email, and branch).",
+        description: "Please fill in your car plate, phone number, and branch.",
         variant: "destructive"
       });
       return;
@@ -340,18 +336,19 @@ export default function PaymentCheckout({ selectedService, onBack }: PaymentChec
                       <div className="flex items-start gap-3">
                         <History className="w-5 h-5 text-amber-600 mt-0.5" />
                         <div>
-                          <h4 className="font-medium text-amber-900 mb-1">Track Your Service History</h4>
+                          <h4 className="font-medium text-amber-900 mb-1">Sign in for faster checkout</h4>
                           <p className="text-sm text-amber-700 mb-3">
-                            Create an account or login to save your car details and view your service history for faster bookings.
+                            Enter your phone number and we'll auto-fill your car &amp; details. Your washes are saved in your dashboard.
                           </p>
-                          <Button 
-                            variant="outline" 
+                          <Button
+                            variant="outline"
                             size="sm"
                             onClick={() => setShowAuth(true)}
                             className="bg-white hover:bg-amber-50"
+                            data-testid="button-open-signin"
                           >
-                            <User className="w-4 h-4 mr-2" />
-                            Login / Register
+                            <Phone className="w-4 h-4 mr-2" />
+                            Sign in with phone
                           </Button>
                         </div>
                       </div>
@@ -411,16 +408,15 @@ export default function PaymentCheckout({ selectedService, onBack }: PaymentChec
                   </div>
 
                   <div>
-                    <Label htmlFor="email">Email Address *</Label>
+                    <Label htmlFor="email">Email Address <span className="text-gray-400 font-normal text-xs">(optional)</span></Label>
                     <Input
                       id="email"
                       type="email"
                       value={formData.email}
                       onChange={(e) => handleInputChange('email', e.target.value)}
                       placeholder="your@email.com"
-                      required
                     />
-                    <p className="text-xs text-gray-500 mt-1">Your payment receipt will be sent here</p>
+                    <p className="text-xs text-gray-500 mt-1">We'll send your QR code via WhatsApp — email is just for a paper-trail receipt.</p>
                   </div>
 
                   <div>
@@ -497,115 +493,124 @@ export default function PaymentCheckout({ selectedService, onBack }: PaymentChec
               <Card>
                 <CardHeader>
                   <CardTitle className="flex items-center gap-2">
-                    {authMode === 'login' ? (
-                      <>
-                        <User className="w-5 h-5" />
-                        Login to Your Account
-                      </>
-                    ) : (
-                      <>
-                        <UserPlus className="w-5 h-5" />
-                        Create New Account
-                      </>
-                    )}
+                    <Phone className="w-5 h-5" />
+                    {otpStep === 'phone' ? 'Sign in with phone' : 'Enter your code'}
                   </CardTitle>
                 </CardHeader>
                 <CardContent className="space-y-4">
-                  <Button
-                    type="button"
-                    variant="outline"
-                    onClick={handleGoogleSignIn}
-                    className="w-full flex items-center justify-center gap-2"
-                    data-testid="button-google-signin"
-                  >
-                    <SiGoogle className="w-4 h-4" />
-                    Continue with Google
-                  </Button>
-                  <div className="relative">
-                    <div className="absolute inset-0 flex items-center">
-                      <span className="w-full border-t" />
-                    </div>
-                    <div className="relative flex justify-center text-xs uppercase">
-                      <span className="bg-background px-2 text-muted-foreground">
-                        Or continue with
-                      </span>
-                    </div>
-                  </div>
-                  <Tabs value={authMode} onValueChange={(value) => setAuthMode(value as 'login' | 'register')}>
-                    <TabsList className="grid w-full grid-cols-2">
-                      <TabsTrigger value="login">Login</TabsTrigger>
-                      <TabsTrigger value="register">Register</TabsTrigger>
-                    </TabsList>
-                    
-                    <form onSubmit={handleAuthSubmit} className="space-y-4 mt-4">
-                      <TabsContent value="login" className="space-y-4 mt-0">
-                        <div>
-                          <Label htmlFor="username">Username</Label>
-                          <Input
-                            id="username"
-                            value={authData.username}
-                            onChange={(e) => handleAuthInputChange('username', e.target.value)}
-                            placeholder="Enter your username"
-                            required
-                          />
-                        </div>
-                        <div>
-                          <Label htmlFor="password">Password</Label>
-                          <Input
-                            id="password"
-                            type="password"
-                            value={authData.password}
-                            onChange={(e) => handleAuthInputChange('password', e.target.value)}
-                            placeholder="Enter your password"
-                            required
-                          />
-                        </div>
-                      </TabsContent>
-
-                      <TabsContent value="register" className="space-y-4 mt-0">
-                        <div>
-                          <Label htmlFor="reg-username">Username</Label>
-                          <Input
-                            id="reg-username"
-                            value={authData.username}
-                            onChange={(e) => handleAuthInputChange('username', e.target.value)}
-                            placeholder="Choose a username"
-                            required
-                          />
-                        </div>
-                        <div>
-                          <Label htmlFor="reg-email">Email (Optional)</Label>
-                          <Input
-                            id="reg-email"
-                            type="email"
-                            value={authData.email}
-                            onChange={(e) => handleAuthInputChange('email', e.target.value)}
-                            placeholder="your@email.com"
-                          />
-                        </div>
-                        <div>
-                          <Label htmlFor="reg-password">Password</Label>
-                          <Input
-                            id="reg-password"
-                            type="password"
-                            value={authData.password}
-                            onChange={(e) => handleAuthInputChange('password', e.target.value)}
-                            placeholder="Create a password"
-                            required
-                          />
-                        </div>
-                      </TabsContent>
-
-                      <div className="flex gap-2">
+                  {otpStep === 'phone' ? (
+                    <>
+                      <div className="space-y-1">
+                        <Label htmlFor="otp-phone" className="flex items-center gap-1">
+                          <Phone className="w-3 h-3" /> Phone number
+                        </Label>
+                        <Input
+                          id="otp-phone"
+                          value={otpPhone}
+                          onChange={(e) => setOtpPhone(e.target.value)}
+                          placeholder="+673 7XX XXXX"
+                          inputMode="tel"
+                          autoFocus
+                          data-testid="input-checkout-phone"
+                        />
+                      </div>
+                      <div className="space-y-1">
+                        <Label htmlFor="otp-name">
+                          Name <span className="text-gray-400 font-normal text-xs">(optional, first time only)</span>
+                        </Label>
+                        <Input
+                          id="otp-name"
+                          value={otpName}
+                          onChange={(e) => setOtpName(e.target.value)}
+                          placeholder="Your name"
+                          data-testid="input-checkout-name"
+                        />
+                      </div>
+                      <div className="flex gap-2 pt-1">
                         <Button type="button" variant="outline" onClick={() => setShowAuth(false)} className="flex-1">
                           Cancel
                         </Button>
-                        <Button type="submit" className="flex-1">
-                          {authMode === 'login' ? 'Login' : 'Create Account'}
+                        <Button
+                          type="button"
+                          onClick={sendOtp}
+                          disabled={otpBusy || !otpPhone.trim()}
+                          className="flex-1 bg-cuci-primary hover:bg-cuci-primary/90 text-white"
+                          data-testid="button-checkout-send-code"
+                        >
+                          {otpBusy ? <Loader2 className="w-4 h-4 animate-spin" /> : 'Send 6-digit code →'}
                         </Button>
                       </div>
-                    </form>
-                  </Tabs>
+                      <p className="text-[11px] text-gray-400 text-center">
+                        We'll send a one-time code to your WhatsApp. No password to remember.
+                      </p>
+                    </>
+                  ) : (
+                    <>
+                      <div className="rounded-lg bg-cuci-primary/5 border border-cuci-primary/20 p-3 text-center">
+                        <p className="text-sm text-gray-700">
+                          Code sent to{' '}
+                          <span className="font-bold text-cuci-primary">{otpPhone}</span>
+                        </p>
+                      </div>
+                      <div className="space-y-1">
+                        <Label htmlFor="otp-code" className="flex items-center gap-1">
+                          <KeyRound className="w-3 h-3" /> 6-digit code
+                        </Label>
+                        <Input
+                          id="otp-code"
+                          value={otpCode}
+                          onChange={(e) => setOtpCode(e.target.value.replace(/\D/g, '').slice(0, 6))}
+                          placeholder="••••••"
+                          inputMode="numeric"
+                          autoFocus
+                          className="tracking-[0.6em] text-center text-2xl font-mono py-6"
+                          data-testid="input-checkout-code"
+                        />
+                      </div>
+                      <div className="flex gap-2">
+                        <Button
+                          type="button"
+                          variant="outline"
+                          onClick={() => { setOtpStep('phone'); setOtpCode(''); }}
+                          className="flex-1"
+                        >
+                          ← Back
+                        </Button>
+                        <Button
+                          type="button"
+                          onClick={verifyOtp}
+                          disabled={otpBusy || otpCode.length !== 6}
+                          className="flex-1 bg-cuci-primary hover:bg-cuci-primary/90 text-white"
+                          data-testid="button-checkout-verify"
+                        >
+                          {otpBusy ? <Loader2 className="w-4 h-4 animate-spin" /> : 'Verify & continue'}
+                        </Button>
+                      </div>
+
+                      {import.meta.env.DEV && (
+                        <button
+                          type="button"
+                          onClick={async () => {
+                            try {
+                              const r = await fetch(`/api/dev/last-otp?phone=${encodeURIComponent(otpPhone.trim().replace(/\s+/g, ''))}`);
+                              const d = await r.json();
+                              if (d.ok && /^\d{6}$/.test(d.code)) {
+                                setOtpCode(d.code);
+                                toast({ title: 'Dev code filled', description: `Code: ${d.code}` });
+                              } else {
+                                toast({ title: 'No dev code yet', variant: 'destructive' });
+                              }
+                            } catch {
+                              toast({ title: 'Could not read dev code', variant: 'destructive' });
+                            }
+                          }}
+                          className="w-full text-xs text-amber-700 bg-amber-50 border border-amber-300 rounded-md py-2 hover:bg-amber-100"
+                        >
+                          🔧 Dev only: reveal &amp; auto-fill the OTP
+                        </button>
+                      )}
+                    </>
+                  )}
                 </CardContent>
               </Card>
             </motion.div>

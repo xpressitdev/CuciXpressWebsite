@@ -3091,10 +3091,53 @@ export async function registerRoutes(app: Express): Promise<Server> {
     });
   });
 
-  // Get current user endpoint with car details from queue app database
-  app.get('/api/auth/me', unifiedAuth.requireAuth, async (req, res) => {
+  // Get current user endpoint with car details from queue app database.
+  //
+  // 2026-05-05 — auth-unification fix. Originally this only accepted the
+  // legacy JWT cookie (set by Google OAuth + the deprecated
+  // username/password login). After Phase 12 the customer dashboard moved
+  // to phone+OTP, which mints a Lucia `cx_session` cookie instead. That
+  // left /checkout (which uses this endpoint via the `useAuth` hook)
+  // unable to see a phone-OTP-logged-in customer, forcing them to sign
+  // in twice — once on /dashboard and again on /checkout.
+  //
+  // The fix: try Lucia first, fall back to the legacy JWT only if Lucia
+  // didn't recognise the request. Both paths resolve to a numeric user
+  // id and the rest of the handler is unchanged.
+  app.get('/api/auth/me', async (req, res) => {
     try {
-      const user = await storage.getUser(req.user.id);
+      let userId: number | null = null;
+
+      // Path A — Lucia (cx_session cookie). Set by phone+OTP login and
+      // by Google OAuth callback. Already attached to req by the
+      // `attachLuciaSession` middleware in server/index.ts.
+      const luciaUserId = req.lucia?.user?.id;
+      if (luciaUserId) {
+        const parsed = Number(luciaUserId);
+        if (Number.isFinite(parsed)) userId = parsed;
+      }
+
+      // Path B — legacy JWT (auth_token cookie / Authorization header).
+      // Only consulted if Lucia didn't already authenticate the request.
+      if (userId == null) {
+        const token =
+          req.headers.authorization?.replace('Bearer ', '') ||
+          (req as any).cookies?.auth_token ||
+          null;
+        if (token) {
+          const decoded = unifiedAuth.verifyToken(token);
+          if (decoded?.id) userId = Number(decoded.id);
+        }
+      }
+
+      if (userId == null) {
+        return res.status(401).json({
+          success: false,
+          error: 'Not authenticated',
+        });
+      }
+
+      const user = await storage.getUser(userId);
       if (!user) {
         return res.status(404).json({
           success: false,
