@@ -1126,3 +1126,34 @@ No schema changes — pure frontend on top of Phase 12c's
 - Lane queue display embedded on the same screen (the existing
   `/queue` page already covers this and is open in another tab
   on most lane displays)
+
+---
+
+## 2026-05-05 — Phase 12c-ui follow-up: Scan In moved to /pos
+
+User feedback: cashiers live in `/pos`, so the Scan In tool
+belongs there, not buried in `/admin`.
+
+### What changed
+- Removed the **Scan In** tab from `client/src/pages/admin.tsx`
+  (tab trigger, tab content, import, and the `QrCode` icon
+  import all rolled back).
+- Added a **Scan QR** button to the `/pos` header CTA row, sitting
+  between the Shift bar and the Reports button. Filled with the
+  brand purple so it's the most visually prominent CTA in the
+  header — that's where the cashier's eye lives during a busy
+  lane.
+- The button opens a shadcn `Dialog` containing the same
+  `ScanInTab` component (no copy-paste — single source of truth).
+  Closing the dialog unmounts the tab, which fires the cleanup
+  effect that stops the camera, so we don't leave a zombie
+  webcam stream running in the background.
+- `ScanInTab` itself stays exactly where it was at
+  `client/src/components/admin/ScanInTab.tsx` — the path is
+  legacy now but moving the file would just create churn.
+
+### Not in this phase
+- Auto-refreshing the POS "today's orders" list when a scan
+  succeeds (the existing 30 s polling picks it up; can be made
+  reactive via `queryClient.invalidateQueries` later if cashiers
+  feel the lag).

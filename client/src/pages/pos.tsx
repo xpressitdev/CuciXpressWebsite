@@ -30,6 +30,7 @@ import {
   User,
   X,
   BarChart3,
+  QrCode,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -46,6 +47,13 @@ import {
 } from "@/components/ui/select";
 import AdminLogin from "@/components/AdminLogin";
 import ShiftBar from "@/components/ShiftBar";
+import ScanInTab from "@/components/admin/ScanInTab";
+import {
+  Dialog,
+  DialogContent,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog";
 import { useStaffAuth } from "@/hooks/useStaffAuth";
 import { useToast } from "@/hooks/use-toast";
 import { apiRequest } from "@/lib/queryClient";
@@ -213,6 +221,7 @@ export default function POS() {
   const [paymentMethod, setPaymentMethod] = useState<PaymentMethod>("cash");
   const [paymentRef, setPaymentRef] = useState<string>("");
   const [itemNotes, setItemNotes] = useState<string>("");
+  const [scanOpen, setScanOpen] = useState<boolean>(false);
 
   // Phase 1: vehicle/customer linkage.
   // - `matchedVehicleId` is set when the cashier picks a suggestion from
@@ -837,6 +846,17 @@ export default function POS() {
                 branchName={branchId !== null ? BRANCH_NAME_BY_ID[branchId] ?? null : null}
                 enabled={isAuthenticated}
               />
+              {/* Phase 12c-ui: prepaid scan-in. Opens a modal containing
+                  the ScanInTab component so cashiers don't have to leave
+                  POS to allocate a ticket for a customer who paid online. */}
+              <button
+                onClick={() => setScanOpen(true)}
+                className="cuci-cta bg-cuci-primary text-white px-4 py-2 rounded-full inline-flex items-center gap-2 text-sm"
+                data-testid="button-pos-scan-qr"
+              >
+                <QrCode className="w-4 h-4" />
+                Scan QR
+              </button>
               {/* End-of-Day shortcut: deep-links to /admin where the cashier
                   can pull the dashboard, payment-method breakdown, and Excel
                   export. Same staff session, no second login. */}
@@ -1476,6 +1496,21 @@ export default function POS() {
           </div>
         </div>
       </main>
+
+      {/* Phase 12c-ui: prepaid scan-in modal. Closing the dialog
+          unmounts ScanInTab, which stops the camera in its cleanup
+          effect — no zombie video stream. */}
+      <Dialog open={scanOpen} onOpenChange={setScanOpen}>
+        <DialogContent className="max-w-4xl max-h-[90vh] overflow-y-auto">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2">
+              <QrCode className="w-5 h-5 text-cuci-primary" />
+              Prepaid Scan-In
+            </DialogTitle>
+          </DialogHeader>
+          <ScanInTab />
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }
