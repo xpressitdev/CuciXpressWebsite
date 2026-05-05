@@ -1072,3 +1072,57 @@ No schema changes — uses Phase 12a's `payment_ref` (Pocket Pay
   current `PaymentReceipt` already embeds `order_id`, so all new
   receipts work. Customers holding pre-12a receipts will hit the
   `order_not_found` branch and be handled manually.
+
+---
+
+## 2026-05-05 — Phase 12c-ui: Scan In tab for staff
+
+No schema changes — pure frontend on top of Phase 12c's
+`/api/verify-qr` endpoint.
+
+### What changed
+- New `client/src/components/admin/ScanInTab.tsx`. New `Scan In`
+  tab in `client/src/pages/admin.tsx`, sitting right after the
+  Dashboard tab. Visible to **all staff** (not just managers/
+  owners) — lane workers are the primary users of this screen.
+- Two side-by-side panels:
+  - **Camera scan** — uses `html5-qrcode` (newly installed) via
+    a dynamic import so the lib only ships when the staff opens
+    the tab. Start/stop button. `facingMode: environment` so
+    phones use the rear camera. Auto-stops on a successful scan
+    so the staff can read the result without it firing again.
+    A 1.5 s in-flight cooldown prevents the scanner from
+    hammering the API on every decoded frame.
+  - **Manual paste** — a `Textarea` + Verify button. Always
+    available so staff can fall back when the camera is blocked
+    (HTTPS issues, denied permission, dim screen, broken lens).
+- Result rendering:
+  - **Success (newly_allocated=true)** — green-bordered card
+    with a huge `T-NNN` ticket in mono, prepaid badge, and a
+    details column (plate, package, branch, amount, customer
+    name + phone if linked).
+  - **Success (already in queue)** — same layout, blue border,
+    "Already in queue" headline.
+  - **Errors** — colour-coded by error code:
+    - `payment_pending` → amber, Clock icon, "Payment not yet
+      confirmed"
+    - `voided` / `refunded` → rose, Ban icon
+    - `order_not_found` → slate, Search icon
+    - `network_error` → slate, AlertCircle icon
+  - Each result has a "Scan another" / "Try again" button that
+    resets the panel.
+- A toast confirms each successful scan with the ticket code +
+  plate so staff hear feedback even if they're not looking at
+  the screen.
+
+### Dependencies
+- `html5-qrcode` added (~250KB, single file, no peer deps,
+  works on iOS Safari).
+
+### Not in this phase (deliberately)
+- Sound/haptic feedback on scan
+- Recent-scans history (would need a state store; staff can
+  re-look-up by re-scanning if needed)
+- Lane queue display embedded on the same screen (the existing
+  `/queue` page already covers this and is open in another tab
+  on most lane displays)

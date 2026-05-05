@@ -54,6 +54,7 @@ import {
   Building2,
   UserCircle2,
   MapPinned,
+  QrCode,
 } from "lucide-react";
 import { Link } from "wouter";
 import { motion } from "framer-motion";
@@ -62,6 +63,7 @@ import { useStaffAuth } from "@/hooks/useStaffAuth";
 import type { CollaborationSubmission, SubscriptionSignup } from "@shared/schema";
 import CustomersTab from "@/components/admin/CustomersTab";
 import BranchesTab from "@/components/admin/BranchesTab";
+import ScanInTab from "@/components/admin/ScanInTab";
 import {
   AreaChart,
   Area,
@@ -242,6 +244,7 @@ export default function Admin() {
             const isManagerOrOwner = role === "owner" || role === "manager";
             const visibleTabs = [
               "dashboard",
+              "scan-in",
               "trends",
               "orders",
               "payments",
@@ -264,6 +267,10 @@ export default function Admin() {
               <TabsTrigger value="dashboard" className="flex items-center gap-2" data-testid="tab-dashboard">
                 <BarChart3 className="w-4 h-4" />
                 Dashboard
+              </TabsTrigger>
+              <TabsTrigger value="scan-in" className="flex items-center gap-2" data-testid="tab-scan-in">
+                <QrCode className="w-4 h-4" />
+                Scan In
               </TabsTrigger>
               <TabsTrigger value="trends" className="flex items-center gap-2" data-testid="tab-trends">
                 <LineChartIcon className="w-4 h-4" />
@@ -326,6 +333,10 @@ export default function Admin() {
 
             <TabsContent value="dashboard" className="mt-6">
               <DashboardTab />
+            </TabsContent>
+
+            <TabsContent value="scan-in" className="mt-6">
+              <ScanInTab />
             </TabsContent>
 
             <TabsContent value="trends" className="mt-6">
