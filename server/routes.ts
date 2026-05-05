@@ -1,4 +1,4 @@
-import type { Express } from "express";
+import type { Express, Request } from "express";
 import { createServer, type Server } from "http";
 import { z } from "zod";
 import { db } from "./db";
@@ -1273,19 +1273,67 @@ export async function registerRoutes(app: Express): Promise<Server> {
   // No new tables; uses existing customers / cars / orders / branches.
   // ==========================================================================
 
-  // GET /api/admin/customers?search=&branch_id=&page=&per_page=
-  // List customers with last-visit + total spend, paginated.
-  app.get('/api/admin/customers', requireStaff, requireStaffRole('owner', 'manager'), async (req, res) => {
+  // ---- Phase 12b-3: customer segment filters --------------------------------
+  // Composable AND-fragments evaluated against alias `c` (customers).
+  // Returned as Drizzle SQL fragments so they slot into list + CSV queries.
+  const SEGMENTS = ['vip', 'at_risk', 'online', 'multi_branch', 'new'] as const;
+  type Segment = (typeof SEGMENTS)[number];
+  function segmentFragment(seg: Segment | null) {
+    if (seg === null) return sql``;
+    if (seg === 'vip') {
+      // Lifetime spend (excl. refunds) >= B$500.
+      return sql`AND (
+        SELECT COALESCE(SUM(o.total_cents),0)
+          FROM orders o JOIN cars car ON car.id = o.vehicle_id
+         WHERE car.customer_id = c.id AND o.status <> 'refunded'
+      ) >= 50000`;
+    }
+    if (seg === 'at_risk') {
+      // 2+ paid visits AND last visit > 30 days ago.
+      return sql`AND (
+        SELECT COUNT(*) FROM orders o JOIN cars car ON car.id = o.vehicle_id
+         WHERE car.customer_id = c.id AND o.status NOT IN ('refunded','pending_payment','voided')
+      ) >= 2
+      AND (
+        SELECT MAX(o.created_at) FROM orders o JOIN cars car ON car.id = o.vehicle_id
+         WHERE car.customer_id = c.id AND o.status NOT IN ('refunded','pending_payment','voided')
+      ) < NOW() - INTERVAL '30 days'`;
+    }
+    if (seg === 'online') {
+      return sql`AND EXISTS (
+        SELECT 1 FROM orders o JOIN cars car ON car.id = o.vehicle_id
+         WHERE car.customer_id = c.id AND o.qr_provider = 'pocket_pay'
+      )`;
+    }
+    if (seg === 'multi_branch') {
+      return sql`AND (
+        SELECT COUNT(DISTINCT o.branch_id) FROM orders o JOIN cars car ON car.id = o.vehicle_id
+         WHERE car.customer_id = c.id AND o.status <> 'refunded'
+      ) >= 2`;
+    }
+    if (seg === 'new') {
+      return sql`AND c.created_at > NOW() - INTERVAL '14 days'`;
+    }
+    return sql``;
+  }
+
+  // Shared filter parser for /api/admin/customers list + export.
+  function parseCustomerFilters(req: Request) {
     const search = String(req.query.search ?? '').trim();
     const branchParam = String(req.query.branch_id ?? 'all').trim();
     const branchId =
       branchParam === '' || branchParam === 'all' ? null : Number(branchParam);
     if (branchId !== null && (!Number.isFinite(branchId) || branchId <= 0)) {
-      return res.status(400).json({ error: 'invalid_branch_id' });
+      return { error: 'invalid_branch_id' as const };
     }
-    const page = Math.max(1, Number(req.query.page ?? 1) || 1);
-    const perPage = Math.min(100, Math.max(10, Number(req.query.per_page ?? 25) || 25));
-    const offset = (page - 1) * perPage;
+    const segParam = String(req.query.segment ?? 'all').trim();
+    const segment: Segment | null =
+      segParam === 'all' || segParam === '' ? null
+      : (SEGMENTS as readonly string[]).includes(segParam) ? (segParam as Segment)
+      : null;
+    if (segParam !== 'all' && segParam !== '' && segment === null) {
+      return { error: 'invalid_segment' as const };
+    }
 
     const searchFilter = search.length >= 2
       ? sql`AND (
@@ -1302,11 +1350,26 @@ export async function registerRoutes(app: Express): Promise<Server> {
     const branchFilter = branchId !== null
       ? sql`AND EXISTS (SELECT 1 FROM orders o JOIN cars car2 ON car2.id = o.vehicle_id WHERE car2.customer_id = c.id AND o.branch_id = ${branchId})`
       : sql``;
+    const segmentFilter = segmentFragment(segment);
+
+    return { search, branchId, segment, searchFilter, branchFilter, segmentFilter };
+  }
+
+  // GET /api/admin/customers?search=&branch_id=&segment=&page=&per_page=
+  // List customers with last-visit + total spend, paginated.
+  app.get('/api/admin/customers', requireStaff, requireStaffRole('owner', 'manager'), async (req, res) => {
+    const f = parseCustomerFilters(req);
+    if ('error' in f) return res.status(400).json({ error: f.error });
+    const { search, branchId, segment, searchFilter, branchFilter, segmentFilter } = f;
+
+    const page = Math.max(1, Number(req.query.page ?? 1) || 1);
+    const perPage = Math.min(100, Math.max(10, Number(req.query.per_page ?? 25) || 25));
+    const offset = (page - 1) * perPage;
 
     try {
       const countRow = (await db.execute(sql`
         SELECT COUNT(*)::int AS n FROM customers c
-         WHERE 1=1 ${searchFilter} ${branchFilter}
+         WHERE 1=1 ${searchFilter} ${branchFilter} ${segmentFilter}
       `)).rows[0] as { n: number };
 
       const rows = (await db.execute(sql`
@@ -1316,7 +1379,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
                (SELECT COALESCE(SUM(o.total_cents),0)::bigint FROM orders o JOIN cars car ON car.id = o.vehicle_id WHERE car.customer_id = c.id AND o.status <> 'refunded') AS total_spent_cents,
                (SELECT MAX(o.created_at)         FROM orders o JOIN cars car ON car.id = o.vehicle_id WHERE car.customer_id = c.id) AS last_visit_at
           FROM customers c
-         WHERE 1=1 ${searchFilter} ${branchFilter}
+         WHERE 1=1 ${searchFilter} ${branchFilter} ${segmentFilter}
          ORDER BY (SELECT MAX(o.created_at) FROM orders o JOIN cars car ON car.id = o.vehicle_id WHERE car.customer_id = c.id) DESC NULLS LAST,
                   c.created_at DESC
          LIMIT ${perPage} OFFSET ${offset}
@@ -1333,11 +1396,61 @@ export async function registerRoutes(app: Express): Promise<Server> {
         per_page: perPage,
         total_count: countRow.n,
         branches,
-        filter: { search, branch_id: branchId },
+        filter: { search, branch_id: branchId, segment },
       });
     } catch (err) {
       console.error('[admin.customers.list] failed:', err);
       res.status(500).json({ error: 'list_failed' });
+    }
+  });
+
+  // GET /api/admin/customers/export.csv — Phase 12b-2.
+  // Same filters as list (search/branch/segment) but no pagination.
+  // Streams a CSV the user can open in Excel / Google Sheets.
+  app.get('/api/admin/customers/export.csv', requireStaff, requireStaffRole('owner', 'manager'), async (req, res) => {
+    const f = parseCustomerFilters(req);
+    if ('error' in f) return res.status(400).json({ error: f.error });
+    const { searchFilter, branchFilter, segmentFilter } = f;
+    try {
+      const rows = (await db.execute(sql`
+        SELECT c.id, c.name, c.phone, c.created_at,
+               (SELECT COUNT(*)::int FROM cars car WHERE car.customer_id = c.id)                                                AS vehicle_count,
+               (SELECT COUNT(*)::int FROM orders o JOIN cars car ON car.id = o.vehicle_id WHERE car.customer_id = c.id AND o.status <> 'refunded')                AS visits,
+               (SELECT COALESCE(SUM(o.total_cents),0)::bigint FROM orders o JOIN cars car ON car.id = o.vehicle_id WHERE car.customer_id = c.id AND o.status <> 'refunded') AS total_spent_cents,
+               (SELECT MAX(o.created_at)         FROM orders o JOIN cars car ON car.id = o.vehicle_id WHERE car.customer_id = c.id) AS last_visit_at,
+               (SELECT STRING_AGG(car.license_plate, '; ' ORDER BY car.id) FROM cars car WHERE car.customer_id = c.id) AS plates
+          FROM customers c
+         WHERE 1=1 ${searchFilter} ${branchFilter} ${segmentFilter}
+         ORDER BY (SELECT MAX(o.created_at) FROM orders o JOIN cars car ON car.id = o.vehicle_id WHERE car.customer_id = c.id) DESC NULLS LAST,
+                  c.created_at DESC
+         LIMIT 10000
+      `)).rows;
+
+      const csvEscape = (v: any): string => {
+        if (v === null || v === undefined) return '';
+        const s = String(v);
+        return /[",\n\r]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s;
+      };
+      const header = ['id','name','phone','plates','vehicles','visits','lifetime_spend_bnd','last_visit_at','created_at'];
+      const lines = [header.join(',')];
+      for (const r of rows as any[]) {
+        const spendBnd = (Number(r.total_spent_cents ?? 0) / 100).toFixed(2);
+        lines.push([
+          r.id, r.name, r.phone, r.plates ?? '',
+          r.vehicle_count ?? 0, r.visits ?? 0, spendBnd,
+          r.last_visit_at ? new Date(r.last_visit_at).toISOString() : '',
+          r.created_at ? new Date(r.created_at).toISOString() : '',
+        ].map(csvEscape).join(','));
+      }
+
+      const today = new Date().toISOString().slice(0, 10);
+      res.setHeader('Content-Type', 'text/csv; charset=utf-8');
+      res.setHeader('Content-Disposition', `attachment; filename="cucixpress-customers-${today}.csv"`);
+      // BOM so Excel opens UTF-8 cleanly
+      res.send('\uFEFF' + lines.join('\n'));
+    } catch (err) {
+      console.error('[admin.customers.export] failed:', err);
+      res.status(500).json({ error: 'export_failed' });
     }
   });
 
@@ -1364,6 +1477,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
       const orders = (await db.execute(sql`
         SELECT o.id, o.ticket_code, o.plate, o.created_at, o.payment_method,
                o.package_name, o.total_cents, o.status, o.refunded_at,
+               o.qr_provider,
                b.name AS branch_name, s.name AS staff_name
           FROM orders o
           LEFT JOIN branches b ON b.id = o.branch_id
@@ -1428,6 +1542,61 @@ export async function registerRoutes(app: Express): Promise<Server> {
     } catch (err) {
       console.error('[admin.customers.update] failed:', err);
       res.status(500).json({ error: 'update_failed' });
+    }
+  });
+
+  // GET /api/admin/orders/pending-payments — Phase 12b-1.
+  // Lists Pocket Pay orders sitting in 'pending_payment' so staff can
+  // chase or manually void abandoned web checkouts.
+  app.get('/api/admin/orders/pending-payments', requireStaff, requireStaffRole('owner', 'manager'), async (_req, res) => {
+    try {
+      const rows = (await db.execute(sql`
+        SELECT o.id, o.plate, o.created_at, o.total_cents,
+               o.package_name, o.payment_ref, o.qr_provider,
+               EXTRACT(EPOCH FROM (NOW() - o.created_at))::int AS age_seconds,
+               b.name  AS branch_name,
+               c.id    AS customer_id,
+               c.name  AS customer_name,
+               c.phone AS customer_phone
+          FROM orders o
+          LEFT JOIN branches  b   ON b.id  = o.branch_id
+          LEFT JOIN cars      car ON car.id = o.vehicle_id
+          LEFT JOIN customers c   ON c.id  = car.customer_id
+         WHERE o.status = 'pending_payment'
+         ORDER BY o.created_at DESC
+         LIMIT 200
+      `)).rows.map((r: any) => ({
+        ...r,
+        total_cents: Number(r.total_cents ?? 0),
+        age_seconds: Number(r.age_seconds ?? 0),
+      }));
+      res.json({ rows, count: rows.length });
+    } catch (err) {
+      console.error('[admin.orders.pending] failed:', err);
+      res.status(500).json({ error: 'list_failed' });
+    }
+  });
+
+  // POST /api/admin/orders/:id/void-pending — Phase 12b-1.
+  // Manual void of a pending_payment row. Idempotent: a Pocket Pay
+  // callback that arrives after a manual void won't override us
+  // because /api/payment-callback gates on status='pending_payment'.
+  app.post('/api/admin/orders/:id/void-pending', requireStaff, requireStaffRole('owner', 'manager'), async (req, res) => {
+    const id = String(req.params.id);
+    if (!id) return res.status(400).json({ error: 'invalid_id' });
+    try {
+      const rows = (await db.execute(sql`
+        UPDATE orders
+           SET status = 'voided'
+         WHERE id = ${id}
+           AND status = 'pending_payment'
+        RETURNING id, status
+      `)).rows;
+      if (rows.length === 0) return res.status(409).json({ error: 'not_pending_or_not_found' });
+      res.json({ ok: true });
+    } catch (err) {
+      console.error('[admin.orders.void] failed:', err);
+      res.status(500).json({ error: 'void_failed' });
     }
   });
 

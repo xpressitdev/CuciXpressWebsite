@@ -937,3 +937,69 @@ endpoint changes needed.
 - A status-poll cron for `pending_payment` rows older than 24h.
   For now they stay visible in the CRM and can be reconciled by
   hand.
+
+---
+
+## 2026-05-05 — Phase 12b: pending payments, CSV export, segments
+
+No schema changes — all three pieces ride on the existing
+`customers` / `cars` / `orders` tables and the new
+`pending_payment` status from Phase 12a.
+
+### 12a polish
+- `/api/admin/customers/:id` now returns `qr_provider` on each
+  order so the CRM can mark web-checkout washes with an "Online"
+  badge and render `pending_payment` / `voided` states with the
+  appropriate amber/grey badge instead of generic styling. Orders
+  whose `ticket_code` is still NULL show "awaiting scan" rather
+  than a blank cell.
+
+### 12b-1 — Pending payments reconciliation
+- `GET /api/admin/orders/pending-payments` lists every
+  `status='pending_payment'` order with age, customer info, branch,
+  amount, and Pocket Pay reference. Owner+manager only.
+- `POST /api/admin/orders/:id/void-pending` flips a single pending
+  row to `'voided'`. The `WHERE status='pending_payment'` guard
+  makes it safe against races: if a Pocket Pay callback lands
+  after a manual void, the callback's own `WHERE status='pending_payment'`
+  guard prevents it from overriding us.
+- Frontend renders a panel at the top of the Customers tab. When
+  count is zero it collapses to a thin green "all clear" line. When
+  there are pending rows it shows an amber-bordered table with
+  per-row Void buttons (require an explicit "Confirm void" click
+  to prevent fat-finger errors). Polls every 30 s.
+
+### 12b-2 — CSV export
+- `GET /api/admin/customers/export.csv` reuses the same
+  search / branch / segment filters as the list endpoint, drops
+  pagination (cap 10k rows), and streams a UTF-8-BOM CSV with
+  columns: id, name, phone, plates (semicolon-joined), vehicles,
+  visits, lifetime_spend_bnd, last_visit_at (ISO), created_at (ISO).
+- Frontend exposes an "Export CSV" button next to the result count.
+  The href carries the active filters so the downloaded file
+  matches what the user is looking at.
+
+### 12b-3 — Customer segments
+- `GET /api/admin/customers` accepts a new `segment` query param,
+  validated against an explicit allow-list. Five presets land in
+  this phase:
+  - **vip** — lifetime spend (excl. refunds) ≥ B$500
+  - **at_risk** — 2+ paid visits AND last visit > 30 days ago
+  - **online** — has any order with `qr_provider='pocket_pay'`
+  - **multi_branch** — visited 2+ distinct branches
+  - **new** — `customers.created_at` within last 14 days
+- Each segment is a composable Drizzle SQL fragment evaluated
+  against alias `c`, so the same fragments slot into both the
+  paginated list query and the CSV export query without
+  duplication.
+- Frontend adds a Segment dropdown next to the branch filter. The
+  filter row shows a one-line hint describing the active segment
+  and the total match count, so the user always knows what they're
+  looking at before exporting.
+
+**Not in this phase (deliberately):**
+- Saved/custom segments (just the five presets for now)
+- A 24-hour cron to auto-void abandoned `pending_payment` rows
+  (manual void via the panel covers it for now)
+- SMS/WhatsApp blast to a filtered list (needs a third-party
+  gateway — Phase 13+)
