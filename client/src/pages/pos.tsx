@@ -31,6 +31,9 @@ import {
   X,
   BarChart3,
   QrCode,
+  Play,
+  CheckCheck,
+  Activity,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -1417,6 +1420,26 @@ export default function POS() {
                 </CardContent>
               </Card>
 
+              {/* Phase 12d: Lane control. Shows the queued + washing
+                  cars for this branch with two buttons each so lane
+                  staff can advance them through the wash lifecycle.
+                  Reads from the same /api/pos/orders/today query the
+                  Today panel below uses, then filters client-side. */}
+              <LaneControl
+                orders={(todayData?.orders ?? []).filter(
+                  (o) => o.status === "queued" || o.status === "washing",
+                )}
+                branchId={branchId}
+                onChanged={() => {
+                  queryClient.invalidateQueries({
+                    queryKey: ["/api/pos/orders/today", branchId],
+                  });
+                  queryClient.invalidateQueries({
+                    queryKey: ["/api/queue/snapshot"],
+                  });
+                }}
+              />
+
               {/* Today's orders */}
               <Card>
                 <CardHeader>
@@ -1512,5 +1535,166 @@ export default function POS() {
         </DialogContent>
       </Dialog>
     </div>
+  );
+}
+
+// ============================================================
+// LaneControl — Phase 12d.
+//
+// Two-column lane card on /pos. Left: queued cars waiting to be
+// started. Right: cars currently being washed. Tapping the button
+// on a row PATCHes /api/pos/orders/:id/status, then invalidates
+// today's orders + the public queue snapshot so both this card
+// and the public widget reflect reality within one tick.
+// ============================================================
+function LaneControl({
+  orders,
+  branchId,
+  onChanged,
+}: {
+  orders: TodayOrder[];
+  branchId: number | null;
+  onChanged: () => void;
+}) {
+  const { toast } = useToast();
+  const [pendingId, setPendingId] = useState<string | null>(null);
+
+  const queued = orders.filter((o) => o.status === "queued");
+  const washing = orders.filter((o) => o.status === "washing");
+
+  const advance = async (orderId: string, to: "washing" | "done") => {
+    setPendingId(orderId);
+    try {
+      const r = await apiRequest("PATCH", `/api/pos/orders/${orderId}/status`, { to });
+      if (!r.ok) {
+        const body = await r.json().catch(() => ({}));
+        throw new Error(body?.error ?? `${r.status}`);
+      }
+      onChanged();
+      toast({
+        title: to === "washing" ? "Wash started" : "Marked done",
+        description: to === "washing"
+          ? "Car moved to the washing lane."
+          : "Car checked out — counted in today's total.",
+      });
+    } catch (e: any) {
+      toast({
+        title: "Couldn't update status",
+        description: e?.message ?? "Try again.",
+        variant: "destructive",
+      });
+    } finally {
+      setPendingId(null);
+    }
+  };
+
+  if (branchId === null) return null;
+
+  return (
+    <Card data-testid="card-lane-control">
+      <CardHeader className="pb-3">
+        <CardTitle className="text-base flex items-center gap-2">
+          <Activity className="w-4 h-4 text-cuci-primary" />
+          Lane control
+          <span className="ml-auto text-xs font-normal text-gray-500">
+            {queued.length} queued · {washing.length} washing
+          </span>
+        </CardTitle>
+      </CardHeader>
+      <CardContent className="space-y-4">
+        {/* Currently washing */}
+        <div>
+          <p className="cuci-eyebrow mb-2 text-cuci-secondary">Washing now</p>
+          {washing.length === 0 ? (
+            <p className="text-sm text-gray-400 italic">No cars in the wash.</p>
+          ) : (
+            <div className="space-y-2">
+              {washing.map((o) => (
+                <div
+                  key={o.id}
+                  className="flex items-center justify-between gap-2 border-2 border-cuci-secondary/40 bg-cuci-secondary/5 rounded-lg px-3 py-2"
+                  data-testid={`row-washing-${o.id}`}
+                >
+                  <div className="min-w-0">
+                    <p className="font-mono font-bold text-sm">{o.ticket_code}</p>
+                    <p className="text-xs text-gray-600 truncate">
+                      {o.plate} · {o.package_name}
+                    </p>
+                  </div>
+                  <Button
+                    size="sm"
+                    variant="default"
+                    disabled={pendingId === o.id}
+                    onClick={() => advance(o.id, "done")}
+                    data-testid={`button-mark-done-${o.id}`}
+                    className="bg-emerald-600 hover:bg-emerald-700 text-white"
+                  >
+                    {pendingId === o.id ? (
+                      <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                    ) : (
+                      <>
+                        <CheckCheck className="w-3.5 h-3.5 mr-1" />
+                        Mark done
+                      </>
+                    )}
+                  </Button>
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+
+        <Separator />
+
+        {/* In the queue, oldest first */}
+        <div>
+          <p className="cuci-eyebrow mb-2">Up next</p>
+          {queued.length === 0 ? (
+            <p className="text-sm text-gray-400 italic">Queue is empty.</p>
+          ) : (
+            <div className="space-y-2">
+              {[...queued]
+                .sort((a, b) => a.created_at.localeCompare(b.created_at))
+                .map((o, i) => (
+                  <div
+                    key={o.id}
+                    className="flex items-center justify-between gap-2 border border-gray-200 rounded-lg px-3 py-2"
+                    data-testid={`row-queued-${o.id}`}
+                  >
+                    <div className="flex items-center gap-2 min-w-0">
+                      <span className="inline-flex items-center justify-center w-6 h-6 rounded-full bg-gray-900 text-white text-xs font-bold">
+                        {i + 1}
+                      </span>
+                      <div className="min-w-0">
+                        <p className="font-mono font-bold text-sm">{o.ticket_code}</p>
+                        <p className="text-xs text-gray-600 truncate">
+                          {o.plate} · {o.package_name}
+                        </p>
+                      </div>
+                    </div>
+                    <Button
+                      size="sm"
+                      variant="default"
+                      disabled={pendingId === o.id}
+                      onClick={() => advance(o.id, "washing")}
+                      data-testid={`button-start-wash-${o.id}`}
+                      className="bg-cuci-primary hover:bg-cuci-primary/90"
+                    >
+                      {pendingId === o.id ? (
+                        <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                      ) : (
+                        <>
+                          <Play className="w-3.5 h-3.5 mr-1" />
+                          Start wash
+                        </>
+                      )}
+                    </Button>
+                  </div>
+                ))}
+            </div>
+          )}
+        </div>
+      </CardContent>
+    </Card>
   );
 }

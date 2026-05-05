@@ -1157,3 +1157,62 @@ belongs there, not buried in `/admin`.
   succeeds (the existing 30 s polling picks it up; can be made
   reactive via `queryClient.invalidateQueries` later if cashiers
   feel the lag).
+
+---
+
+## 2026-05-05 — Phase 12d: Lane control
+
+Closed the gap that orders were entering the queue but never
+leaving it. The public live-queue widget previously showed a
+forever-growing "in queue" count because no one could mark cars
+as washing or done.
+
+### Backend
+- New endpoint **`PATCH /api/pos/orders/:id/status`** in
+  `server/routes.ts` (right after the refund endpoint).
+- Body: `{ to: 'washing' | 'done' }`. Strict state machine:
+  - `queued` → `washing` (start the wash)
+  - `washing` → `done`  (car drove out)
+- Idempotent: PATCHing to the current status returns the row as
+  a no-op instead of erroring (handles double-tap on tablets).
+- Hard gates that return 409:
+  - skipping (queued → done)
+  - rewinding (done → washing)
+  - touching closed states (refunded, voided, pending_payment)
+- Branch lock: lane/cashier can only advance orders at their own
+  branch; owner/manager can advance any branch. Same pattern as
+  the refund endpoint.
+- Wrapped in a `db.transaction` with `SELECT ... FOR UPDATE` so
+  two phones tapping the same row at the same instant can't
+  corrupt the state.
+
+### Frontend
+- New `LaneControl` component at the bottom of
+  `client/src/pages/pos.tsx` (sibling to `POS()`, ~150 LoC).
+- Rendered in the right column of `/pos` between the order-
+  summary card and the Today panel.
+- Reads from the existing `/api/pos/orders/today` query (which
+  already polls), filters client-side to `queued` + `washing`
+  rows — no extra request.
+- Two sections:
+  - **Washing now** — cards with the cuci-secondary tint and a
+    green "Mark done" button per row.
+  - **Up next** — numbered queue (oldest first) with a purple
+    "Start wash" button per row.
+- After a successful PATCH, invalidates both
+  `["/api/pos/orders/today", branchId]` (so the card itself
+  refreshes) and `["/api/queue/snapshot"]` (so the public
+  /queue page + homepage widget update within one tick).
+- Toast on success and on failure.
+
+### Smoke gates (all PASS)
+1. queued → washing — row updated
+2. washing → done — row updated
+3. done → washing — 0 rows updated (gate blocks the rewind)
+4. queued → done — 0 rows updated (gate blocks the skip)
+
+### Not in this phase
+- "Undo" button if a cashier marks the wrong car done. Today the
+  fix is a manual SQL fix; can be added later as a 60-second
+  reverse window.
+- No new database columns. No migration required.

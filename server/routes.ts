@@ -4217,6 +4217,92 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
+  // ==========================================================================
+  // PATCH /api/pos/orders/:id/status — Phase 12d: Lane control.
+  //
+  // Lane staff advance an order through the wash lifecycle:
+  //   queued  -> washing    (start the wash)
+  //   washing -> done       (car drove out)
+  //
+  // Strict state machine. No skipping (queued -> done), no rewinding
+  // (done -> washing), no touching closed states (refunded, voided,
+  // pending_payment). Lane/cashier are LOCKED to their own branch;
+  // owner/manager can advance any branch's orders.
+  //
+  // Wrapped in a FOR UPDATE transaction so two phones tapping
+  // "Start wash" at the same instant produce one transition + one
+  // 409 instead of corrupting the row.
+  // ==========================================================================
+  app.patch('/api/pos/orders/:id/status', requireStaff, async (req, res) => {
+    const orderId = String(req.params.id);
+    const to = String(req.body?.to ?? '');
+    if (to !== 'washing' && to !== 'done') {
+      return res.status(400).json({ error: 'invalid_target_status' });
+    }
+    const requiredFrom = to === 'washing' ? 'queued' : 'washing';
+
+    const staffUser = req.staff!.user as any;
+    const staffRole = staffUser.role as 'owner' | 'manager' | 'lane' | 'cashier';
+    const staffBranchId = staffUser.branchId as number | null;
+
+    try {
+      const updated = await db.transaction(async (tx) => {
+        const rows = (await tx.execute(sql`
+          SELECT id, branch_id, status, ticket_code, plate, package_name
+            FROM orders
+           WHERE id = ${orderId}
+           FOR UPDATE
+        `)).rows as Array<{ id: string; branch_id: number; status: string; ticket_code: string | null; plate: string; package_name: string }>;
+
+        if (rows.length === 0) {
+          throw Object.assign(new Error('not_found'), { httpStatus: 404 });
+        }
+        const o = rows[0];
+
+        // Branch lock for lane/cashier.
+        if (staffRole !== 'owner' && staffRole !== 'manager') {
+          if (staffBranchId == null || o.branch_id !== staffBranchId) {
+            throw Object.assign(new Error('branch_mismatch'), { httpStatus: 403 });
+          }
+        }
+
+        // Idempotent: already in the target state — return the row, no-op.
+        if (o.status === to) {
+          return { ...o, status: o.status, no_op: true };
+        }
+
+        // Strict transition gate.
+        if (o.status !== requiredFrom) {
+          throw Object.assign(
+            new Error(`invalid_transition_from_${o.status}`),
+            { httpStatus: 409 },
+          );
+        }
+
+        const r = (await tx.execute(sql`
+          UPDATE orders
+             SET status = ${to}
+           WHERE id = ${orderId}
+             AND status = ${requiredFrom}
+          RETURNING id, branch_id, status, ticket_code, plate, package_name
+        `)).rows as any[];
+
+        if (r.length === 0) {
+          // Lost the race. Re-read for a clean error.
+          throw Object.assign(new Error('race_lost'), { httpStatus: 409 });
+        }
+        return { ...r[0], no_op: false };
+      });
+
+      res.json({ ok: true, order: updated });
+    } catch (err: any) {
+      const status = err?.httpStatus ?? 500;
+      const code = err?.message ?? 'status_update_failed';
+      if (status === 500) console.error('[pos.orders.status] failed:', err);
+      res.status(status).json({ error: code });
+    }
+  });
+
   // GET /api/pos/orders/today?branch_id=N
   // Today's orders for a branch, newest first. Used by the right-rail of
   // the POS page so the cashier sees what's been booked.
