@@ -130,6 +130,7 @@ export default function CustomersTab() {
   return (
     <div className="space-y-6">
       <PendingPaymentsPanel />
+      <LiabilitiesPanel />
       <div className="grid lg:grid-cols-3 gap-6">
       {/* Left: list */}
       <div className="lg:col-span-2 space-y-4">
@@ -470,6 +471,305 @@ function PendingPaymentsPanel() {
             </TableBody>
           </Table>
         </div>
+      </CardContent>
+    </Card>
+  );
+}
+
+interface LiabilityResp {
+  outstanding_qrs: {
+    rows: Array<{
+      id: string; plate: string; created_at: string; total_cents: number;
+      package_name: string; age_seconds: number; branch_name: string | null;
+      customer_id: number | null; customer_name: string | null; customer_phone: string | null;
+    }>;
+    count: number; total_cents: number;
+  };
+  active_packs: {
+    rows: Array<{
+      id: string; customer_name: string | null; customer_phone: string | null;
+      plate: string | null; total_washes: number; remaining_washes: number;
+      price_cents: number; per_wash_cents: number; deferred_cents: number;
+      created_at: string; expires_at: string | null; sold_at_branch_name: string | null;
+    }>;
+    count: number; deferred_cents: number;
+  };
+  active_unlimited: {
+    rows: Array<{
+      id: string; customer_name: string | null; customer_phone: string | null;
+      plate: string | null; price_cents: number; deferred_cents: number;
+      earned_cents: number; days_left: number; created_at: string;
+      expires_at: string; sold_at_branch_name: string | null;
+    }>;
+    count: number; deferred_cents: number;
+  };
+  grand_liability_cents: number;
+}
+
+function LiabilitiesPanel() {
+  const { data, isLoading } = useQuery<LiabilityResp>({
+    queryKey: ["/api/admin/liabilities"],
+    queryFn: async () => {
+      const res = await fetch("/api/admin/liabilities", { credentials: "include" });
+      if (!res.ok) throw new Error("failed");
+      return res.json();
+    },
+    refetchInterval: 60_000,
+  });
+
+  if (isLoading) {
+    return (
+      <Card className="cuci-card border-2 border-black">
+        <CardContent className="py-3 text-sm text-gray-500">Loading liabilities…</CardContent>
+      </Card>
+    );
+  }
+  if (!data) return null;
+
+  const { outstanding_qrs, active_packs, active_unlimited, grand_liability_cents } = data;
+  const isClear =
+    outstanding_qrs.count === 0 && active_packs.count === 0 && active_unlimited.count === 0;
+
+  return (
+    <Card className="cuci-card border-2 border-black" data-testid="card-liabilities">
+      <CardHeader className="pb-3">
+        <div className="flex items-start justify-between gap-4 flex-wrap">
+          <div>
+            <div className="cuci-eyebrow">Accounting · service still owed</div>
+            <CardTitle className="text-xl font-extrabold tracking-tight">
+              Outstanding service liability
+            </CardTitle>
+            <p className="text-xs text-gray-600 mt-1 max-w-xl">
+              Money you've already collected for washes you haven't delivered yet.
+              For monthly P&amp;L, this is what you must <em>defer</em> from revenue —
+              it earns out as customers redeem.
+            </p>
+          </div>
+          <div className="text-right">
+            <div className="text-[10px] uppercase tracking-wider text-gray-500 font-semibold">
+              Total liability now
+            </div>
+            <div className="text-2xl font-extrabold tabular-nums" data-testid="text-grand-liability">
+              {formatBND(grand_liability_cents)}
+            </div>
+          </div>
+        </div>
+      </CardHeader>
+
+      <CardContent className="space-y-5">
+        {isClear && (
+          <div className="text-sm text-gray-600 bg-green-50 border-2 border-green-600 rounded-md py-3 px-4 flex items-center gap-2">
+            <CheckCircle2 className="w-4 h-4 text-green-700" />
+            All clear — no unredeemed prepaid service on the books.
+          </div>
+        )}
+
+        {/* === Outstanding prepaid QRs === */}
+        {outstanding_qrs.count > 0 && (
+          <section>
+            <div className="flex items-center justify-between mb-2">
+              <h3 className="text-sm font-bold flex items-center gap-2">
+                <Receipt className="w-4 h-4" />
+                Outstanding prepaid QRs
+                <Badge variant="outline" className="border-2 border-black">
+                  {outstanding_qrs.count}
+                </Badge>
+              </h3>
+              <div className="text-sm font-bold tabular-nums">
+                {formatBND(outstanding_qrs.total_cents)}
+              </div>
+            </div>
+            <p className="text-[11px] text-gray-500 mb-2">
+              Customer paid online via Pocket Pay, has a valid QR, hasn't shown up yet.
+              Liability = full ticket price (1-for-1).
+            </p>
+            <div className="border-2 border-black rounded-md overflow-x-auto bg-white">
+              <Table>
+                <TableHeader>
+                  <TableRow>
+                    <TableHead>Paid</TableHead>
+                    <TableHead>Customer</TableHead>
+                    <TableHead>Plate</TableHead>
+                    <TableHead>Package</TableHead>
+                    <TableHead>Branch</TableHead>
+                    <TableHead className="text-right">Owed</TableHead>
+                  </TableRow>
+                </TableHeader>
+                <TableBody>
+                  {outstanding_qrs.rows.map((o) => (
+                    <TableRow key={o.id} data-testid={`liability-qr-${o.id}`}>
+                      <TableCell className="text-xs">
+                        <div className="font-semibold">{formatAge(o.age_seconds)} ago</div>
+                        <div className="text-gray-500">{formatDateTime(o.created_at)}</div>
+                      </TableCell>
+                      <TableCell className="text-xs">
+                        {o.customer_name ? (
+                          <>
+                            <div className="font-semibold">{o.customer_name}</div>
+                            <div className="text-gray-500 flex items-center gap-1">
+                              <Phone className="w-3 h-3" /> {o.customer_phone}
+                            </div>
+                          </>
+                        ) : (
+                          <span className="italic text-gray-400">unknown</span>
+                        )}
+                      </TableCell>
+                      <TableCell className="text-xs font-mono font-bold">{o.plate}</TableCell>
+                      <TableCell className="text-xs">{o.package_name}</TableCell>
+                      <TableCell className="text-xs">{o.branch_name ?? "—"}</TableCell>
+                      <TableCell className="text-right tabular-nums font-semibold text-xs">
+                        {formatBND(o.total_cents)}
+                      </TableCell>
+                    </TableRow>
+                  ))}
+                </TableBody>
+              </Table>
+            </div>
+          </section>
+        )}
+
+        {/* === Active wash packs === */}
+        {active_packs.count > 0 && (
+          <section>
+            <div className="flex items-center justify-between mb-2">
+              <h3 className="text-sm font-bold flex items-center gap-2">
+                <CarIcon className="w-4 h-4" />
+                Active wash packs
+                <Badge variant="outline" className="border-2 border-black">
+                  {active_packs.count}
+                </Badge>
+              </h3>
+              <div className="text-sm font-bold tabular-nums">
+                {formatBND(active_packs.deferred_cents)}
+              </div>
+            </div>
+            <p className="text-[11px] text-gray-500 mb-2">
+              Liability per pack = remaining washes × (price ÷ total washes).
+            </p>
+            <div className="border-2 border-black rounded-md overflow-x-auto bg-white">
+              <Table>
+                <TableHeader>
+                  <TableRow>
+                    <TableHead>Sold</TableHead>
+                    <TableHead>Customer</TableHead>
+                    <TableHead>Plate</TableHead>
+                    <TableHead className="text-right">Remaining</TableHead>
+                    <TableHead className="text-right">Per wash</TableHead>
+                    <TableHead className="text-right">Deferred</TableHead>
+                  </TableRow>
+                </TableHeader>
+                <TableBody>
+                  {active_packs.rows.map((m) => (
+                    <TableRow key={m.id} data-testid={`liability-pack-${m.id}`}>
+                      <TableCell className="text-xs">
+                        <div>{formatDate(m.created_at)}</div>
+                        <div className="text-gray-500">{m.sold_at_branch_name ?? "—"}</div>
+                      </TableCell>
+                      <TableCell className="text-xs">
+                        {m.customer_name ? (
+                          <>
+                            <div className="font-semibold">{m.customer_name}</div>
+                            <div className="text-gray-500 flex items-center gap-1">
+                              <Phone className="w-3 h-3" /> {m.customer_phone}
+                            </div>
+                          </>
+                        ) : (
+                          <span className="italic text-gray-400">unknown</span>
+                        )}
+                      </TableCell>
+                      <TableCell className="text-xs font-mono font-bold">
+                        {m.plate ?? <span className="text-gray-400 italic">any car</span>}
+                      </TableCell>
+                      <TableCell className="text-right text-xs tabular-nums">
+                        {m.remaining_washes} / {m.total_washes}
+                      </TableCell>
+                      <TableCell className="text-right text-xs tabular-nums">
+                        {formatBND(m.per_wash_cents)}
+                      </TableCell>
+                      <TableCell className="text-right tabular-nums font-semibold text-xs">
+                        {formatBND(m.deferred_cents)}
+                      </TableCell>
+                    </TableRow>
+                  ))}
+                </TableBody>
+              </Table>
+            </div>
+          </section>
+        )}
+
+        {/* === Active unlimited memberships === */}
+        {active_unlimited.count > 0 && (
+          <section>
+            <div className="flex items-center justify-between mb-2">
+              <h3 className="text-sm font-bold flex items-center gap-2">
+                <Crown className="w-4 h-4" />
+                Active unlimited memberships
+                <Badge variant="outline" className="border-2 border-black">
+                  {active_unlimited.count}
+                </Badge>
+              </h3>
+              <div className="text-sm font-bold tabular-nums">
+                {formatBND(active_unlimited.deferred_cents)}
+              </div>
+            </div>
+            <p className="text-[11px] text-gray-500 mb-2">
+              Straight-line deferred = price × (days remaining ÷ total days).
+              Earned portion already counts toward this period's revenue.
+            </p>
+            <div className="border-2 border-black rounded-md overflow-x-auto bg-white">
+              <Table>
+                <TableHeader>
+                  <TableRow>
+                    <TableHead>Sold</TableHead>
+                    <TableHead>Customer</TableHead>
+                    <TableHead>Plate</TableHead>
+                    <TableHead>Expires</TableHead>
+                    <TableHead className="text-right">Days left</TableHead>
+                    <TableHead className="text-right">Paid</TableHead>
+                    <TableHead className="text-right">Earned</TableHead>
+                    <TableHead className="text-right">Deferred</TableHead>
+                  </TableRow>
+                </TableHeader>
+                <TableBody>
+                  {active_unlimited.rows.map((m) => (
+                    <TableRow key={m.id} data-testid={`liability-unlimited-${m.id}`}>
+                      <TableCell className="text-xs">
+                        <div>{formatDate(m.created_at)}</div>
+                        <div className="text-gray-500">{m.sold_at_branch_name ?? "—"}</div>
+                      </TableCell>
+                      <TableCell className="text-xs">
+                        {m.customer_name ? (
+                          <>
+                            <div className="font-semibold">{m.customer_name}</div>
+                            <div className="text-gray-500 flex items-center gap-1">
+                              <Phone className="w-3 h-3" /> {m.customer_phone}
+                            </div>
+                          </>
+                        ) : (
+                          <span className="italic text-gray-400">unknown</span>
+                        )}
+                      </TableCell>
+                      <TableCell className="text-xs font-mono font-bold">
+                        {m.plate ?? <span className="text-gray-400 italic">any car</span>}
+                      </TableCell>
+                      <TableCell className="text-xs">{formatDate(m.expires_at)}</TableCell>
+                      <TableCell className="text-right text-xs tabular-nums">{m.days_left}</TableCell>
+                      <TableCell className="text-right text-xs tabular-nums">
+                        {formatBND(m.price_cents)}
+                      </TableCell>
+                      <TableCell className="text-right text-xs tabular-nums text-green-700">
+                        {formatBND(m.earned_cents)}
+                      </TableCell>
+                      <TableCell className="text-right tabular-nums font-semibold text-xs">
+                        {formatBND(m.deferred_cents)}
+                      </TableCell>
+                    </TableRow>
+                  ))}
+                </TableBody>
+              </Table>
+            </div>
+          </section>
+        )}
       </CardContent>
     </Card>
   );

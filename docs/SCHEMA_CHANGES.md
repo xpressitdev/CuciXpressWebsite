@@ -1216,3 +1216,73 @@ as washing or done.
   fix is a manual SQL fix; can be added later as a 60-second
   reverse window.
 - No new database columns. No migration required.
+
+---
+
+## Phase 12e — Outstanding service liability ledger (2026-05-05)
+
+### Why
+Owner needed visibility into prepaid service that's been collected
+but not yet delivered, for two reasons:
+  1. **Outstanding QRs** — paid web checkouts that haven't shown up
+     at the lane yet. The redemption mechanic was already wired
+     end-to-end (Phase 12c flips paid → queued on QR scan), but the
+     owner had no list view of what was still on the books.
+  2. **Wash-pack / unlimited liability** — for honest monthly P&L,
+     prepaid memberships must be deferred and earned out over time.
+     Booking the full B$60 of an unlimited month as May revenue is
+     wrong; it earns straight-line across the term.
+
+### No schema change
+Pure read endpoint over existing tables. No migration required.
+
+### Backend
+- New `GET /api/admin/liabilities` (owner|manager only) at
+  `server/routes.ts`, mounted next to `/api/admin/orders/pending-payments`.
+- Returns three buckets + a grand total:
+  - `outstanding_qrs` — `orders` where
+    `status='paid' AND ticket_code IS NULL AND qr_provider='pocket_pay'`.
+    Liability per row = full `total_cents` (1-for-1).
+  - `active_packs` — `memberships` where
+    `kind='pack' AND status='active' AND remaining_washes > 0`.
+    Liability per row = `remaining_washes × round(price_cents / total_washes)`.
+  - `active_unlimited` — `memberships` where
+    `kind='unlimited' AND status='active' AND expires_at > NOW()`.
+    Liability per row = straight-line deferred =
+    `clamp(0, price_cents, round(price_cents × (sec_remaining / sec_total)))`.
+    Earned portion = `price - deferred`.
+- All three queries `LEFT JOIN customers/cars/branches` so the
+  panel can render names + plates without an N+1.
+
+### Frontend
+- New `LiabilitiesPanel` component in
+  `client/src/components/admin/CustomersTab.tsx`, mounted
+  immediately below `PendingPaymentsPanel`.
+- Header card shows the **grand liability total** right-aligned.
+- Three sub-sections (each hidden when its bucket is empty):
+  - Outstanding prepaid QRs — Paid / Customer / Plate / Package /
+    Branch / Owed.
+  - Active wash packs — Sold / Customer / Plate / Remaining /
+    Per wash / Deferred.
+  - Active unlimited — Sold / Customer / Plate / Expires /
+    Days left / Paid / Earned (green) / Deferred.
+- "All clear" green banner when nothing is outstanding.
+- Refetches every 60s.
+
+### Smoke gates (all PASS)
+1. SQL for outstanding QRs runs (returned 0 rows on prod).
+2. SQL for active packs runs (returned 0 rows on prod).
+3. SQL for active unlimited returns 1 row, deferred B$45.96 — the
+   straight-line math is producing sensible numbers against a real
+   live membership.
+4. Endpoint returns 401 to unauthed callers — gating works.
+
+### Not in this phase
+- No "auto-void abandoned pending_payment" cron yet (separate
+  concern, doesn't touch paid QRs).
+- No monthly P&L roll-up (cash-in vs revenue-earned). This panel
+  is a **snapshot**; the owner can subtract this month's deferred
+  from last month's deferred + cash-in to compute earned revenue
+  manually. A proper period view can come later.
+- No "manually mark redeemed" override on outstanding QRs. The
+  Scan QR flow at /pos is the canonical redemption path.

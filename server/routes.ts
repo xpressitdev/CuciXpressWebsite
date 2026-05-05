@@ -1577,6 +1577,128 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
+  // GET /api/admin/liabilities — Phase 12e.
+  // Owner/manager dashboard of unredeemed prepaid service we still owe
+  // customers. Three buckets:
+  //   1. outstanding_qrs   : web Pocket Pay orders paid but not yet
+  //                          scanned at /pos (status='paid', ticket
+  //                          still NULL, qr_provider='pocket_pay').
+  //   2. active_packs      : memberships.kind='pack' with remaining > 0.
+  //                          Liability = remaining_washes × (price /
+  //                          total_washes).
+  //   3. active_unlimited  : memberships.kind='unlimited' not yet
+  //                          expired. Liability is straight-line
+  //                          deferred = price × (days_left / total_days).
+  // Totals are summed in cents and returned alongside row-level rows
+  // so the frontend can render a real liability ledger.
+  app.get('/api/admin/liabilities', requireStaff, requireStaffRole('owner', 'manager'), async (_req, res) => {
+    try {
+      const qrRows = (await db.execute(sql`
+        SELECT o.id, o.plate, o.created_at, o.total_cents,
+               o.package_name, o.payment_ref,
+               EXTRACT(EPOCH FROM (NOW() - o.created_at))::int AS age_seconds,
+               b.name  AS branch_name,
+               c.id    AS customer_id,
+               c.name  AS customer_name,
+               c.phone AS customer_phone
+          FROM orders o
+          LEFT JOIN branches  b   ON b.id  = o.branch_id
+          LEFT JOIN cars      car ON car.id = o.vehicle_id
+          LEFT JOIN customers c   ON c.id  = car.customer_id
+         WHERE o.status         = 'paid'
+           AND o.ticket_code   IS NULL
+           AND o.qr_provider   = 'pocket_pay'
+         ORDER BY o.created_at ASC
+         LIMIT 500
+      `)).rows.map((r: any) => ({
+        ...r,
+        total_cents: Number(r.total_cents ?? 0),
+        age_seconds: Number(r.age_seconds ?? 0),
+      }));
+
+      const packRows = (await db.execute(sql`
+        SELECT m.id, m.customer_id, m.vehicle_id,
+               m.total_washes, m.remaining_washes, m.price_cents,
+               m.created_at, m.expires_at,
+               c.name  AS customer_name,
+               c.phone AS customer_phone,
+               car.license_plate AS plate,
+               b.name AS sold_at_branch_name
+          FROM memberships m
+          LEFT JOIN customers c   ON c.id  = m.customer_id
+          LEFT JOIN cars      car ON car.id = m.vehicle_id
+          LEFT JOIN branches  b   ON b.id  = m.sold_at_branch_id
+         WHERE m.kind             = 'pack'
+           AND m.status           = 'active'
+           AND m.remaining_washes > 0
+         ORDER BY m.created_at ASC
+         LIMIT 500
+      `)).rows.map((r: any) => {
+        const total = Number(r.total_washes ?? 0);
+        const remaining = Number(r.remaining_washes ?? 0);
+        const price = Number(r.price_cents ?? 0);
+        const perWash = total > 0 ? Math.round(price / total) : 0;
+        return {
+          ...r,
+          total_washes: total,
+          remaining_washes: remaining,
+          price_cents: price,
+          per_wash_cents: perWash,
+          deferred_cents: perWash * remaining,
+        };
+      });
+
+      const unlimitedRows = (await db.execute(sql`
+        SELECT m.id, m.customer_id, m.vehicle_id,
+               m.price_cents, m.created_at, m.expires_at,
+               EXTRACT(EPOCH FROM (m.expires_at - m.created_at))::bigint AS total_seconds,
+               EXTRACT(EPOCH FROM (m.expires_at - NOW()))::bigint        AS remaining_seconds,
+               c.name  AS customer_name,
+               c.phone AS customer_phone,
+               car.license_plate AS plate,
+               b.name AS sold_at_branch_name
+          FROM memberships m
+          LEFT JOIN customers c   ON c.id  = m.customer_id
+          LEFT JOIN cars      car ON car.id = m.vehicle_id
+          LEFT JOIN branches  b   ON b.id  = m.sold_at_branch_id
+         WHERE m.kind        = 'unlimited'
+           AND m.status      = 'active'
+           AND m.expires_at IS NOT NULL
+           AND m.expires_at  > NOW()
+         ORDER BY m.created_at ASC
+         LIMIT 500
+      `)).rows.map((r: any) => {
+        const price = Number(r.price_cents ?? 0);
+        const totalSec = Math.max(1, Number(r.total_seconds ?? 0));
+        const remSec   = Math.max(0, Number(r.remaining_seconds ?? 0));
+        // Straight-line deferred revenue, clamped to [0, price].
+        const deferred = Math.min(price, Math.max(0, Math.round(price * (remSec / totalSec))));
+        const daysLeft = Math.ceil(remSec / 86400);
+        return {
+          ...r,
+          price_cents: price,
+          deferred_cents: deferred,
+          earned_cents: price - deferred,
+          days_left: daysLeft,
+        };
+      });
+
+      const outstandingQrTotal = qrRows.reduce((a: number, r: any) => a + (r.total_cents || 0), 0);
+      const packDeferredTotal  = packRows.reduce((a: number, r: any) => a + (r.deferred_cents || 0), 0);
+      const unlimitedDeferredTotal = unlimitedRows.reduce((a: number, r: any) => a + (r.deferred_cents || 0), 0);
+
+      res.json({
+        outstanding_qrs:    { rows: qrRows,        count: qrRows.length,        total_cents: outstandingQrTotal },
+        active_packs:       { rows: packRows,      count: packRows.length,      deferred_cents: packDeferredTotal },
+        active_unlimited:   { rows: unlimitedRows, count: unlimitedRows.length, deferred_cents: unlimitedDeferredTotal },
+        grand_liability_cents: outstandingQrTotal + packDeferredTotal + unlimitedDeferredTotal,
+      });
+    } catch (err) {
+      console.error('[admin.liabilities] failed:', err);
+      res.status(500).json({ error: 'list_failed' });
+    }
+  });
+
   // POST /api/admin/orders/:id/void-pending — Phase 12b-1.
   // Manual void of a pending_payment row. Idempotent: a Pocket Pay
   // callback that arrives after a manual void won't override us
