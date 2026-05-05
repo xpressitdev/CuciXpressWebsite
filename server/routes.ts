@@ -2589,63 +2589,172 @@ export async function registerRoutes(app: Express): Promise<Server> {
   // QR Code Verification API for staff scanning.
   // Locked to staff (Task 2.3): only the lane/cashier should be able to
   // mark a transaction's QR as verified.
+  // POST /api/verify-qr — Phase 12c.
+  // Staff scans the customer's Pocket Pay QR receipt at the lane.
+  // We look up the prepaid order by `payment_ref`, allocate the next
+  // T-NNN ticket for this branch+day (mirroring /api/pos/orders), and
+  // flip status from 'paid' -> 'queued'. Idempotent: rescanning a
+  // ticket that's already in the queue returns the existing ticket
+  // code instead of allocating a new one.
   app.post('/api/verify-qr', requireStaff, async (req, res) => {
-    const { qr_data } = req.body;
-    
+    const { qr_data } = req.body ?? {};
+    if (typeof qr_data !== 'string' || qr_data.length === 0) {
+      return res.status(400).json({ success: false, message: 'Missing qr_data' });
+    }
+
+    let paymentData: any;
     try {
-      // Parse QR code data
-      let paymentData;
-      try {
-        paymentData = JSON.parse(qr_data);
-      } catch (parseError) {
-        return res.status(400).json({
-          success: false,
-          message: 'Invalid QR code format'
-        });
-      }
+      paymentData = JSON.parse(qr_data);
+    } catch {
+      return res.status(400).json({ success: false, message: 'Invalid QR code format' });
+    }
+    if (paymentData?.type !== 'CUCI_XPRESS_PAYMENT' || !paymentData?.order_id) {
+      return res.status(400).json({ success: false, message: 'Invalid Cuci Xpress payment QR code' });
+    }
 
-      // Validate QR code structure
-      if (paymentData.type !== 'CUCI_XPRESS_PAYMENT' || !paymentData.transaction_id) {
-        return res.status(400).json({
-          success: false,
-          message: 'Invalid Cuci Xpress payment QR code'
-        });
-      }
+    const ppOrderId = String(paymentData.order_id);
 
-      // Verify payment status (in production, check against payment database)
-      if (paymentData.status !== 'PAID') {
-        return res.status(400).json({
-          success: false,
-          message: 'Payment not confirmed'
-        });
-      }
+    try {
+      const result = await db.transaction(async (tx) => {
+        // 1. Look up the order by Pocket Pay reference.
+        const orderRows = (await tx.execute(sql`
+          SELECT o.id, o.branch_id, o.status, o.ticket_code, o.plate,
+                 o.package_name, o.total_cents, o.payment_ref,
+                 o.vehicle_id, o.customer_id,
+                 b.name AS branch_name,
+                 c.name AS customer_name, c.phone AS customer_phone
+            FROM orders o
+            LEFT JOIN branches  b ON b.id = o.branch_id
+            LEFT JOIN cars    car ON car.id = o.vehicle_id
+            LEFT JOIN customers c ON c.id = car.customer_id
+           WHERE o.qr_provider = 'pocket_pay'
+             AND o.payment_ref = ${ppOrderId}
+           LIMIT 1
+           FOR UPDATE
+        `)).rows as any[];
 
-      // Return verification success with order details for POS system
-      res.json({
-        success: true,
-        message: 'Payment verified successfully',
-        order: {
-          transaction_id: paymentData.transaction_id,
-          service: paymentData.service,
-          amount: paymentData.amount,
-          branch: paymentData.branch,
-          car_plate: paymentData.car_plate,
-          phone: paymentData.phone,
-          payment_timestamp: paymentData.timestamp,
-          verified_at: new Date().toISOString()
-        },
-        pos_instructions: {
-          action: 'ADD_TO_QUEUE',
-          service_code: paymentData.service === 'Full Package' ? 'FP' : 'BW',
-          prepaid: true
+        if (orderRows.length === 0) {
+          return { http: 404, body: { success: false, code: 'order_not_found', message: 'Order not in our system. Customer may have a legacy receipt.' } };
         }
+        const order = orderRows[0];
+
+        // 2. Status gates.
+        if (order.status === 'pending_payment') {
+          return { http: 402, body: { success: false, code: 'payment_pending', message: 'Payment not yet confirmed by Pocket Pay. Ask the customer to wait or pay again.' } };
+        }
+        if (order.status === 'voided' || order.status === 'refunded') {
+          return { http: 409, body: { success: false, code: order.status, message: `Order is ${order.status}. Do not service this car.` } };
+        }
+
+        // 3. Already in the queue — return existing ticket (idempotent rescan).
+        if (order.ticket_code && ['queued', 'washing', 'done'].includes(order.status)) {
+          return {
+            http: 200,
+            body: {
+              success: true,
+              message: 'Already in queue',
+              newly_allocated: false,
+              order: {
+                id: order.id,
+                ticket_code: order.ticket_code,
+                plate: order.plate,
+                package_name: order.package_name,
+                total_cents: Number(order.total_cents ?? 0),
+                branch_id: order.branch_id,
+                branch_name: order.branch_name,
+                status: order.status,
+                customer: order.customer_name
+                  ? { name: order.customer_name, phone: order.customer_phone }
+                  : null,
+                is_prepaid: true,
+              },
+            },
+          };
+        }
+
+        // 4. Allocate next T-NNN for this branch + today (UTC). Same algorithm
+        //    as /api/pos/orders so prepaid + walk-in tickets share one stream.
+        const seqRow = (await tx.execute(sql`
+          SELECT COALESCE(
+            MAX( NULLIF(regexp_replace(ticket_code, '\\D', '', 'g'), '')::int ),
+            0
+          ) + 1 AS next_seq
+            FROM orders
+           WHERE branch_id = ${order.branch_id}
+             AND ticket_day = (now() AT TIME ZONE 'UTC')::date
+        `)).rows as Array<{ next_seq: number }>;
+        const seq = seqRow[0]?.next_seq ?? 1;
+        const ticketCode = `T-${String(seq).padStart(3, '0')}`;
+
+        // 5. Flip the order into the queue with its new ticket.
+        const updated = (await tx.execute(sql`
+          UPDATE orders
+             SET ticket_code = ${ticketCode},
+                 status      = 'queued',
+                 ticket_day  = (now() AT TIME ZONE 'UTC')::date
+           WHERE id = ${order.id}
+             AND status = 'paid'
+             AND ticket_code IS NULL
+          RETURNING id, ticket_code, status
+        `)).rows as any[];
+
+        if (updated.length === 0) {
+          // Race: another scan beat us to it. Re-read and return idempotent.
+          const re = (await tx.execute(sql`
+            SELECT ticket_code, status FROM orders WHERE id = ${order.id} LIMIT 1
+          `)).rows[0] as any;
+          return {
+            http: 200,
+            body: {
+              success: true,
+              message: 'Already in queue',
+              newly_allocated: false,
+              order: {
+                id: order.id,
+                ticket_code: re?.ticket_code ?? null,
+                plate: order.plate,
+                package_name: order.package_name,
+                total_cents: Number(order.total_cents ?? 0),
+                branch_id: order.branch_id,
+                branch_name: order.branch_name,
+                status: re?.status ?? order.status,
+                customer: order.customer_name
+                  ? { name: order.customer_name, phone: order.customer_phone }
+                  : null,
+                is_prepaid: true,
+              },
+            },
+          };
+        }
+
+        return {
+          http: 200,
+          body: {
+            success: true,
+            message: 'Ticket allocated',
+            newly_allocated: true,
+            order: {
+              id: order.id,
+              ticket_code: ticketCode,
+              plate: order.plate,
+              package_name: order.package_name,
+              total_cents: Number(order.total_cents ?? 0),
+              branch_id: order.branch_id,
+              branch_name: order.branch_name,
+              status: 'queued',
+              customer: order.customer_name
+                ? { name: order.customer_name, phone: order.customer_phone }
+                : null,
+              is_prepaid: true,
+            },
+          },
+        };
       });
+
+      return res.status(result.http).json(result.body);
     } catch (error) {
-      console.error('QR verification API error:', error);
-      res.status(500).json({
-        success: false,
-        message: 'Verification system error'
-      });
+      console.error('[verify-qr] failed:', error);
+      return res.status(500).json({ success: false, message: 'Verification system error' });
     }
   });
 

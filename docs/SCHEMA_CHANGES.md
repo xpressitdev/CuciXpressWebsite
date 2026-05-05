@@ -1003,3 +1003,72 @@ No schema changes — all three pieces ride on the existing
   (manual void via the panel covers it for now)
 - SMS/WhatsApp blast to a filtered list (needs a third-party
   gateway — Phase 13+)
+
+---
+
+## 2026-05-05 — Phase 12c: prepaid lane scan-in via /api/verify-qr
+
+No schema changes — uses Phase 12a's `payment_ref` (Pocket Pay
+`order_id`) and the existing T-NNN ticket sequence.
+
+### What changed
+- `POST /api/verify-qr` (`requireStaff`) was rewritten from a mock
+  validator into the real prepaid scan-in endpoint:
+  1. Parse the QR JSON, expect `type='CUCI_XPRESS_PAYMENT'` and a
+     non-empty `order_id` (the Pocket Pay reference baked into the
+     QR by `PaymentReceipt`).
+  2. `SELECT ... FOR UPDATE` the order by
+     `qr_provider='pocket_pay' AND payment_ref=<order_id>`. Status
+     gates:
+     - **404 `order_not_found`** — no row matches (legacy receipt
+       or wrong provider).
+     - **402 `payment_pending`** — `status='pending_payment'`.
+       Pocket Pay callback hasn't landed yet; staff tells the
+       customer to wait or pay again.
+     - **409 `voided` / `refunded`** — do not service this car.
+     - **200 idempotent** — already `queued`/`washing`/`done`
+       with a `ticket_code`. Returns the existing ticket.
+  3. Otherwise (`status='paid'`, `ticket_code IS NULL`), allocate
+     the next T-NNN for `(branch_id, ticket_day=today UTC)` using
+     the same `MAX(regexp_replace(ticket_code, '\D', '', 'g'))+1`
+     pattern as `/api/pos/orders` so prepaid + walk-in tickets
+     share one stream per branch per day.
+  4. `UPDATE ... SET ticket_code=$1, status='queued',
+     ticket_day=today WHERE id=$2 AND status='paid' AND
+     ticket_code IS NULL RETURNING ...`. The `WHERE` guard makes
+     the whole flow safe against two staff scanning the same QR
+     at the same instant — second scan's UPDATE matches zero rows,
+     it re-reads, and returns the same ticket.
+
+### Response shape (success)
+```
+{
+  success: true,
+  message: "Ticket allocated" | "Already in queue",
+  newly_allocated: true | false,
+  order: {
+    id, ticket_code, plate, package_name, total_cents,
+    branch_id, branch_name, status,
+    customer: { name, phone } | null,
+    is_prepaid: true
+  }
+}
+```
+
+### Smoke tests passed
+- Lookup by `payment_ref` returns the row with `status='paid'`,
+  `ticket_code=NULL`.
+- First scan allocates `T-001`, flips `status='queued'`.
+- Second scan: UPDATE matches 0 rows → idempotent return of
+  same `T-001`.
+- `status='voided'` row is gated by the status check.
+- Unknown `payment_ref` returns 0 rows → 404 path.
+
+### Not in this phase (deliberately)
+- A staff-facing scanner UI (camera + form). The endpoint is
+  ready; the front end can be built in a later phase or live
+  inside the existing third-party POS.
+- Replacing the legacy `transaction_id`-only QR contents — the
+  current `PaymentReceipt` already embeds `order_id`, so all new
+  receipts work. Customers holding pre-12a receipts will hit the
+  `order_not_found` branch and be handled manually.
