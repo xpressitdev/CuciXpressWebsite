@@ -6,21 +6,24 @@ import {
   MeResp,
   OrderRow,
   MembershipRow,
+  CarRow,
   QueueBranch,
   formatBND,
   formatBNDFull,
   packageBadgeClass,
 } from "./types";
+import { LoyaltyCard } from "./LoyaltyCard";
 
 interface Props {
   me: MeResp;
   orders: OrderRow[];
   memberships: MembershipRow[];
+  cars: CarRow[];
   fullName: string;
   onChangeTab: (tab: "history" | "subscription") => void;
 }
 
-export function OverviewTab({ me, orders, memberships, fullName, onChangeTab }: Props) {
+export function OverviewTab({ me, orders, memberships, cars, fullName, onChangeTab }: Props) {
   const firstName = fullName.split(" ")[0];
   const activeMembership = memberships.find((m) => m.status === "active");
 
@@ -98,6 +101,9 @@ export function OverviewTab({ me, orders, memberships, fullName, onChangeTab }: 
           </Link>
         </div>
       </div>
+
+      {/* Loyalty punch card */}
+      <LoyaltyCard cars={cars} />
 
       {/* KPI tiles */}
       <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">

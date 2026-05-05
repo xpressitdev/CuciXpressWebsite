@@ -495,6 +495,10 @@ export const orders = pgTable("orders", {
   change_cents: integer("change_cents").default(0).notNull(),
   order_notes: text("order_notes"),                           // operational notes ("water pressure low", "tips $1")
   item_notes: text("item_notes"),                             // car description ("Mini Cooper BAK9007")
+  // Phase 12f (2026-05-05_01): when this order has been "punched" toward
+  // a free-wash redemption, points at the loyalty_redemptions row that
+  // consumed it. NULL = still eligible to count toward a future stamp.
+  loyalty_consumed_in: text("loyalty_consumed_in"),
 });
 
 // Allowed payment methods. Mirrors the orders.payment_method CHECK
@@ -572,6 +576,20 @@ export const insertMembershipRedemptionSchema = createInsertSchema(membershipRed
 });
 export type MembershipRedemption = typeof membershipRedemptions.$inferSelect;
 export type InsertMembershipRedemption = z.infer<typeof insertMembershipRedemptionSchema>;
+
+// --- Loyalty redemptions (Phase 12f) ------------------------
+// One row per "collect 4 × B$12 receipts → free B$12 wash"
+// redemption. Voucher orders are real `orders` rows with
+// payment_method='voucher', qr_provider='loyalty', total_cents=0.
+export const loyaltyRedemptions = pgTable("loyalty_redemptions", {
+  id: text("id").primaryKey(),
+  customer_user_id: integer("customer_user_id").references(() => users.id).notNull(),
+  voucher_order_id: text("voucher_order_id").references(() => orders.id).notNull(),
+  package_id: text("package_id").notNull(),
+  branch_id: integer("branch_id").references(() => branches.id).notNull(),
+  created_at: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
+});
+export type LoyaltyRedemption = typeof loyaltyRedemptions.$inferSelect;
 
 // --- Cashier shifts (Phase 8) -------------------------------
 // One open shift per staff at a time (enforced by partial unique

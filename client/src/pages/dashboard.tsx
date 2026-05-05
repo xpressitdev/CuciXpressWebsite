@@ -106,6 +106,7 @@ export default function DashboardPage() {
               me={me}
               orders={orders}
               memberships={memberships}
+              cars={cars}
               fullName={fullName}
               onChangeTab={(t) => setTab(t)}
             />

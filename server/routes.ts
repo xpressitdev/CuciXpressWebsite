@@ -2749,7 +2749,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
             LEFT JOIN branches  b ON b.id = o.branch_id
             LEFT JOIN cars    car ON car.id = o.vehicle_id
             LEFT JOIN customers c ON c.id = car.customer_id
-           WHERE o.qr_provider = 'pocket_pay'
+           WHERE o.qr_provider IN ('pocket_pay','loyalty')
              AND o.payment_ref = ${ppOrderId}
            LIMIT 1
            FOR UPDATE
@@ -3526,6 +3526,226 @@ export async function registerRoutes(app: Express): Promise<Server> {
       ORDER BY c.last_seen_at DESC NULLS LAST, c.id DESC
     `)).rows;
     res.json({ cars: rows });
+  });
+
+  // GET /api/branches/active — public list of active branches for
+  // customer-facing pickers (loyalty redeem modal, etc).
+  app.get('/api/branches/active', async (_req, res) => {
+    try {
+      const rows = (await db.execute(sql`
+        SELECT id, name, location FROM branches ORDER BY name
+      `)).rows;
+      res.json({ branches: rows });
+    } catch {
+      res.status(500).json({ branches: [] });
+    }
+  });
+
+  // ─────────────────────────────────────────────────────────────
+  // Phase 12f — Loyalty punch card.
+  // Promo: collect 4 paid receipts of the B$12 package
+  // (`pkg_basic_tyre_wax`) → redeem 1 free B$12 wash.
+  //
+  // Eligibility rules (locked with the owner):
+  //   1. Only `pkg_basic_tyre_wax` counts (price = B$12).
+  //   2. Wash-pack / unlimited redemptions don't count (the customer
+  //      didn't pay B$12 for that wash). Detected via the
+  //      `membership_redemptions` table.
+  //   3. Free voucher washes don't count themselves.
+  //      (payment_method='voucher' AND qr_provider='loyalty').
+  //   4. No expiry. A receipt counts forever until consumed.
+  //   5. Voided / refunded / pending_payment orders never count.
+  // ─────────────────────────────────────────────────────────────
+  const LOYALTY_PKG_ID         = 'pkg_basic_tyre_wax';
+  const LOYALTY_REQUIRED_COUNT = 4;
+
+  app.get('/api/customer/loyalty', requireLuciaUser, async (req, res) => {
+    const userId = Number(req.lucia!.user!.id);
+    try {
+      const eligible = (await db.execute(sql`
+        SELECT o.id, o.created_at, o.plate, o.total_cents, b.name AS branch_name
+          FROM orders o
+          LEFT JOIN branches b ON b.id = o.branch_id
+         WHERE o.customer_id          = ${userId}
+           AND o.package_id           = ${LOYALTY_PKG_ID}
+           AND o.loyalty_consumed_in IS NULL
+           AND o.status               IN ('paid','queued','washing','done')
+           AND NOT (o.payment_method  = 'voucher' AND o.qr_provider = 'loyalty')
+           AND o.id NOT IN (SELECT order_id FROM membership_redemptions)
+         ORDER BY o.created_at ASC
+      `)).rows.map((r: any) => ({
+        ...r,
+        total_cents: Number(r.total_cents ?? 0),
+      }));
+
+      const stamps = eligible.length;
+      const canRedeem = stamps >= LOYALTY_REQUIRED_COUNT;
+
+      // Pending (unscanned) loyalty voucher, if any.
+      const pendingVoucher = (await db.execute(sql`
+        SELECT o.id, o.payment_ref, o.created_at, o.plate, b.name AS branch_name
+          FROM orders o
+          LEFT JOIN branches b ON b.id = o.branch_id
+         WHERE o.customer_id  = ${userId}
+           AND o.qr_provider  = 'loyalty'
+           AND o.status       = 'paid'
+           AND o.ticket_code IS NULL
+         ORDER BY o.created_at DESC
+         LIMIT 1
+      `)).rows[0] as any;
+
+      res.json({
+        package_id: LOYALTY_PKG_ID,
+        package_name: 'Basic Wash + Tyre Shine + Spray Wax',
+        required: LOYALTY_REQUIRED_COUNT,
+        stamps,
+        can_redeem: canRedeem,
+        eligible_orders: eligible,
+        pending_voucher: pendingVoucher
+          ? {
+              order_id: pendingVoucher.id,
+              payment_ref: pendingVoucher.payment_ref,
+              created_at: pendingVoucher.created_at,
+              plate: pendingVoucher.plate,
+              branch_name: pendingVoucher.branch_name,
+              qr_payload: JSON.stringify({
+                type: 'CUCI_XPRESS_PAYMENT',
+                order_id: pendingVoucher.payment_ref,
+              }),
+            }
+          : null,
+      });
+    } catch (err) {
+      console.error('[customer.loyalty] failed:', err);
+      res.status(500).json({ error: 'load_failed' });
+    }
+  });
+
+  // POST /api/customer/loyalty/redeem
+  // Body: { branch_id: number, plate: string }
+  // Atomically: (a) re-checks eligible count under FOR UPDATE,
+  // (b) creates a B$0 voucher order at the chosen branch+plate,
+  // (c) writes the loyalty_redemption row, (d) marks the 4 oldest
+  // eligible orders consumed. Returns the QR payload the dashboard
+  // renders for the customer to show at the lane.
+  const redeemSchema = z.object({
+    branch_id: z.number().int().positive(),
+    plate: z.string().trim().min(1).max(20),
+  });
+  app.post('/api/customer/loyalty/redeem', requireLuciaUser, async (req, res) => {
+    const parsed = redeemSchema.safeParse(req.body);
+    if (!parsed.success) return res.status(400).json({ error: 'invalid_request' });
+    const userId = Number(req.lucia!.user!.id);
+    const branchId = parsed.data.branch_id;
+    const plate = parsed.data.plate.toUpperCase().replace(/\s+/g, ' ').trim();
+
+    try {
+      const out = await db.transaction(async (tx) => {
+        // Reject if there's already an unredeemed voucher waiting.
+        const existing = (await tx.execute(sql`
+          SELECT id FROM orders
+           WHERE customer_id = ${userId}
+             AND qr_provider = 'loyalty'
+             AND status      = 'paid'
+             AND ticket_code IS NULL
+           LIMIT 1
+        `)).rows[0] as any;
+        if (existing) {
+          return { http: 409, body: { error: 'voucher_pending', voucher_order_id: existing.id } };
+        }
+
+        // Branch + package sanity.
+        const branch = (await tx.execute(sql`
+          SELECT id, name FROM branches WHERE id = ${branchId} LIMIT 1
+        `)).rows[0] as any;
+        if (!branch) return { http: 400, body: { error: 'branch_not_found' } };
+
+        const pkg = (await tx.execute(sql`
+          SELECT id, name, price_cents FROM packages WHERE id = ${LOYALTY_PKG_ID} LIMIT 1
+        `)).rows[0] as any;
+        if (!pkg) return { http: 500, body: { error: 'package_missing' } };
+
+        // Lock + recount eligible orders. Take the oldest N.
+        const eligibleRows = (await tx.execute(sql`
+          SELECT id FROM orders
+           WHERE customer_id          = ${userId}
+             AND package_id           = ${LOYALTY_PKG_ID}
+             AND loyalty_consumed_in IS NULL
+             AND status               IN ('paid','queued','washing','done')
+             AND NOT (payment_method  = 'voucher' AND qr_provider = 'loyalty')
+             AND id NOT IN (SELECT order_id FROM membership_redemptions)
+           ORDER BY created_at ASC
+           LIMIT ${LOYALTY_REQUIRED_COUNT}
+           FOR UPDATE
+        `)).rows as Array<{ id: string }>;
+
+        if (eligibleRows.length < LOYALTY_REQUIRED_COUNT) {
+          return { http: 400, body: { error: 'not_enough_stamps', have: eligibleRows.length, need: LOYALTY_REQUIRED_COUNT } };
+        }
+
+        const redemptionId = `loy_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 8)}`;
+        const voucherId    = `ord_loy_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 8)}`;
+
+        // Voucher order. payment_ref = redemptionId so /api/verify-qr
+        // can find it; that endpoint already widens to qr_provider IN
+        // ('pocket_pay','loyalty') so the same scan flow allocates a
+        // T-NNN ticket and flips paid → queued at the lane.
+        await tx.execute(sql`
+          INSERT INTO orders (
+            id, branch_id, customer_id, plate,
+            package_id, package_name, package_price_cents,
+            addons, subtotal_cents, total_cents,
+            payment_method, payment_ref, qr_provider,
+            ticket_code, status, customer_name_walkin
+          ) VALUES (
+            ${voucherId}, ${branchId}, ${userId}, ${plate},
+            ${pkg.id}, ${pkg.name}, 0,
+            '[]'::jsonb, 0, 0,
+            'voucher', ${redemptionId}, 'loyalty',
+            NULL, 'paid', NULL
+          )
+        `);
+
+        await tx.execute(sql`
+          INSERT INTO loyalty_redemptions
+            (id, customer_user_id, voucher_order_id, package_id, branch_id)
+          VALUES
+            (${redemptionId}, ${userId}, ${voucherId}, ${LOYALTY_PKG_ID}, ${branchId})
+        `);
+
+        // Punch the 4 receipts.
+        const ids = eligibleRows.map(r => r.id);
+        await tx.execute(sql`
+          UPDATE orders SET loyalty_consumed_in = ${redemptionId}
+           WHERE id = ANY(${ids}::text[])
+             AND loyalty_consumed_in IS NULL
+        `);
+
+        return {
+          http: 201,
+          body: {
+            ok: true,
+            voucher: {
+              order_id: voucherId,
+              payment_ref: redemptionId,
+              branch_id: branchId,
+              branch_name: branch.name,
+              plate,
+              package_name: pkg.name,
+              qr_payload: JSON.stringify({
+                type: 'CUCI_XPRESS_PAYMENT',
+                order_id: redemptionId,
+              }),
+            },
+          },
+        };
+      });
+
+      return res.status(out.http).json(out.body);
+    } catch (err) {
+      console.error('[customer.loyalty.redeem] failed:', err);
+      return res.status(500).json({ error: 'redeem_failed' });
+    }
   });
 
   // POST /api/customer/cars — customer adds one of their vehicles.

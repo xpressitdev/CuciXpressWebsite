@@ -1286,3 +1286,102 @@ Pure read endpoint over existing tables. No migration required.
   manually. A proper period view can come later.
 - No "manually mark redeemed" override on outstanding QRs. The
   Scan QR flow at /pos is the canonical redemption path.
+
+---
+
+## Phase 12f — Loyalty punch card (2026-05-05)
+
+### Why
+Owner runs a physical promo: "collect 4 receipts of the B$12
+package, show us at the lane, get one free." Wanted to digitise it
+on the customer dashboard with a gamified stamp card.
+
+### Migration: `2026-05-05_01_loyalty_redemptions.sql`
+- New table `loyalty_redemptions` (id, customer_user_id,
+  voucher_order_id, package_id, branch_id, created_at).
+- New column `orders.loyalty_consumed_in TEXT` (FK to
+  loyalty_redemptions.id, nullable). Once set, that order is
+  permanently "spent" toward a redemption and can't count again.
+- Partial index on `(customer_id, package_id)` filtered to
+  `loyalty_consumed_in IS NULL AND status IN
+  ('paid','queued','washing','done')` for fast eligibility lookup.
+- No new payment_method or status — voucher orders use the
+  already-allowed `payment_method='voucher'`.
+
+### Eligibility rules (locked with the owner)
+1. Only `pkg_basic_tyre_wax` (B$12) counts toward stamps.
+2. Wash-pack / unlimited redemptions don't count — detected via
+   the membership_redemptions table.
+3. Free voucher washes don't count themselves
+   (`payment_method='voucher' AND qr_provider='loyalty'`).
+4. No expiry. Receipts count forever until consumed.
+5. Voided / refunded / pending_payment orders never count.
+
+### Backend
+- `GET /api/customer/loyalty` — returns `{stamps, required,
+  can_redeem, eligible_orders, pending_voucher}`. The pending
+  voucher includes the QR payload ready to render so the
+  dashboard can show it again later if the customer didn't scan
+  it the first time.
+- `POST /api/customer/loyalty/redeem` (body: `{branch_id, plate}`):
+  in one transaction —
+    a) re-checks eligible count under FOR UPDATE,
+    b) creates a B$0 voucher order (status='paid',
+       payment_method='voucher', qr_provider='loyalty',
+       payment_ref=redemption_id),
+    c) writes the loyalty_redemption row,
+    d) marks the 4 oldest eligible orders as
+       `loyalty_consumed_in=redemption_id`.
+  Returns the QR payload the dashboard renders. Refuses with
+  HTTP 409 if a previous voucher is still unscanned.
+- `GET /api/branches/active` — small public branch list for the
+  redeem-modal picker (no auth required).
+- `/api/verify-qr` widened from
+  `qr_provider = 'pocket_pay'` to
+  `qr_provider IN ('pocket_pay','loyalty')` so the existing
+  /pos Scan QR flow allocates a T-NNN ticket and flips the
+  voucher paid → queued exactly like a paid Pocket Pay order.
+
+### Frontend
+- New `client/src/components/dashboard/LoyaltyCard.tsx` (~280 LoC).
+  Mounted in `OverviewTab` between the one-tap wash banner and
+  the KPI tiles.
+- 4-stamp progress row (filled = check, empty = lock).
+- Three states:
+    - 0–3 stamps: shows progress + "X more to unlock".
+    - 4+ stamps and no pending voucher: "Redeem free wash" button →
+      modal with branch + vehicle picker.
+    - Pending voucher exists: "Show free-wash QR" button →
+      modal that renders the QR client-side (qrcode lib) so the
+      customer can show it at the lane immediately, or come back
+      to it later from the dashboard.
+- QR encoding matches Pocket Pay's existing format
+  (`{type:'CUCI_XPRESS_PAYMENT', order_id:<payment_ref>}`),
+  so the cashier scans it with the same Scan QR button on /pos
+  with zero behavioural change.
+
+### Smoke gates (all PASS)
+1. `orders.loyalty_consumed_in` column exists.
+2. `loyalty_redemptions` table exists.
+3. Eligibility query runs against live DB without error.
+4. `GET /api/branches/active` returns 200 with branch list.
+5. `GET /api/customer/loyalty` returns 401 unauthed (gating works).
+6. `POST /api/customer/loyalty/redeem` route mounted (gating works).
+7. Vite HMR rebuilt the dashboard cleanly.
+
+### Owner-side visibility
+Voucher orders show up in:
+  - The existing `/admin` reports as B$0 orders with
+    `payment_method='voucher'` and `package_name='Basic Wash +
+    Tyre Shine + Spray Wax'`. They count as washes performed but
+    not as cash collected — correct accounting.
+  - The Phase 12e liability panel does NOT list them (B$0 = no
+    liability), also correct.
+
+### Not in this phase
+- No "expire receipts after N months" rule. Easy to add as a
+  WHERE clause on the eligibility query later.
+- No admin tool to mark a physical paper receipt as a stamp for
+  customers who paid before having an account. Could be added
+  later as a "manual punch" button in the customer detail.
+- No SMS/email notification when stamp 4 is earned.
