@@ -196,10 +196,17 @@ export default function Admin() {
       <main className="pt-20 pb-16">
         <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 space-y-8">
           <div className="space-y-4">
-            <Link href="/" className="inline-block">
-              <button className="flex items-center text-gray-600 hover:text-cuci-primary transition-colors">
+            {/* Phase 12c-ui follow-up: cashiers reach /admin from /pos
+                via the Reports button. The back link should return them
+                to POS, not the public landing page (use the navbar's
+                Home link for that). */}
+            <Link href="/pos" className="inline-block">
+              <button
+                className="flex items-center text-gray-600 hover:text-cuci-primary transition-colors"
+                data-testid="button-back-to-pos"
+              >
                 <ArrowLeft className="w-4 h-4 mr-2" />
-                Back to Home
+                Back to POS
               </button>
             </Link>
             <div className="flex items-center justify-between flex-wrap gap-4">
