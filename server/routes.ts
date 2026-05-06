@@ -3376,7 +3376,20 @@ export async function registerRoutes(app: Express): Promise<Server> {
   // user later hooks up Google or staff edits it). The customer never
   // sees these.
   // ===================================================================
-  const normalisePhone = (s: string) => s.trim().replace(/\s+/g, '');
+  // Canonical Brunei phone form = bare digits, country-code prefixed.
+  // Accepts: "+6738669378", " 673 8669378 ", "8669378", "(673) 866-9378"
+  // Returns: "6738669378" (or "" if not a usable number).
+  // Why bare digits (no '+'): 375 of 512 existing rows are bare-digits, so
+  // we go with the dominant form. Without this, "+6738669378" and
+  // "6738669378" hash to different OTP buckets and create duplicate
+  // accounts on login.
+  const normalisePhone = (s: string) => {
+    const digits = (s ?? '').replace(/\D+/g, '');
+    if (!digits) return '';
+    // Local-format 7-digit Brunei number (e.g. "8669378") → prepend 673.
+    if (digits.length === 7) return `673${digits}`;
+    return digits;
+  };
   const phoneStartSchema = z.object({ phone: z.string().min(7).max(20) });
   const phoneVerifySchema = z.object({
     phone: z.string().min(7).max(20),
