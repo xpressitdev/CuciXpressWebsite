@@ -93,7 +93,19 @@ export function OverviewTab({ me, orders, memberships, cars, fullName, onChangeT
             </p>
           </div>
           <Link
-            href="/checkout"
+            href={`/checkout?service=${encodeURIComponent(JSON.stringify({
+              name: "Full Package",
+              price: "BND 12",
+              duration: "12 minutes",
+              features: [
+                "Exterior foam wash",
+                "High-pressure rinse",
+                "Basic drying",
+                "Spray wax",
+                "Tyre shine",
+                "Wheel cleaning",
+              ],
+            }))}`}
             className="inline-flex items-center justify-center gap-1 px-5 py-3 bg-white text-gray-900 rounded-xl font-bold border-2 border-black whitespace-nowrap hover:translate-x-[-1px] hover:translate-y-[-1px] transition-transform"
             data-testid="button-onetap-pay"
           >

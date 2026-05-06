@@ -383,41 +383,81 @@ export default function PaymentCheckout({ selectedService, onBack }: PaymentChec
 
                 {/* Customer Information */}
                 <div className="space-y-4">
-                  <h3 className="font-semibold">Customer Information</h3>
-                  
-                  <div>
-                    <Label htmlFor="carPlate">Car Plate Number *</Label>
-                    <Input
-                      id="carPlate"
-                      value={formData.carPlate}
-                      onChange={(e) => handleInputChange('carPlate', e.target.value.toUpperCase())}
-                      placeholder="BB1234"
-                      required
-                    />
+                  <div className="flex items-center justify-between">
+                    <h3 className="font-semibold">Customer Information</h3>
+                    {isAuthenticated && (
+                      <a
+                        href="/dashboard"
+                        className="text-xs text-cuci-primary hover:underline"
+                        data-testid="link-edit-profile"
+                      >
+                        Edit in dashboard →
+                      </a>
+                    )}
                   </div>
 
-                  <div>
-                    <Label htmlFor="phone">Phone Number *</Label>
-                    <Input
-                      id="phone"
-                      value={formData.phone}
-                      onChange={(e) => handleInputChange('phone', e.target.value)}
-                      placeholder="673 7654321"
-                      required
-                    />
-                  </div>
+                  {isAuthenticated ? (
+                    // Logged-in view: locked read-only rows so the user can't
+                    // accidentally overwrite their saved profile from this page.
+                    <div className="rounded-lg border border-gray-200 bg-gray-50 divide-y divide-gray-200">
+                      <div className="flex items-center justify-between px-3 py-2.5">
+                        <span className="text-xs text-gray-500">Car plate</span>
+                        <span className="font-mono font-bold text-gray-900" data-testid="text-locked-plate">
+                          {formData.carPlate || <span className="text-amber-600 text-xs font-sans">Not set — add in dashboard</span>}
+                        </span>
+                      </div>
+                      <div className="flex items-center justify-between px-3 py-2.5">
+                        <span className="text-xs text-gray-500">Phone</span>
+                        <span className="text-gray-900" data-testid="text-locked-phone">
+                          {formData.phone || <span className="text-amber-600 text-xs">Not set</span>}
+                        </span>
+                      </div>
+                      <div className="flex items-center justify-between px-3 py-2.5">
+                        <span className="text-xs text-gray-500">Email</span>
+                        <span className="text-gray-900 text-sm" data-testid="text-locked-email">
+                          {formData.email || <span className="text-gray-400 text-xs">— (optional)</span>}
+                        </span>
+                      </div>
+                    </div>
+                  ) : (
+                    // Guest view: still editable so walk-in customers can pay
+                    // without signing in.
+                    <>
+                      <div>
+                        <Label htmlFor="carPlate">Car Plate Number *</Label>
+                        <Input
+                          id="carPlate"
+                          value={formData.carPlate}
+                          onChange={(e) => handleInputChange('carPlate', e.target.value.toUpperCase())}
+                          placeholder="BB1234"
+                          required
+                        />
+                      </div>
 
-                  <div>
-                    <Label htmlFor="email">Email Address <span className="text-gray-400 font-normal text-xs">(optional)</span></Label>
-                    <Input
-                      id="email"
-                      type="email"
-                      value={formData.email}
-                      onChange={(e) => handleInputChange('email', e.target.value)}
-                      placeholder="your@email.com"
-                    />
-                    <p className="text-xs text-gray-500 mt-1">We'll send your QR code via WhatsApp — email is just for a paper-trail receipt.</p>
-                  </div>
+                      <div>
+                        <Label htmlFor="phone">Phone Number *</Label>
+                        <Input
+                          id="phone"
+                          value={formData.phone}
+                          onChange={(e) => handleInputChange('phone', e.target.value)}
+                          placeholder="673 7654321"
+                          required
+                        />
+                      </div>
+
+                      <div>
+                        <Label htmlFor="email">Email Address <span className="text-gray-400 font-normal text-xs">(optional)</span></Label>
+                        <Input
+                          id="email"
+                          type="email"
+                          value={formData.email}
+                          onChange={(e) => handleInputChange('email', e.target.value)}
+                          placeholder="your@email.com"
+                        />
+                        <p className="text-xs text-gray-500 mt-1">We'll send your QR code via WhatsApp — email is just for a paper-trail receipt.</p>
+                      </div>
+                    </>
+                  )}
 
                   <div>
                     <Label htmlFor="selectedBranch">Select Branch *</Label>
