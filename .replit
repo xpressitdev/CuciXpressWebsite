@@ -42,3 +42,7 @@ integrations = ["javascript_database:1.0.0", "javascript_sendgrid:1.0.0", "javas
 
 [userenv.shared]
 PRODUCTION_URL = "https://cucixpress.com"
+
+[postMerge]
+path = "scripts/post-merge.sh"
+timeoutMs = 20000
