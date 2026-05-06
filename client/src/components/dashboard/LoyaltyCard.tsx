@@ -274,15 +274,25 @@ function VoucherDialog({
   voucher: NonNullable<LoyaltyResp["pending_voucher"]>;
   packageName: string;
 }) {
-  const canvasRef = useRef<HTMLCanvasElement | null>(null);
+  // Render QR as a data-URL <img> instead of drawing into a canvas ref.
+  // Radix Dialog mounts its content through a portal after a tick, so the
+  // canvasRef-based approach silently no-op'd on first open (the effect
+  // fired before the canvas was in the DOM, and never re-ran).
+  const [qrDataUrl, setQrDataUrl] = useState<string | null>(null);
 
   useEffect(() => {
-    if (!open || !canvasRef.current) return;
-    QRCodeLib.toCanvas(canvasRef.current, voucher.qr_payload, {
+    if (!open) return;
+    let cancelled = false;
+    QRCodeLib.toDataURL(voucher.qr_payload, {
       width: 280,
       margin: 1,
       color: { dark: "#000000", light: "#ffffff" },
-    }).catch(() => { /* noop */ });
+    })
+      .then((url) => { if (!cancelled) setQrDataUrl(url); })
+      .catch((err) => {
+        console.error("[loyalty.voucher] QR generation failed:", err);
+      });
+    return () => { cancelled = true; };
   }, [open, voucher.qr_payload]);
 
   return (
@@ -298,8 +308,19 @@ function VoucherDialog({
             your <strong>{packageName}</strong>.
           </DialogDescription>
         </DialogHeader>
-        <div className="flex justify-center py-4">
-          <canvas ref={canvasRef} data-testid="canvas-voucher-qr" />
+        <div className="flex justify-center py-4 min-h-[280px] items-center">
+          {qrDataUrl ? (
+            <img
+              src={qrDataUrl}
+              alt="Free wash QR code"
+              width={280}
+              height={280}
+              className="rounded-md"
+              data-testid="img-voucher-qr"
+            />
+          ) : (
+            <div className="text-xs text-gray-400">Generating QR…</div>
+          )}
         </div>
         <div className="text-center text-xs text-gray-600 space-y-1">
           <div><strong>Plate:</strong> {voucher.plate}</div>
