@@ -2719,10 +2719,22 @@ export async function registerRoutes(app: Express): Promise<Server> {
   // ticket that's already in the queue returns the existing ticket
   // code instead of allocating a new one.
   app.post('/api/verify-qr', requireStaff, async (req, res) => {
-    const { qr_data } = req.body ?? {};
+    const { qr_data, branch_id: scanBranchRaw } = req.body ?? {};
     if (typeof qr_data !== 'string' || qr_data.length === 0) {
       return res.status(400).json({ success: false, message: 'Missing qr_data' });
     }
+
+    // Optional: the cashier's active POS branch. If supplied AND the
+    // QR is a free-wash voucher (qr_provider='loyalty'), we reroute
+    // the voucher to whichever branch is actually scanning it. This
+    // lets a customer redeem on the dashboard for branch A but walk
+    // into branch B and still get served. Pocket-Pay orders are NOT
+    // rerouted — those were paid against a chosen branch and the
+    // capacity/queue was committed there.
+    const scanBranchId =
+      typeof scanBranchRaw === 'number' && Number.isInteger(scanBranchRaw) && scanBranchRaw > 0
+        ? scanBranchRaw
+        : null;
 
     let paymentData: any;
     try {
@@ -2742,6 +2754,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
         const orderRows = (await tx.execute(sql`
           SELECT o.id, o.branch_id, o.status, o.ticket_code, o.plate,
                  o.package_name, o.total_cents, o.payment_ref,
+                 o.qr_provider,
                  o.vehicle_id, o.customer_id,
                  b.name AS branch_name,
                  c.name AS customer_name, c.phone AS customer_phone
@@ -2766,6 +2779,36 @@ export async function registerRoutes(app: Express): Promise<Server> {
         }
         if (order.status === 'voided' || order.status === 'refunded') {
           return { http: 409, body: { success: false, code: order.status, message: `Order is ${order.status}. Do not service this car.` } };
+        }
+
+        // 2b. Free-wash branch reroute. Only when the order hasn't
+        //     been ticketed yet (status='paid', ticket_code IS NULL).
+        //     Once a ticket is in the queue we leave it alone so the
+        //     idempotent re-scan path still returns the same ticket.
+        if (
+          order.qr_provider === 'loyalty' &&
+          scanBranchId !== null &&
+          order.status === 'paid' &&
+          !order.ticket_code &&
+          Number(order.branch_id) !== scanBranchId
+        ) {
+          const newBranchRow = (await tx.execute(sql`
+            SELECT name FROM branches WHERE id = ${scanBranchId} LIMIT 1
+          `)).rows[0] as any;
+          if (newBranchRow) {
+            await tx.execute(sql`
+              UPDATE orders SET branch_id = ${scanBranchId} WHERE id = ${order.id}
+            `);
+            // Mirror the redemption row so reports tie back to the
+            // serving branch instead of the originally-picked one.
+            await tx.execute(sql`
+              UPDATE loyalty_redemptions
+                 SET branch_id = ${scanBranchId}
+               WHERE voucher_order_id = ${order.id}
+            `);
+            order.branch_id = scanBranchId;
+            order.branch_name = newBranchRow.name;
+          }
         }
 
         // 3. Already in the queue — return existing ticket (idempotent rescan).

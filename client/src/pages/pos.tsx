@@ -1528,10 +1528,16 @@ export default function POS() {
           <DialogHeader>
             <DialogTitle className="flex items-center gap-2">
               <QrCode className="w-5 h-5 text-cuci-primary" />
-              Prepaid Scan-In
+              Scan-In · Prepaid or Free-wash QR
             </DialogTitle>
           </DialogHeader>
-          <ScanInTab />
+          {/* Pass the active POS branch so free-wash vouchers get
+              rerouted to this lane on scan instead of staying tied
+              to whichever branch the customer chose at redemption. */}
+          <ScanInTab
+            branchId={branchId}
+            branchName={branchId !== null ? BRANCH_NAME_BY_ID[branchId] ?? null : null}
+          />
         </DialogContent>
       </Dialog>
     </div>

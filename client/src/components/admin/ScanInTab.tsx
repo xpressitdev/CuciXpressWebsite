@@ -48,7 +48,17 @@ const formatBND = (cents: number) =>
     maximumFractionDigits: 2,
   })}`;
 
-export default function ScanInTab() {
+export default function ScanInTab({
+  branchId,
+  branchName,
+}: {
+  // The active POS branch. When supplied, free-wash vouchers get
+  // rerouted server-side to *this* branch on first scan. Omit on
+  // the admin scan-in page where there is no per-branch context —
+  // the server then falls back to the voucher's original branch.
+  branchId?: number | null;
+  branchName?: string | null;
+} = {}) {
   const { toast } = useToast();
   const scannerRef = useRef<any>(null);
   const inFlightRef = useRef(false);
@@ -91,7 +101,12 @@ export default function ScanInTab() {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         credentials: "include",
-        body: JSON.stringify({ qr_data: qrData }),
+        body: JSON.stringify({
+          qr_data: qrData,
+          // Lets the server reroute a free-wash voucher to the
+          // scanning branch instead of the customer's chosen one.
+          ...(branchId != null ? { branch_id: branchId } : {}),
+        }),
       });
       const body = await res.json().catch(() => ({}));
       if (res.ok && body?.success) {
@@ -227,12 +242,20 @@ export default function ScanInTab() {
         <CardHeader>
           <CardTitle className="flex items-center gap-2 text-xl">
             <QrCode className="w-6 h-6 text-cuci-primary" />
-            Prepaid Scan-In
+            Scan-In · Prepaid or Free-wash QR
           </CardTitle>
           <p className="text-sm text-gray-600 mt-1">
-            Scan the customer's QR receipt at the lane. We'll allocate their
-            ticket and add them to today's queue.
+            Scan any Cuci Xpress QR at the lane — works for web Pocket Pay
+            receipts and for free-wash vouchers from the loyalty card.
+            We'll allocate the ticket and add the car to today's queue
+            {branchName ? ` at ${branchName}` : ""}.
           </p>
+          {branchId != null && (
+            <p className="text-xs text-gray-500 mt-1">
+              Free-wash vouchers will be served at this branch even if the
+              customer originally picked a different one when redeeming.
+            </p>
+          )}
         </CardHeader>
       </Card>
 
