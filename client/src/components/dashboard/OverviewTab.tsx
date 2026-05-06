@@ -252,51 +252,110 @@ function ActiveSubscriptionMini({
   membership: MembershipRow;
   onManage: () => void;
 }) {
+  // Compact twinkles tuned for the smaller overview-tab card.
+  const TWINKLES = [
+    { top: 10,  left: "55%", size: 11, delay: "0s"   },
+    { top: 70,  left: "12%", size: 8,  delay: "0.3s" },
+    { top: 40,  left: "85%", size: 8,  delay: "0.6s" },
+    { top: 180, left: "75%", size: 10, delay: "1.2s" },
+    { top: 230, left: "20%", size: 9,  delay: "1.8s" },
+  ];
+
   return (
     <div
-      className="rounded-2xl bg-gray-900 text-white p-5 h-full flex flex-col"
+      className="relative overflow-hidden rounded-2xl text-white p-5 h-full flex flex-col"
+      style={{
+        background:
+          "linear-gradient(135deg, #7C5CE7 0%, #B47CF7 45%, #FF9500 100%)",
+        boxShadow:
+          "0 0 40px rgba(255,149,0,0.35), 0 0 70px rgba(124,92,231,0.3)",
+      }}
       data-testid="card-subscription-mini"
     >
-      <div className="flex items-center justify-between mb-2">
-        <h3 className="text-base font-bold">Your subscription</h3>
-        <span className="text-amber-400 text-lg">👑</span>
+      {/* Same gloss + shimmer + twinkles as the SubscriptionTab active card. */}
+      <div className="cuci-gloss" aria-hidden />
+      <div className="cuci-shimmer-wrap" aria-hidden />
+      {TWINKLES.map((t, ti) => (
+        <svg
+          key={ti}
+          className="cuci-twinkle"
+          width={t.size}
+          height={t.size}
+          viewBox="0 0 24 24"
+          style={{ top: t.top, left: t.left, animationDelay: t.delay }}
+          aria-hidden
+        >
+          <path
+            d="M12 0 L13.5 10.5 L24 12 L13.5 13.5 L12 24 L10.5 13.5 L0 12 L10.5 10.5 Z"
+            fill="#fff"
+          />
+        </svg>
+      ))}
+
+      <div className="relative flex flex-col flex-1" style={{ zIndex: 1 }}>
+        <div className="flex items-center justify-between mb-2">
+          <h3 className="text-base font-bold">Your subscription</h3>
+          <span style={{ color: "#FFE89E" }} className="text-lg">👑</span>
+        </div>
+        <span
+          className="self-start text-[10px] uppercase font-extrabold px-2 py-0.5 rounded"
+          style={{
+            background: "#FF9500",
+            color: "#1a1208",
+            border: "1.5px solid rgba(0,0,0,0.6)",
+            letterSpacing: 1.1,
+          }}
+        >
+          {membership.kind === "unlimited" ? "Unlimited" : "Wash Pack"}
+        </span>
+        <p
+          className="text-xs mt-3"
+          style={{ color: "rgba(255,255,255,0.85)" }}
+        >
+          Active until
+        </p>
+        <p
+          className="text-xl font-black"
+          style={{ textShadow: "0 2px 12px rgba(0,0,0,0.2)" }}
+        >
+          {membership.expires_at
+            ? new Date(membership.expires_at).toLocaleDateString("en-GB", {
+                day: "numeric",
+                month: "short",
+                year: "numeric",
+              })
+            : "Ongoing"}
+        </p>
+        <div
+          className="my-3"
+          style={{ borderTop: "1px solid rgba(255,255,255,0.25)" }}
+        />
+        <dl className="text-xs space-y-1.5">
+          <Stat
+            label="Plan"
+            value={
+              membership.kind === "unlimited" ? "Unlimited Xpress" : "Wash Pack"
+            }
+          />
+          <Stat label="Price" value={formatBNDFull(membership.price_cents)} />
+          <Stat
+            label="Remaining"
+            value={
+              membership.kind === "unlimited"
+                ? "Unlimited"
+                : `${membership.remaining_washes} / ${membership.total_washes}`
+            }
+          />
+        </dl>
+        <button
+          onClick={onManage}
+          className="mt-auto pt-4 text-xs font-bold hover:underline self-start"
+          style={{ color: "#FFE89E" }}
+          data-testid="link-manage-subscription"
+        >
+          Manage →
+        </button>
       </div>
-      <span className="self-start text-[10px] uppercase font-bold bg-amber-500 text-white px-2 py-0.5 rounded">
-        {membership.kind === "unlimited" ? "Unlimited" : "Wash Pack"}
-      </span>
-      <p className="text-xs text-gray-400 mt-3">Active until</p>
-      <p className="text-xl font-black">
-        {membership.expires_at
-          ? new Date(membership.expires_at).toLocaleDateString("en-GB", {
-              day: "numeric",
-              month: "short",
-              year: "numeric",
-            })
-          : "Ongoing"}
-      </p>
-      <div className="border-t border-gray-700 my-3" />
-      <dl className="text-xs space-y-1.5">
-        <Stat
-          label="Plan"
-          value={membership.kind === "unlimited" ? "Unlimited Xpress" : "Wash Pack"}
-        />
-        <Stat label="Price" value={formatBNDFull(membership.price_cents)} />
-        <Stat
-          label="Remaining"
-          value={
-            membership.kind === "unlimited"
-              ? "Unlimited"
-              : `${membership.remaining_washes} / ${membership.total_washes}`
-          }
-        />
-      </dl>
-      <button
-        onClick={onManage}
-        className="mt-auto pt-4 text-xs text-amber-400 hover:underline self-start"
-        data-testid="link-manage-subscription"
-      >
-        Manage →
-      </button>
     </div>
   );
 }
@@ -323,10 +382,12 @@ function NoSubscriptionMini({ onSeePlans }: { onSeePlans: () => void }) {
 }
 
 function Stat({ label, value }: { label: string; value: string }) {
+  // Used inside the gradient subscription mini-card — styled for the
+  // light-on-gradient context (white-ish label, bright white value).
   return (
     <div className="flex items-center justify-between">
-      <dt className="text-gray-400">{label}</dt>
-      <dd className="font-bold">{value}</dd>
+      <dt style={{ color: "rgba(255,255,255,0.75)" }}>{label}</dt>
+      <dd className="font-bold text-white">{value}</dd>
     </div>
   );
 }
