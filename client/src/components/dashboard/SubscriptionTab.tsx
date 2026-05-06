@@ -194,7 +194,7 @@ function UpsellCard({
         </h3>
         <ul className="mt-4 space-y-2 text-sm text-gray-700">
           <li>• Wash as often as you want — no per-wash payment</li>
-          <li>• Skip the queue with priority lane</li>
+          <li>• One QR works at every Cuci Xpress branch</li>
           <li>• Cancel anytime, no contracts</li>
         </ul>
       </article>
