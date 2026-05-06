@@ -32,12 +32,55 @@ interface PaymentCheckoutProps {
   onBack?: () => void;
 }
 
+// Single source of truth for the wash packages offered at checkout.
+// Mirrors the cards on the landing page (ServicePricing.tsx) so prices
+// stay aligned across the site.
+const PACKAGES = [
+  {
+    id: "basic",
+    name: "Basic Wash",
+    price: 8,
+    duration: "8 minutes",
+    tagline: "Quick exterior clean",
+    features: [
+      "Exterior foam wash",
+      "High-pressure rinse",
+      "Basic drying",
+      "Drive-thru convenience",
+    ],
+  },
+  {
+    id: "full",
+    name: "Full Package",
+    price: 12,
+    duration: "12 minutes",
+    tagline: "Complete care + wax",
+    features: [
+      "Everything in Basic Wash",
+      "Spray wax",
+      "Tyre shine",
+      "Wheel cleaning",
+    ],
+    popular: true,
+  },
+] as const;
+
+type PackageId = (typeof PACKAGES)[number]["id"];
+
 export default function PaymentCheckout({ selectedService, onBack }: PaymentCheckoutProps) {
   const { toast } = useToast();
   const { user, isAuthenticated, logout, isLoading, checkAuthStatus } = useAuth();
 
   const [isProcessing, setIsProcessing] = useState(false);
   const [showAuth, setShowAuth] = useState(false);
+
+  // Picked package — defaults to whatever the caller suggested via
+  // `selectedService` (matched by name), else Full Package as the
+  // recommended option. Customer can switch in the picker any time.
+  const initialPackageId: PackageId =
+    PACKAGES.find((p) => p.name === selectedService?.name)?.id ?? "full";
+  const [packageId, setPackageId] = useState<PackageId>(initialPackageId);
+  const pkg = PACKAGES.find((p) => p.id === packageId)!;
   // Phone+OTP sign-in state (replaces the old username/password/Google
   // tri-modal). Identical flow to /login, just inline in the checkout
   // modal so the customer never has to leave this page.
@@ -185,12 +228,9 @@ export default function PaymentCheckout({ selectedService, onBack }: PaymentChec
         // Continue with payment even if customer save fails
       }
       
-      // Extract numeric price from string like "BND 12"
-      const numericPrice = parseFloat(selectedService?.price?.replace(/[^\d.]/g, '') || '0');
-      
       const paymentData = {
-        serviceName: selectedService?.name || 'Car Wash Service',
-        amount: numericPrice,
+        serviceName: pkg.name,
+        amount: pkg.price,
         carPlate: formData.carPlate,
         phone: formData.phone,
         selectedBranch: formData.selectedBranch
@@ -263,38 +303,69 @@ export default function PaymentCheckout({ selectedService, onBack }: PaymentChec
                 </CardTitle>
               </CardHeader>
               <CardContent>
-                {selectedService && (
-                  <div className="space-y-4">
-                    <div className="flex justify-between items-start">
-                      <div>
-                        <h3 className="font-semibold text-lg">{selectedService.name}</h3>
-                        <p className="text-gray-600">{selectedService.duration}</p>
-                      </div>
-                      <div className="text-right">
-                        <p className="text-2xl font-bold text-cuci-primary">{selectedService.price}</p>
-                      </div>
-                    </div>
-                    
-                    <div className="border-t pt-4">
-                      <h4 className="font-medium mb-2">Included Features:</h4>
-                      <ul className="space-y-1">
-                        {selectedService.features.map((feature, index) => (
-                          <li key={index} className="text-sm text-gray-600 flex items-start">
-                            <div className="w-2 h-2 rounded-full bg-green-500 mr-2 mt-2 flex-shrink-0"></div>
-                            {feature}
-                          </li>
-                        ))}
-                      </ul>
-                    </div>
+                {/* Package picker — radio cards. Customer can switch
+                    between Basic Wash and Full Package without leaving
+                    the checkout. */}
+                <div className="space-y-2 mb-4">
+                  <h4 className="font-medium text-sm text-gray-700">Choose your wash</h4>
+                  {PACKAGES.map((p) => {
+                    const isSelected = p.id === packageId;
+                    return (
+                      <button
+                        key={p.id}
+                        type="button"
+                        onClick={() => setPackageId(p.id)}
+                        data-testid={`button-pick-pkg-${p.id}`}
+                        className={
+                          "w-full text-left rounded-lg border-2 p-3 transition-all relative " +
+                          (isSelected
+                            ? "border-cuci-primary bg-cuci-primary/5 ring-2 ring-cuci-primary/20"
+                            : "border-gray-200 hover:border-gray-300 bg-white")
+                        }
+                      >
+                        {p.popular && (
+                          <Badge className="absolute -top-2 right-3 bg-cuci-primary text-white text-[10px] px-2 py-0">
+                            Most popular
+                          </Badge>
+                        )}
+                        <div className="flex justify-between items-start gap-3">
+                          <div className="min-w-0">
+                            <p className="font-bold text-gray-900">{p.name}</p>
+                            <p className="text-xs text-gray-500">{p.tagline} · {p.duration}</p>
+                          </div>
+                          <div className="text-right shrink-0">
+                            <p className={"text-xl font-bold " + (isSelected ? "text-cuci-primary" : "text-gray-700")}>
+                              BND {p.price}
+                            </p>
+                          </div>
+                        </div>
+                      </button>
+                    );
+                  })}
+                </div>
 
-                    <div className="border-t pt-4">
-                      <div className="flex justify-between text-lg font-semibold">
-                        <span>Total Amount:</span>
-                        <span className="text-cuci-primary">{selectedService.price}</span>
-                      </div>
+                <div className="border-t pt-4 space-y-4">
+                  <div>
+                    <h4 className="font-medium mb-2 text-sm">What's included:</h4>
+                    <ul className="space-y-1">
+                      {pkg.features.map((feature, index) => (
+                        <li key={index} className="text-sm text-gray-600 flex items-start">
+                          <div className="w-2 h-2 rounded-full bg-green-500 mr-2 mt-2 flex-shrink-0"></div>
+                          {feature}
+                        </li>
+                      ))}
+                    </ul>
+                  </div>
+
+                  <div className="border-t pt-4">
+                    <div className="flex justify-between text-lg font-semibold">
+                      <span>Total Amount:</span>
+                      <span className="text-cuci-primary" data-testid="text-total-amount">
+                        BND {pkg.price}
+                      </span>
                     </div>
                   </div>
-                )}
+                </div>
 
                 {/* Security Notice */}
                 <div className="mt-6 p-4 bg-green-50 border border-green-200 rounded-lg">
@@ -500,7 +571,7 @@ export default function PaymentCheckout({ selectedService, onBack }: PaymentChec
                       Creating Payment Link...
                     </div>
                   ) : (
-                    `Proceed to Payment (${selectedService?.price || 'BND 0'})`
+                    `Proceed to Payment (BND ${pkg.price})`
                   )}
                 </Button>
 
