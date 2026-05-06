@@ -4508,7 +4508,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
             ${pkg.id}, ${pkg.name}, ${pkg.price_cents},
             ${JSON.stringify(addonSnapshots)}::jsonb, ${subtotal}, ${chargedTotal}, ${discountCents},
             ${body.payment_method}, ${body.payment_ref ?? null},
-            ${ticketCode}, 'paid',
+            ${ticketCode}, 'queued',
             ${body.order_notes ?? null}, ${body.item_notes ?? null},
             ${resolvedVehicleId}, ${walkinName},
             ${shiftIdForOrder}
@@ -4557,7 +4557,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
           total_cents: result.chargedTotal,
           discount_cents: result.discountCents,
           payment_method: body.payment_method,
-          status: 'paid',
+          status: 'queued',
           membership: result.redeemMembership
             ? {
                 id: result.redeemMembership.id,
