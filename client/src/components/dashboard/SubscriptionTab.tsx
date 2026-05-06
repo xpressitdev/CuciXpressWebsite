@@ -124,77 +124,123 @@ function ActiveCard({
   const isUnlimited = membership.kind === "unlimited";
   const planName = isUnlimited ? "Unlimited Xpress" : "Wash Pack";
 
+  // 5 twinkles tuned for the dashboard's wider/shorter active card.
+  const TWINKLES = [
+    { top: 14,  left: "62%", size: 13, delay: "0s"   },
+    { top: 96,  left: "20%", size: 10, delay: "0.3s" },
+    { top: 60,  left: "88%", size: 9,  delay: "0.6s" },
+    { top: 200, left: "78%", size: 12, delay: "1.2s" },
+    { top: 250, left: "12%", size: 11, delay: "1.8s" },
+  ];
+
   return (
     <article
-      className="relative flex flex-col"
-      style={CARD_BASE}
+      className="relative overflow-hidden flex flex-col"
+      style={{
+        background:
+          "linear-gradient(135deg, #7C5CE7 0%, #B47CF7 45%, #FF9500 100%)",
+        borderRadius: 20,
+        padding: 28,
+        minHeight: 320,
+        color: "#fff",
+        boxShadow:
+          "0 0 60px rgba(255,149,0,0.45), 0 0 100px rgba(124,92,231,0.35)",
+      }}
       data-testid="card-subscription-active"
     >
-      <div className="flex items-start justify-between">
-        <span
-          className="inline-flex items-center text-[11px] uppercase font-extrabold px-2.5 py-1 rounded"
-          style={{
-            background: "#FF9500",
-            color: "#1a1208",
-            letterSpacing: 1.2,
-          }}
+      {/* Glossy highlight + diagonal shimmer + twinkle stars — same
+          treatment as the Most Picked card on /subscriptions. */}
+      <div className="cuci-gloss" aria-hidden />
+      <div className="cuci-shimmer-wrap" aria-hidden />
+      {TWINKLES.map((t, ti) => (
+        <svg
+          key={ti}
+          className="cuci-twinkle"
+          width={t.size}
+          height={t.size}
+          viewBox="0 0 24 24"
+          style={{ top: t.top, left: t.left, animationDelay: t.delay }}
+          aria-hidden
         >
-          {isUnlimited ? "Unlimited" : "Pack"} · Active
-        </span>
-        <Crown className="w-6 h-6" style={{ color: "#FF9500" }} />
-      </div>
+          <path
+            d="M12 0 L13.5 10.5 L24 12 L13.5 13.5 L12 24 L10.5 13.5 L0 12 L10.5 10.5 Z"
+            fill="#fff"
+          />
+        </svg>
+      ))}
 
-      <h2 className="text-3xl font-black mt-5 text-white tracking-tight">
-        {planName}
-      </h2>
-      <p className="text-sm mt-1" style={{ color: "rgba(255,255,255,0.55)" }}>
-        {formatBNDFull(membership.price_cents)}/mo · Renews {renewLabel}
-      </p>
+      {/* Foreground content sits above the overlays. */}
+      <div className="relative flex flex-col flex-1" style={{ zIndex: 1 }}>
+        <div className="flex items-start justify-between">
+          <span
+            className="inline-flex items-center text-[11px] uppercase font-extrabold px-2.5 py-1 rounded"
+            style={{
+              background: "#FF9500",
+              color: "#1a1208",
+              border: "1.5px solid rgba(0,0,0,0.6)",
+              letterSpacing: 1.2,
+            }}
+          >
+            {isUnlimited ? "Unlimited" : "Pack"} · Active
+          </span>
+          <Crown className="w-6 h-6" style={{ color: "#FFE89E" }} />
+        </div>
 
-      <div
-        className="my-5"
-        style={{ borderTop: "1px solid rgba(255,255,255,0.1)" }}
-      />
+        <h2
+          className="text-3xl font-black mt-5 text-white tracking-tight"
+          style={{ textShadow: "0 4px 20px rgba(0,0,0,0.25)" }}
+        >
+          {planName}
+        </h2>
+        <p className="text-sm mt-1" style={{ color: "rgba(255,255,255,0.85)" }}>
+          {formatBNDFull(membership.price_cents)}/mo · Renews {renewLabel}
+        </p>
 
-      <p
-        className="text-[11px] uppercase font-bold mb-3"
-        style={{ color: "rgba(255,255,255,0.5)", letterSpacing: 1.4 }}
-      >
-        This billing cycle
-      </p>
-      <div className="grid grid-cols-3 gap-4">
-        <Stat top="Washes" value={String(washesThisMonth)} />
-        <Stat top="Avg per week" value={avgPerWeek} />
-        <Stat
-          top="Saved"
-          value={formatBND(savingsCents)}
-          accentColor="#34D399"
+        <div
+          className="my-5"
+          style={{ borderTop: "1px solid rgba(255,255,255,0.25)" }}
         />
-      </div>
 
-      <div className="flex gap-2 mt-auto pt-6">
-        <button
-          className="px-4 py-2.5 rounded-lg text-sm font-bold"
-          style={{
-            background: "#1f1f24",
-            color: "#fff",
-            border: "1px solid rgba(255,255,255,0.08)",
-          }}
-          data-testid="button-manage-payment"
+        <p
+          className="text-[11px] uppercase font-bold mb-3"
+          style={{ color: "#FFE89E", letterSpacing: 1.4 }}
         >
-          Manage payment
-        </button>
-        <button
-          className="px-4 py-2.5 rounded-lg text-sm font-bold"
-          style={{
-            background: "transparent",
-            color: "#F87171",
-            border: "1px solid rgba(255,255,255,0.18)",
-          }}
-          data-testid="button-cancel-plan"
-        >
-          Cancel plan
-        </button>
+          This billing cycle
+        </p>
+        <div className="grid grid-cols-3 gap-4">
+          <Stat top="Washes" value={String(washesThisMonth)} />
+          <Stat top="Avg per week" value={avgPerWeek} />
+          <Stat
+            top="Saved"
+            value={formatBND(savingsCents)}
+            accentColor="#FFE89E"
+          />
+        </div>
+
+        <div className="flex gap-2 mt-auto pt-6">
+          <button
+            className="px-4 py-2.5 rounded-lg text-sm font-bold"
+            style={{
+              background: "rgba(0,0,0,0.55)",
+              color: "#fff",
+              border: "1px solid rgba(255,255,255,0.25)",
+            }}
+            data-testid="button-manage-payment"
+          >
+            Manage payment
+          </button>
+          <button
+            className="px-4 py-2.5 rounded-lg text-sm font-bold"
+            style={{
+              background: "rgba(255,255,255,0.15)",
+              color: "#fff",
+              border: "1px solid rgba(255,255,255,0.4)",
+            }}
+            data-testid="button-cancel-plan"
+          >
+            Cancel plan
+          </button>
+        </div>
       </div>
     </article>
   );
