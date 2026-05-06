@@ -1,4 +1,4 @@
-import { Crown, Check, Lock, Sparkles, ArrowRight } from "lucide-react";
+import { Crown, Lock, ArrowRight } from "lucide-react";
 import { Link } from "wouter";
 import { MembershipRow, CarRow, formatBND, formatBNDFull } from "./types";
 
@@ -9,17 +9,6 @@ interface Props {
   washesLastMonth: number;
   savedThisCycleCents: number;
 }
-
-// 5 twinkles scattered across the active gradient card. Same offsets
-// as the /subscriptions popular plan but rebalanced for the wider
-// dashboard card aspect ratio.
-const TWINKLES = [
-  { top: 18,  left: "68%", size: 14, delay: "0s"   },
-  { top: 110, left: "18%", size: 10, delay: "0.3s" },
-  { top: 70,  left: "88%", size: 9,  delay: "0.6s" },
-  { top: 220, left: "75%", size: 12, delay: "1.2s" },
-  { top: 280, left: "10%", size: 11, delay: "1.8s" },
-];
 
 export function SubscriptionTab({
   memberships,
@@ -94,11 +83,24 @@ export function SubscriptionTab({
   );
 }
 
+// Shared card chrome — flat, deep-black "physical card" look used by
+// both ActiveCard and InactiveUnlimitedCard so the silhouette stays
+// identical and the only thing that "lights up" on activation is the
+// orange pill and content. Matches the design sample.
+const CARD_BASE: React.CSSProperties = {
+  background: "#0F0F12",
+  borderRadius: 20,
+  padding: 28,
+  minHeight: 320,
+  color: "#fff",
+};
+
 // ----------------------------------------------------------------------
-// ActiveCard — gradient/glowing version shown when the customer has a
-// paid Unlimited (or Pack) membership in `active` state. Mirrors the
-// premium "popular" card on /subscriptions so members see the same
-// jewel they bought, but adapted to the dashboard's wider aspect.
+// ActiveCard — black "physical card" shown when the customer has a
+// paid membership in `active` state. Mirrors the attached design
+// sample: orange UNLIMITED · ACTIVE pill, big white plan name, BND
+// price + renewal, hairline divider, billing-cycle stats, then dark
+// Manage / outlined Cancel buttons.
 // ----------------------------------------------------------------------
 function ActiveCard({
   membership,
@@ -123,263 +125,176 @@ function ActiveCard({
   const planName = isUnlimited ? "Unlimited Xpress" : "Wash Pack";
 
   return (
-    <div className="relative" data-testid="card-subscription-active">
-      <div
-        className="relative overflow-hidden flex flex-col"
-        style={{
-          background:
-            "linear-gradient(135deg, #7C5CE7 0%, #B47CF7 45%, #FF9500 100%)",
-          border: "2px solid #000",
-          borderRadius: 20,
-          padding: 28,
-          boxShadow:
-            "8px 8px 0 0 rgba(0,0,0,0.92), 0 0 60px rgba(255,149,0,0.45), 0 0 100px rgba(124,92,231,0.35)",
-          minHeight: 360,
-        }}
-      >
-        {/* Glossy double-radial highlight */}
-        <div className="cuci-gloss" aria-hidden />
-        {/* Diagonal shimmer streak */}
-        <div className="cuci-shimmer-wrap" aria-hidden />
-        {/* Twinkle stars */}
-        {TWINKLES.map((t, ti) => (
-          <svg
-            key={ti}
-            className="cuci-twinkle"
-            width={t.size}
-            height={t.size}
-            viewBox="0 0 24 24"
-            style={{ top: t.top, left: t.left, animationDelay: t.delay }}
-            aria-hidden
-          >
-            <path
-              d="M12 0 L13.5 10.5 L24 12 L13.5 13.5 L12 24 L10.5 13.5 L0 12 L10.5 10.5 Z"
-              fill="#fff"
-            />
-          </svg>
-        ))}
-
-        {/* Foreground content */}
-        <div className="relative flex flex-col flex-1" style={{ zIndex: 1 }}>
-          <div className="flex items-start justify-between">
-            <span
-              className="inline-flex items-center gap-1.5 text-[11px] uppercase font-extrabold px-2.5 py-1 rounded-full"
-              style={{
-                background: "#FF9500",
-                color: "#000",
-                border: "2px solid #000",
-                letterSpacing: 1,
-              }}
-            >
-              <Sparkles className="w-3 h-3" /> {isUnlimited ? "Unlimited" : "Pack"} · Active
-            </span>
-            <Crown className="w-6 h-6" style={{ color: "#FFE89E" }} />
-          </div>
-
-          <div
-            style={{
-              fontSize: 12,
-              fontWeight: 800,
-              color: "#FFE89E",
-              textTransform: "uppercase",
-              letterSpacing: 1.4,
-              marginTop: 18,
-            }}
-          >
-            Member · {isUnlimited ? "Unlimited" : "Pack"}
-          </div>
-          <h2
-            className="text-3xl font-black mt-1"
-            style={{ color: "#fff", textShadow: "0 4px 20px rgba(0,0,0,0.18)" }}
-          >
-            {planName}
-          </h2>
-          <p
-            className="text-sm mt-1"
-            style={{ color: "rgba(255,255,255,0.9)" }}
-          >
-            {formatBNDFull(membership.price_cents)}/mo · Renews {renewLabel}
-          </p>
-
-          <div
-            className="my-5"
-            style={{
-              borderTop: "1px solid rgba(255,255,255,0.25)",
-            }}
-          />
-
-          <p
-            className="text-[11px] uppercase font-bold mb-3"
-            style={{ color: "rgba(255,255,255,0.85)", letterSpacing: 1.2 }}
-          >
-            This billing cycle
-          </p>
-          <div className="grid grid-cols-3 gap-4">
-            <Stat top="Washes" value={String(washesThisMonth)} />
-            <Stat top="Avg / week" value={avgPerWeek} />
-            <Stat
-              top="Saved"
-              value={formatBND(savingsCents)}
-              accentColor="#FFE89E"
-            />
-          </div>
-
-          <div className="flex gap-2 mt-auto pt-6">
-            <button
-              className="px-4 py-2 rounded-lg text-sm font-bold"
-              style={{
-                background: "rgba(0,0,0,0.55)",
-                color: "#fff",
-                border: "1px solid rgba(255,255,255,0.25)",
-              }}
-              data-testid="button-manage-payment"
-            >
-              Manage payment
-            </button>
-            <button
-              className="px-4 py-2 rounded-lg text-sm font-bold"
-              style={{
-                background: "rgba(255,255,255,0.15)",
-                color: "#fff",
-                border: "1px solid rgba(255,255,255,0.4)",
-              }}
-              data-testid="button-cancel-plan"
-            >
-              Cancel plan
-            </button>
-          </div>
-        </div>
+    <article
+      className="relative flex flex-col"
+      style={CARD_BASE}
+      data-testid="card-subscription-active"
+    >
+      <div className="flex items-start justify-between">
+        <span
+          className="inline-flex items-center text-[11px] uppercase font-extrabold px-2.5 py-1 rounded"
+          style={{
+            background: "#FF9500",
+            color: "#1a1208",
+            letterSpacing: 1.2,
+          }}
+        >
+          {isUnlimited ? "Unlimited" : "Pack"} · Active
+        </span>
+        <Crown className="w-6 h-6" style={{ color: "#FF9500" }} />
       </div>
-    </div>
+
+      <h2 className="text-3xl font-black mt-5 text-white tracking-tight">
+        {planName}
+      </h2>
+      <p className="text-sm mt-1" style={{ color: "rgba(255,255,255,0.55)" }}>
+        {formatBNDFull(membership.price_cents)}/mo · Renews {renewLabel}
+      </p>
+
+      <div
+        className="my-5"
+        style={{ borderTop: "1px solid rgba(255,255,255,0.1)" }}
+      />
+
+      <p
+        className="text-[11px] uppercase font-bold mb-3"
+        style={{ color: "rgba(255,255,255,0.5)", letterSpacing: 1.4 }}
+      >
+        This billing cycle
+      </p>
+      <div className="grid grid-cols-3 gap-4">
+        <Stat top="Washes" value={String(washesThisMonth)} />
+        <Stat top="Avg per week" value={avgPerWeek} />
+        <Stat
+          top="Saved"
+          value={formatBND(savingsCents)}
+          accentColor="#34D399"
+        />
+      </div>
+
+      <div className="flex gap-2 mt-auto pt-6">
+        <button
+          className="px-4 py-2.5 rounded-lg text-sm font-bold"
+          style={{
+            background: "#1f1f24",
+            color: "#fff",
+            border: "1px solid rgba(255,255,255,0.08)",
+          }}
+          data-testid="button-manage-payment"
+        >
+          Manage payment
+        </button>
+        <button
+          className="px-4 py-2.5 rounded-lg text-sm font-bold"
+          style={{
+            background: "transparent",
+            color: "#F87171",
+            border: "1px solid rgba(255,255,255,0.18)",
+          }}
+          data-testid="button-cancel-plan"
+        >
+          Cancel plan
+        </button>
+      </div>
+    </article>
   );
 }
 
 // ----------------------------------------------------------------------
-// InactiveUnlimitedCard — black "locked" version of the Unlimited card
-// shown when the customer has no active membership. Same silhouette as
-// the active card so the gradient feels like an obvious upgrade.
+// InactiveUnlimitedCard — same "physical card" silhouette as the
+// active version, but with a muted gray pill, a locked crown, and a
+// white Subscribe CTA. Same minHeight + padding as ActiveCard so the
+// page doesn't reflow when membership flips on.
 // ----------------------------------------------------------------------
 function InactiveUnlimitedCard() {
   const features = [
     "Unlimited exterior washes",
     "1 registered vehicle",
-    "1 wash per day cap",
-    "All 4 branches included",
+    "All 5 branches included",
+    "Rain re-wash on us",
   ];
 
   return (
-    <div className="relative" data-testid="card-subscription-empty">
-      <div
-        className="relative overflow-hidden flex flex-col"
-        style={{
-          background:
-            "radial-gradient(circle at 0% 0%, #1f1f23 0%, #0a0a0c 70%)",
-          border: "2px solid #000",
-          borderRadius: 20,
-          padding: 28,
-          boxShadow: "8px 8px 0 0 rgba(0,0,0,0.92)",
-          minHeight: 360,
-        }}
-      >
-        <div className="relative flex flex-col flex-1" style={{ zIndex: 1 }}>
-          <div className="flex items-start justify-between">
-            <span
-              className="inline-flex items-center gap-1.5 text-[11px] uppercase font-extrabold px-2.5 py-1 rounded-full"
-              style={{
-                background: "rgba(255,255,255,0.08)",
-                color: "rgba(255,255,255,0.7)",
-                border: "1px solid rgba(255,255,255,0.2)",
-                letterSpacing: 1,
-              }}
-            >
-              <Lock className="w-3 h-3" /> Unlimited · Not active
-            </span>
-            <Crown
-              className="w-6 h-6"
-              style={{ color: "rgba(255,255,255,0.25)" }}
-            />
-          </div>
-
-          <div
-            style={{
-              fontSize: 12,
-              fontWeight: 800,
-              color: "rgba(255,255,255,0.45)",
-              textTransform: "uppercase",
-              letterSpacing: 1.4,
-              marginTop: 18,
-            }}
-          >
-            Member · Unlimited
-          </div>
-          <h2 className="text-3xl font-black mt-1 text-white">
-            Unlimited Xpress
-          </h2>
-          <p className="text-sm mt-1 text-gray-400">
-            BND 60/mo · Single car · all branches
-          </p>
-
-          <div
-            className="my-5"
-            style={{ borderTop: "1px solid rgba(255,255,255,0.1)" }}
-          />
-
-          <ul className="space-y-2 mb-5">
-            {features.map((f) => (
-              <li
-                key={f}
-                className="flex items-center gap-2.5 text-sm"
-                style={{ color: "rgba(255,255,255,0.78)" }}
-              >
-                <span
-                  className="flex items-center justify-center flex-shrink-0"
-                  style={{
-                    width: 18,
-                    height: 18,
-                    borderRadius: "50%",
-                    background: "rgba(255,255,255,0.08)",
-                    border: "1px solid rgba(255,255,255,0.18)",
-                  }}
-                >
-                  <Check
-                    className="w-3 h-3"
-                    strokeWidth={3.5}
-                    style={{ color: "rgba(255,255,255,0.55)" }}
-                  />
-                </span>
-                <span>{f}</span>
-              </li>
-            ))}
-          </ul>
-
-          <div className="mt-auto">
-            <Link
-              href="/subscriptions"
-              className="inline-flex w-full items-center justify-center gap-1.5 px-4 py-3 rounded-lg font-extrabold cuci-cta"
-              style={{
-                background: "#fff",
-                color: "#7C5CE7",
-              }}
-              data-testid="link-see-plans"
-            >
-              <Sparkles className="w-4 h-4" />
-              Subscribe — BND 60/mo
-              <ArrowRight className="w-4 h-4" />
-            </Link>
-            <p className="text-[11px] text-center text-gray-500 mt-2">
-              Pays for itself after 4 washes · cancel anytime
-            </p>
-          </div>
-        </div>
+    <article
+      className="relative flex flex-col"
+      style={CARD_BASE}
+      data-testid="card-subscription-empty"
+    >
+      <div className="flex items-start justify-between">
+        <span
+          className="inline-flex items-center gap-1.5 text-[11px] uppercase font-extrabold px-2.5 py-1 rounded"
+          style={{
+            background: "rgba(255,255,255,0.08)",
+            color: "rgba(255,255,255,0.55)",
+            letterSpacing: 1.2,
+          }}
+        >
+          <Lock className="w-3 h-3" /> Unlimited · Not active
+        </span>
+        <Crown
+          className="w-6 h-6"
+          style={{ color: "rgba(255,255,255,0.18)" }}
+        />
       </div>
-    </div>
+
+      <h2 className="text-3xl font-black mt-5 text-white tracking-tight">
+        Unlimited Xpress
+      </h2>
+      <p className="text-sm mt-1" style={{ color: "rgba(255,255,255,0.55)" }}>
+        BND 60/mo · Single car · all branches
+      </p>
+
+      <div
+        className="my-5"
+        style={{ borderTop: "1px solid rgba(255,255,255,0.1)" }}
+      />
+
+      <ul className="space-y-2 mb-5">
+        {features.map((f) => (
+          <li
+            key={f}
+            className="flex items-center gap-2.5 text-sm"
+            style={{ color: "rgba(255,255,255,0.78)" }}
+          >
+            <span
+              className="text-[#FF9500] font-bold"
+              style={{ fontSize: 14 }}
+            >
+              ✓
+            </span>
+            <span>{f}</span>
+          </li>
+        ))}
+      </ul>
+
+      <div className="mt-auto">
+        <Link
+          href="/subscriptions"
+          className="inline-flex w-full items-center justify-center gap-2 px-4 py-3 rounded-lg font-extrabold text-sm transition-colors"
+          style={{
+            background: "#FF9500",
+            color: "#1a1208",
+          }}
+          data-testid="link-see-plans"
+        >
+          Subscribe — BND 60/mo
+          <ArrowRight className="w-4 h-4" />
+        </Link>
+        <p
+          className="text-[11px] text-center mt-2"
+          style={{ color: "rgba(255,255,255,0.4)" }}
+        >
+          Pays for itself after 4 washes · cancel anytime
+        </p>
+      </div>
+    </article>
   );
 }
 
 // ----------------------------------------------------------------------
 // UpsellCard — Family upgrade pitch (when active + 2+ cars), or a
 // secondary teaser when the customer hasn't upgraded yet / only has
-// one car. Same shape as before; left untouched aside from spacing.
+// one car.
 // ----------------------------------------------------------------------
 function UpsellCard({
   cars,
@@ -467,16 +382,13 @@ function Stat({
     <div>
       <p
         className="text-[10px] uppercase font-bold"
-        style={{ color: "rgba(255,255,255,0.7)", letterSpacing: 1 }}
+        style={{ color: "rgba(255,255,255,0.5)", letterSpacing: 1.2 }}
       >
         {top}
       </p>
       <p
         className="text-2xl font-black mt-0.5"
-        style={{
-          color: accentColor ?? "#fff",
-          textShadow: "0 2px 10px rgba(0,0,0,0.18)",
-        }}
+        style={{ color: accentColor ?? "#fff" }}
       >
         {value}
       </p>

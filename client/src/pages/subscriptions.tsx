@@ -63,9 +63,8 @@ const PLANS: Plan[] = [
     features: [
       "Unlimited exterior washes",
       "1 registered vehicle",
-      "1 wash per day cap",
       "Rain re-wash guarantee",
-      "All 4 branches included",
+      "All 5 branches included",
     ],
     icon: Crown,
     accent: "bg-cuci-primary",
