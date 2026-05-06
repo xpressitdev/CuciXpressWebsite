@@ -374,19 +374,47 @@ function UpsellCard({
 
   if (!showFamilyOffer) {
     return (
-      <article className="rounded-2xl border border-gray-200 p-6 bg-white">
-        <h3 className="text-lg font-bold text-gray-900">Add a second car?</h3>
+      <article
+        className="rounded-2xl border border-gray-200 p-6 bg-white flex flex-col"
+        data-testid="card-subscription-add-car"
+      >
+        <h3 className="text-lg font-bold text-gray-900">
+          Cover the whole family for BND 150/mo
+        </h3>
         <p className="text-sm text-gray-500 mt-1">
-          Family plans cover up to 3 vehicles. Add another car to your account
-          first, then upgrade.
+          Family plan covers up to 3 vehicles on one membership. Add a second
+          car to your account first, then we'll show you the upgrade.
         </p>
+        <div className="mt-4 bg-purple-50 rounded-lg p-3">
+          <p className="text-[11px] uppercase font-bold text-purple-700">
+            What you'd save
+          </p>
+          <p className="text-2xl font-black text-cuci-primary">
+            ~BND 30/mo per extra car
+          </p>
+          <p className="text-[11px] text-gray-500 mt-1">
+            vs. running two separate Unlimited plans
+          </p>
+        </div>
+        <Link
+          href="/dashboard?tab=vehicles"
+          className="mt-auto pt-4"
+          data-testid="link-add-vehicle-from-upsell"
+        >
+          <button
+            className="w-full py-3 rounded-lg font-extrabold text-base cuci-cta"
+            style={{ background: "#FF9500", color: "#1a1208" }}
+          >
+            Add a second car
+          </button>
+        </Link>
       </article>
     );
   }
 
   return (
     <article
-      className="rounded-2xl border border-gray-200 p-6 bg-white"
+      className="rounded-2xl border border-gray-200 p-6 bg-white flex flex-col"
       data-testid="card-subscription-upsell"
     >
       <h3 className="text-lg font-bold text-gray-900">
@@ -406,10 +434,15 @@ function UpsellCard({
         </p>
       </div>
       <button
-        className="mt-4 w-full py-3 bg-cuci-secondary text-gray-900 rounded-lg font-bold border-2 border-black"
+        className="mt-auto pt-4 w-full"
         data-testid="button-upgrade-plan"
       >
-        Upgrade plan
+        <span
+          className="block w-full py-3 rounded-lg font-extrabold text-base cuci-cta"
+          style={{ background: "#FF9500", color: "#1a1208" }}
+        >
+          Upgrade plan
+        </span>
       </button>
     </article>
   );
