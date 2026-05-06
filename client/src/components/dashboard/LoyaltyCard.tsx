@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
-import { Sparkles, Gift, Check, Lock, MapPin } from "lucide-react";
+import { Sparkles, Gift, Check, Lock } from "lucide-react";
 import QRCodeLib from "qrcode";
 import { apiRequest } from "@/lib/queryClient";
 import { useToast } from "@/hooks/use-toast";
@@ -33,8 +33,6 @@ interface LoyaltyResp {
   };
 }
 
-interface BranchOption { id: number; name: string; }
-
 interface Props {
   cars: CarRow[];
 }
@@ -44,7 +42,6 @@ export function LoyaltyCard({ cars }: Props) {
   const { toast } = useToast();
   const [open, setOpen] = useState(false);
   const [showVoucher, setShowVoucher] = useState(false);
-  const [branchId, setBranchId] = useState<string>("");
   const [plate, setPlate] = useState<string>("");
 
   const { data, isLoading } = useQuery<LoyaltyResp>({
@@ -52,18 +49,8 @@ export function LoyaltyCard({ cars }: Props) {
     refetchInterval: 60_000,
   });
 
-  const { data: branchesData } = useQuery<{ branches: BranchOption[] }>({
-    queryKey: ["/api/branches/active"],
-    queryFn: async () => {
-      const r = await fetch("/api/branches/active");
-      if (!r.ok) return { branches: [] };
-      return r.json();
-    },
-  });
-  const branches = branchesData?.branches ?? [];
-
   const redeem = useMutation({
-    mutationFn: async (body: { branch_id: number; plate: string }) => {
+    mutationFn: async (body: { plate: string }) => {
       const r = await apiRequest("POST", "/api/customer/loyalty/redeem", body);
       const j = await r.json();
       if (!r.ok) throw new Error(j.error ?? "redeem_failed");
@@ -136,7 +123,6 @@ export function LoyaltyCard({ cars }: Props) {
           ) : data.can_redeem ? (
             <Button
               onClick={() => {
-                setBranchId(branches[0]?.id ? String(branches[0].id) : "");
                 setPlate(cars[0]?.license_plate ?? "");
                 setOpen(true);
               }}
@@ -187,29 +173,6 @@ export function LoyaltyCard({ cars }: Props) {
           <div className="space-y-3">
             <div>
               <label className="text-xs font-bold uppercase tracking-wider text-gray-600">
-                Branch
-              </label>
-              <Select value={branchId} onValueChange={setBranchId}>
-                <SelectTrigger
-                  className="border-2 border-black"
-                  data-testid="select-redeem-branch"
-                >
-                  <SelectValue placeholder="Pick a branch" />
-                </SelectTrigger>
-                <SelectContent>
-                  {branches.map((b) => (
-                    <SelectItem key={b.id} value={String(b.id)}>{b.name}</SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
-              <p className="text-[11px] text-gray-500 mt-1">
-                <MapPin className="w-3 h-3 inline-block -mt-0.5 mr-1" />
-                You can still redeem at any branch — the QR works everywhere.
-              </p>
-            </div>
-
-            <div>
-              <label className="text-xs font-bold uppercase tracking-wider text-gray-600">
                 Vehicle
               </label>
               <Select value={plate} onValueChange={setPlate}>
@@ -228,6 +191,10 @@ export function LoyaltyCard({ cars }: Props) {
                   ))}
                 </SelectContent>
               </Select>
+              <p className="text-[11px] text-gray-500 mt-2">
+                Drive into any Cuci Xpress branch and show the QR — the lane
+                that scans you adds your free wash to its queue.
+              </p>
             </div>
           </div>
 
@@ -240,10 +207,8 @@ export function LoyaltyCard({ cars }: Props) {
               Cancel
             </Button>
             <Button
-              disabled={!branchId || !plate || redeem.isPending}
-              onClick={() =>
-                redeem.mutate({ branch_id: Number(branchId), plate })
-              }
+              disabled={!plate || redeem.isPending}
+              onClick={() => redeem.mutate({ plate })}
               className="bg-cuci-primary text-white border-2 border-black font-bold"
               data-testid="button-confirm-redeem"
             >

@@ -92,7 +92,6 @@ export default function PaymentCheckout({ selectedService, onBack }: PaymentChec
   const [formData, setFormData] = useState({
     carPlate: "",
     phone: "",
-    selectedBranch: "",
     email: ""
   });
 
@@ -108,14 +107,6 @@ export default function PaymentCheckout({ selectedService, onBack }: PaymentChec
       }));
     }
   }, [user]);
-
-  const branches = [
-    { id: "tungku", name: "Tungku Link" },
-    { id: "salar", name: "Salar" },
-    { id: "bengkurong", name: "Bengkurong" },
-    { id: "tutong", name: "Tutong" }
-  ];
-
 
   const handleInputChange = (field: string, value: string) => {
     setFormData(prev => ({ ...prev, [field]: value }));
@@ -194,7 +185,7 @@ export default function PaymentCheckout({ selectedService, onBack }: PaymentChec
   // (and is shown on the success page + saved to /dashboard). We still
   // accept an email if the customer types one, for a paper-trail.
   const validateForm = () => {
-    const required = ['carPlate', 'phone', 'selectedBranch'];
+    const required = ['carPlate', 'phone'];
     return required.every(field => formData[field as keyof typeof formData]);
   };
 
@@ -202,7 +193,7 @@ export default function PaymentCheckout({ selectedService, onBack }: PaymentChec
     if (!validateForm()) {
       toast({
         title: "Missing Information",
-        description: "Please fill in your car plate, phone number, and branch.",
+        description: "Please fill in your car plate and phone number.",
         variant: "destructive"
       });
       return;
@@ -233,7 +224,6 @@ export default function PaymentCheckout({ selectedService, onBack }: PaymentChec
         amount: pkg.price,
         carPlate: formData.carPlate,
         phone: formData.phone,
-        selectedBranch: formData.selectedBranch
       };
 
       const response = await fetch('/api/process-payment', {
@@ -530,20 +520,16 @@ export default function PaymentCheckout({ selectedService, onBack }: PaymentChec
                     </>
                   )}
 
-                  <div>
-                    <Label htmlFor="selectedBranch">Select Branch *</Label>
-                    <Select value={formData.selectedBranch} onValueChange={(value) => handleInputChange('selectedBranch', value)}>
-                      <SelectTrigger>
-                        <SelectValue placeholder="Choose your preferred branch" />
-                      </SelectTrigger>
-                      <SelectContent>
-                        {branches.map((branch) => (
-                          <SelectItem key={branch.id} value={branch.id}>
-                            {branch.name}
-                          </SelectItem>
-                        ))}
-                      </SelectContent>
-                    </Select>
+                  {/* Branch picker removed (2026-05-06): customers
+                      buy from anywhere and the wash gets allocated to
+                      whichever Cuci Xpress lane scans the QR. */}
+                  <div className="rounded-lg bg-blue-50 border border-blue-200 p-3 text-sm text-blue-900">
+                    <p className="font-medium mb-1">No branch needed</p>
+                    <p className="text-blue-800 text-xs leading-relaxed">
+                      Drive into any Cuci Xpress branch — Tungku Link, Salar,
+                      Bengkurong or Tutong. The lane that scans your QR adds
+                      you to its queue automatically.
+                    </p>
                   </div>
                 </div>
 

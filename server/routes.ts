@@ -2388,8 +2388,10 @@ export async function registerRoutes(app: Express): Promise<Server> {
     try {
       const paymentData = req.body;
       
-      // Validate required fields
-      const requiredFields = ['serviceName', 'amount', 'carPlate', 'phone', 'selectedBranch'];
+      // Validate required fields. Note: branch is intentionally NOT
+      // required — customers buy from anywhere and the branch is set
+      // when they scan the QR at the lane (see /api/verify-qr).
+      const requiredFields = ['serviceName', 'amount', 'carPlate', 'phone'];
       const missingFields = requiredFields.filter(field => !paymentData[field]);
       
       if (missingFields.length > 0) {
@@ -2399,26 +2401,11 @@ export async function registerRoutes(app: Express): Promise<Server> {
         });
       }
 
-      // ── Phase 12a: resolve branch + package BEFORE calling Pocket Pay ──
-      // Frontend sends a slug like "tungku" / "salar" — map to branches.id
-      // (1=Tungku, 2=Salar, 3=Bengkurong, 4=Tutong, 5=Lambak; seeded set).
-      // If the slug doesn't match, we fail fast — the customer's plate +
-      // phone shouldn't be associated with the wrong branch.
-      const BRANCH_ID_BY_SLUG: Record<string, number> = {
-        tungku: 1,
-        salar: 2,
-        bengkurong: 3,
-        tutong: 4,
-        lambak: 5,
-      };
-      const branchSlug = String(paymentData.selectedBranch || '').toLowerCase();
-      const branchId = BRANCH_ID_BY_SLUG[branchSlug];
-      if (!branchId) {
-        return res.status(400).json({
-          success: false,
-          message: `Unknown branch: ${paymentData.selectedBranch}`,
-        });
-      }
+      // Branch-at-scan model (2026-05-06_01): orders insert with
+      // branch_id = NULL. The lane that scans the QR stamps its own
+      // branch_id onto the row in /api/verify-qr. Until then the
+      // order doesn't appear on any POS / live-queue snapshot.
+      const branchId: number | null = null;
 
       // Resolve package: try exact name match first, fall back to amount
       // match (BND price → cents). package_id is nullable on orders, so
@@ -2456,7 +2443,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
           phone: paymentData.phone,
           amount: paymentData.amount,
           service: paymentData.serviceName,
-          branch: paymentData.selectedBranch
+          branch: 'unassigned (set at lane scan)'
         });
 
         // ── Phase 12a: upsert customer + car + insert pending_payment order
@@ -2544,7 +2531,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
           phone: paymentData.phone,
           service: paymentData.serviceName,
           amount: paymentData.amount,
-          branch: paymentData.selectedBranch
+          branch: 'unassigned'
         }).then(kedaiResult => {
           if (kedaiResult.success) {
             console.log('Order created in KedaiPOS:', kedaiResult.kedai_order_id);
@@ -2565,7 +2552,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
             order_ref: result.order_ref,
             service: paymentData.serviceName,
             amount: paymentData.amount,
-            branch: paymentData.selectedBranch,
+            branch: null,
             car_plate: paymentData.carPlate,
             phone: paymentData.phone,
             success_indicator: result.success_indicator
@@ -2724,13 +2711,13 @@ export async function registerRoutes(app: Express): Promise<Server> {
       return res.status(400).json({ success: false, message: 'Missing qr_data' });
     }
 
-    // Optional: the cashier's active POS branch. If supplied AND the
-    // QR is a free-wash voucher (qr_provider='loyalty'), we reroute
-    // the voucher to whichever branch is actually scanning it. This
-    // lets a customer redeem on the dashboard for branch A but walk
-    // into branch B and still get served. Pocket-Pay orders are NOT
-    // rerouted — those were paid against a chosen branch and the
-    // capacity/queue was committed there.
+    // The cashier's active POS branch. Required for the lane scan to
+    // assign the order to a branch (branch-at-scan model, 2026-05-06_01)
+    // — orders are created branchless from web checkout / loyalty
+    // redeem, and only land on a POS / live queue once a lane scans
+    // their QR. The standalone admin scan-in page (no per-branch
+    // context) can still scan, but a branchless order without a scan
+    // branch can't be ticketed; we surface a clear error in that case.
     const scanBranchId =
       typeof scanBranchRaw === 'number' && Number.isInteger(scanBranchRaw) && scanBranchRaw > 0
         ? scanBranchRaw
@@ -2781,33 +2768,45 @@ export async function registerRoutes(app: Express): Promise<Server> {
           return { http: 409, body: { success: false, code: order.status, message: `Order is ${order.status}. Do not service this car.` } };
         }
 
-        // 2b. Free-wash branch reroute. Only when the order hasn't
-        //     been ticketed yet (status='paid', ticket_code IS NULL).
-        //     Once a ticket is in the queue we leave it alone so the
-        //     idempotent re-scan path still returns the same ticket.
-        if (
-          order.qr_provider === 'loyalty' &&
-          scanBranchId !== null &&
-          order.status === 'paid' &&
-          !order.ticket_code &&
-          Number(order.branch_id) !== scanBranchId
-        ) {
-          const newBranchRow = (await tx.execute(sql`
-            SELECT name FROM branches WHERE id = ${scanBranchId} LIMIT 1
-          `)).rows[0] as any;
-          if (newBranchRow) {
-            await tx.execute(sql`
-              UPDATE orders SET branch_id = ${scanBranchId} WHERE id = ${order.id}
-            `);
-            // Mirror the redemption row so reports tie back to the
-            // serving branch instead of the originally-picked one.
-            await tx.execute(sql`
-              UPDATE loyalty_redemptions
-                 SET branch_id = ${scanBranchId}
-               WHERE voucher_order_id = ${order.id}
-            `);
-            order.branch_id = scanBranchId;
-            order.branch_name = newBranchRow.name;
+        // 2b. Branch-at-scan stamping (2026-05-06_01). Web orders and
+        //     free-wash vouchers are created branchless. The first
+        //     scan stamps the cashier's branch onto the order so it
+        //     appears on that POS + queue. Re-scans (status already
+        //     queued/washing/done) leave branch_id alone so the order
+        //     stays on the lane that started it.
+        if (order.status === 'paid' && !order.ticket_code) {
+          if (scanBranchId === null) {
+            // Standalone admin scan-in page can't ticket a branchless
+            // order — there's no lane context. Surface a clear error.
+            if (order.branch_id == null) {
+              return {
+                http: 400,
+                body: {
+                  success: false,
+                  code: 'branch_required',
+                  message: 'This QR has no branch yet. Scan it from a POS lane (which knows its branch) instead of the admin scan-in page.',
+                },
+              };
+            }
+            // Order already has a branch (legacy row) — fall through.
+          } else if (Number(order.branch_id ?? -1) !== scanBranchId) {
+            const newBranchRow = (await tx.execute(sql`
+              SELECT name FROM branches WHERE id = ${scanBranchId} LIMIT 1
+            `)).rows[0] as any;
+            if (newBranchRow) {
+              await tx.execute(sql`
+                UPDATE orders SET branch_id = ${scanBranchId} WHERE id = ${order.id}
+              `);
+              if (order.qr_provider === 'loyalty') {
+                await tx.execute(sql`
+                  UPDATE loyalty_redemptions
+                     SET branch_id = ${scanBranchId}
+                   WHERE voucher_order_id = ${order.id}
+                `);
+              }
+              order.branch_id = scanBranchId;
+              order.branch_name = newBranchRow.name;
+            }
           }
         }
 
@@ -3708,21 +3707,23 @@ export async function registerRoutes(app: Express): Promise<Server> {
   });
 
   // POST /api/customer/loyalty/redeem
-  // Body: { branch_id: number, plate: string }
+  // Body: { plate: string }
   // Atomically: (a) re-checks eligible count under FOR UPDATE,
-  // (b) creates a B$0 voucher order at the chosen branch+plate,
+  // (b) creates a B$0 branchless voucher order for the plate,
   // (c) writes the loyalty_redemption row, (d) marks the 4 oldest
   // eligible orders consumed. Returns the QR payload the dashboard
   // renders for the customer to show at the lane.
+  //
+  // Branch-at-scan model (2026-05-06_01): voucher is created without
+  // a branch — the branch is stamped on by /api/verify-qr when the
+  // cashier scans the QR at any lane.
   const redeemSchema = z.object({
-    branch_id: z.number().int().positive(),
     plate: z.string().trim().min(1).max(20),
   });
   app.post('/api/customer/loyalty/redeem', requireLuciaUser, async (req, res) => {
     const parsed = redeemSchema.safeParse(req.body);
     if (!parsed.success) return res.status(400).json({ error: 'invalid_request' });
     const userId = Number(req.lucia!.user!.id);
-    const branchId = parsed.data.branch_id;
     const plate = parsed.data.plate.toUpperCase().replace(/\s+/g, ' ').trim();
 
     try {
@@ -3739,12 +3740,6 @@ export async function registerRoutes(app: Express): Promise<Server> {
         if (existing) {
           return { http: 409, body: { error: 'voucher_pending', voucher_order_id: existing.id } };
         }
-
-        // Branch + package sanity.
-        const branch = (await tx.execute(sql`
-          SELECT id, name FROM branches WHERE id = ${branchId} LIMIT 1
-        `)).rows[0] as any;
-        if (!branch) return { http: 400, body: { error: 'branch_not_found' } };
 
         const pkg = (await tx.execute(sql`
           SELECT id, name, price_cents FROM packages WHERE id = ${LOYALTY_PKG_ID} LIMIT 1
@@ -3776,6 +3771,8 @@ export async function registerRoutes(app: Express): Promise<Server> {
         // can find it; that endpoint already widens to qr_provider IN
         // ('pocket_pay','loyalty') so the same scan flow allocates a
         // T-NNN ticket and flips paid → queued at the lane.
+        // Branchless voucher order — branch_id stays NULL until a
+        // cashier scans the QR at a lane.
         await tx.execute(sql`
           INSERT INTO orders (
             id, branch_id, customer_id, plate,
@@ -3784,7 +3781,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
             payment_method, payment_ref, qr_provider,
             ticket_code, status, customer_name_walkin
           ) VALUES (
-            ${voucherId}, ${branchId}, ${userId}, ${plate},
+            ${voucherId}, NULL, ${userId}, ${plate},
             ${pkg.id}, ${pkg.name}, 0,
             '[]'::jsonb, 0, 0,
             'voucher', ${redemptionId}, 'loyalty',
@@ -3796,7 +3793,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
           INSERT INTO loyalty_redemptions
             (id, customer_user_id, voucher_order_id, package_id, branch_id)
           VALUES
-            (${redemptionId}, ${userId}, ${voucherId}, ${LOYALTY_PKG_ID}, ${branchId})
+            (${redemptionId}, ${userId}, ${voucherId}, ${LOYALTY_PKG_ID}, NULL)
         `);
 
         // Punch the 4 receipts. Loop instead of ANY(array) — Drizzle's
@@ -3817,8 +3814,9 @@ export async function registerRoutes(app: Express): Promise<Server> {
             voucher: {
               order_id: voucherId,
               payment_ref: redemptionId,
-              branch_id: branchId,
-              branch_name: branch.name,
+              // Branch is set when the QR is scanned at the lane.
+              branch_id: null,
+              branch_name: null,
               plate,
               package_name: pkg.name,
               qr_payload: JSON.stringify({

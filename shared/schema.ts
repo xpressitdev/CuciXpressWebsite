@@ -445,7 +445,11 @@ export type OrderAddonSnapshot = {
 
 export const orders = pgTable("orders", {
   id: text("id").primaryKey(),
-  branch_id: integer("branch_id").references(() => branches.id).notNull(),
+  // Nullable since 2026-05-06_01: customers buy a wash without picking
+  // a branch — the branch is stamped onto the order at scan-in time
+  // (verify-qr writes the scanning cashier's branch). Until then the
+  // order is "branchless" and doesn't show on any POS / queue snapshot.
+  branch_id: integer("branch_id").references(() => branches.id),
   lane_id: text("lane_id").references(() => lanes.id),
   customer_id: integer("customer_id").references(() => users.id),
   staff_id: text("staff_id").references(() => staff.id),
@@ -586,7 +590,9 @@ export const loyaltyRedemptions = pgTable("loyalty_redemptions", {
   customer_user_id: integer("customer_user_id").references(() => users.id).notNull(),
   voucher_order_id: text("voucher_order_id").references(() => orders.id).notNull(),
   package_id: text("package_id").notNull(),
-  branch_id: integer("branch_id").references(() => branches.id).notNull(),
+  // Nullable since 2026-05-06_01: free-wash voucher's branch is set
+  // when the customer scans the QR at the lane, not when they redeem.
+  branch_id: integer("branch_id").references(() => branches.id),
   created_at: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
 });
 export type LoyaltyRedemption = typeof loyaltyRedemptions.$inferSelect;
