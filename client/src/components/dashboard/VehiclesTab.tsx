@@ -1,6 +1,6 @@
-import { useState } from "react";
+import { useRef, useState } from "react";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
-import { Pencil, Plus, Car as CarIcon, Loader2 } from "lucide-react";
+import { Pencil, Plus, Car as CarIcon, Loader2, Camera, X } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -25,9 +25,18 @@ interface FormState {
   brand: string;
   model: string;
   color: string;
+  photo_url: string | null;
+  photo_touched: boolean;
 }
 
-const blank: FormState = { license_plate: "", brand: "", model: "", color: "" };
+const blank: FormState = {
+  license_plate: "",
+  brand: "",
+  model: "",
+  color: "",
+  photo_url: null,
+  photo_touched: false,
+};
 
 const relativeAgo = (iso: string | null) => {
   if (!iso) return "Never washed";
@@ -42,12 +51,44 @@ const relativeAgo = (iso: string | null) => {
   return `${Math.floor(days / 365)} year${Math.floor(days / 365) === 1 ? "" : "s"} ago`;
 };
 
+// Browser-side resize + JPEG compress so the photo arrives at the
+// server around ~100-200KB even from a 12MP phone camera. Keeps the
+// orders/cars table from bloating and the data URL well under the
+// 2.8MB cap on the server zod schema.
+async function fileToCompressedDataUrl(file: File): Promise<string> {
+  const dataUrl: string = await new Promise((resolve, reject) => {
+    const fr = new FileReader();
+    fr.onload = () => resolve(fr.result as string);
+    fr.onerror = () => reject(fr.error);
+    fr.readAsDataURL(file);
+  });
+  const img = await new Promise<HTMLImageElement>((resolve, reject) => {
+    const i = new Image();
+    i.onload = () => resolve(i);
+    i.onerror = () => reject(new Error("decode_failed"));
+    i.src = dataUrl;
+  });
+  const MAX = 900;
+  const ratio = Math.min(1, MAX / Math.max(img.width, img.height));
+  const w = Math.round(img.width * ratio);
+  const h = Math.round(img.height * ratio);
+  const canvas = document.createElement("canvas");
+  canvas.width = w;
+  canvas.height = h;
+  const ctx = canvas.getContext("2d");
+  if (!ctx) throw new Error("canvas_unsupported");
+  ctx.drawImage(img, 0, 0, w, h);
+  return canvas.toDataURL("image/jpeg", 0.82);
+}
+
 export function VehiclesTab({ cars }: Props) {
   const qc = useQueryClient();
   const { toast } = useToast();
   const [open, setOpen] = useState(false);
   const [editingId, setEditingId] = useState<number | null>(null);
   const [form, setForm] = useState<FormState>(blank);
+  const [photoBusy, setPhotoBusy] = useState(false);
+  const fileRef = useRef<HTMLInputElement>(null);
 
   const reset = () => {
     setForm(blank);
@@ -65,18 +106,45 @@ export function VehiclesTab({ cars }: Props) {
       brand: c.brand ?? "",
       model: c.model ?? "",
       color: c.color ?? "",
+      photo_url: c.photo_url ?? null,
+      photo_touched: false,
     });
     setOpen(true);
   };
 
+  const onPickPhoto = async (file: File | undefined) => {
+    if (!file) return;
+    if (!file.type.startsWith("image/")) {
+      toast({ title: "Pick an image file", variant: "destructive" });
+      return;
+    }
+    setPhotoBusy(true);
+    try {
+      const compressed = await fileToCompressedDataUrl(file);
+      setForm((f) => ({ ...f, photo_url: compressed, photo_touched: true }));
+    } catch {
+      toast({ title: "Could not read that image", variant: "destructive" });
+    } finally {
+      setPhotoBusy(false);
+      if (fileRef.current) fileRef.current.value = "";
+    }
+  };
+
+  const clearPhoto = () => {
+    setForm((f) => ({ ...f, photo_url: null, photo_touched: true }));
+  };
+
   const save = useMutation({
     mutationFn: async () => {
-      const body = {
+      const body: Record<string, unknown> = {
         license_plate: form.license_plate.trim(),
         brand: form.brand.trim() || null,
         model: form.model.trim() || null,
         color: form.color.trim() || null,
       };
+      // Only send photo_url if the user actually changed it — server
+      // uses key presence to distinguish "leave alone" from "clear".
+      if (form.photo_touched) body.photo_url = form.photo_url;
       const r = editingId
         ? await apiRequest("PATCH", `/api/customer/cars/${editingId}`, body)
         : await apiRequest("POST", "/api/customer/cars", body);
@@ -103,7 +171,7 @@ export function VehiclesTab({ cars }: Props) {
     },
   });
 
-  const canSave = form.license_plate.trim().length > 0 && !save.isPending;
+  const canSave = form.license_plate.trim().length > 0 && !save.isPending && !photoBusy;
 
   return (
     <div className="space-y-5">
@@ -137,7 +205,7 @@ export function VehiclesTab({ cars }: Props) {
             >
               <span
                 className={
-                  "absolute top-3 left-3 text-[10px] uppercase font-bold px-2 py-0.5 rounded " +
+                  "absolute top-3 left-3 z-10 text-[10px] uppercase font-bold px-2 py-0.5 rounded " +
                   (idx === 0
                     ? "bg-cuci-primary/10 text-cuci-primary"
                     : "bg-gray-100 text-gray-600")
@@ -147,15 +215,26 @@ export function VehiclesTab({ cars }: Props) {
               </span>
               <button
                 onClick={() => startEdit(c)}
-                className="absolute top-3 right-3 p-1.5 rounded hover:bg-gray-100"
+                className="absolute top-3 right-3 z-10 p-1.5 rounded bg-white/80 hover:bg-white shadow-sm"
                 data-testid={`button-edit-vehicle-${c.id}`}
                 aria-label="Edit vehicle"
               >
                 <Pencil className="w-4 h-4 text-gray-500" />
               </button>
 
-              <div className="bg-gray-50 rounded-lg h-24 grid place-items-center mb-3 mt-6">
-                <CarIcon className="w-12 h-12 text-gray-300" strokeWidth={1.5} />
+              <div className="bg-gray-50 rounded-lg h-32 overflow-hidden mb-3 mt-6">
+                {c.photo_url ? (
+                  <img
+                    src={c.photo_url}
+                    alt={c.license_plate}
+                    className="w-full h-full object-cover"
+                    data-testid={`img-vehicle-${c.id}`}
+                  />
+                ) : (
+                  <div className="w-full h-full grid place-items-center">
+                    <CarIcon className="w-12 h-12 text-gray-300" strokeWidth={1.5} />
+                  </div>
+                )}
               </div>
 
               <p className="text-lg font-black tracking-wider text-gray-900">
@@ -194,12 +273,66 @@ export function VehiclesTab({ cars }: Props) {
             <DialogTitle>{editingId ? "Edit vehicle" : "Add a vehicle"}</DialogTitle>
             <DialogDescription>
               {editingId
-                ? "Update the brand, model, or colour. The plate stays the same."
+                ? "Update the brand, model, colour or photo. The plate stays the same."
                 : "Save a vehicle to your account so we can recognise it on arrival."}
             </DialogDescription>
           </DialogHeader>
 
           <div className="space-y-3">
+            {/* Photo uploader */}
+            <div>
+              <Label>Photo</Label>
+              <div className="mt-1 flex items-center gap-3">
+                <div className="w-24 h-24 rounded-lg bg-gray-50 border border-gray-200 overflow-hidden grid place-items-center shrink-0">
+                  {photoBusy ? (
+                    <Loader2 className="w-6 h-6 text-gray-400 animate-spin" />
+                  ) : form.photo_url ? (
+                    <img
+                      src={form.photo_url}
+                      alt="Preview"
+                      className="w-full h-full object-cover"
+                      data-testid="img-vehicle-preview"
+                    />
+                  ) : (
+                    <CarIcon className="w-8 h-8 text-gray-300" strokeWidth={1.5} />
+                  )}
+                </div>
+                <div className="flex flex-col gap-2">
+                  <input
+                    ref={fileRef}
+                    type="file"
+                    accept="image/*"
+                    className="hidden"
+                    onChange={(e) => onPickPhoto(e.target.files?.[0])}
+                    data-testid="input-vehicle-photo"
+                  />
+                  <Button
+                    type="button"
+                    variant="outline"
+                    size="sm"
+                    onClick={() => fileRef.current?.click()}
+                    disabled={photoBusy}
+                    data-testid="button-upload-vehicle-photo"
+                  >
+                    <Camera className="w-4 h-4 mr-1.5" />
+                    {form.photo_url ? "Change photo" : "Upload photo"}
+                  </Button>
+                  {form.photo_url && (
+                    <Button
+                      type="button"
+                      variant="ghost"
+                      size="sm"
+                      onClick={clearPhoto}
+                      className="text-red-600 hover:text-red-700"
+                      data-testid="button-remove-vehicle-photo"
+                    >
+                      <X className="w-4 h-4 mr-1" /> Remove
+                    </Button>
+                  )}
+                </div>
+              </div>
+            </div>
+
             <div>
               <Label htmlFor="vh-plate">License plate</Label>
               <Input

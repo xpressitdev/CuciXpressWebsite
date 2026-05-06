@@ -3597,7 +3597,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
     // Per-car total wash count uses a left join + group by on plate so a
     // brand-new car (no orders yet) still shows up with total_washes=0.
     const rows = (await db.execute(sql`
-      SELECT c.id, c.license_plate, c.brand, c.model, c.color, c.last_seen_at,
+      SELECT c.id, c.license_plate, c.brand, c.model, c.color, c.photo_url, c.last_seen_at,
              COALESCE(o.total_washes, 0)::int AS total_washes
       FROM cars c
       LEFT JOIN (
@@ -3838,11 +3838,19 @@ export async function registerRoutes(app: Express): Promise<Server> {
   // POST /api/customer/cars — customer adds one of their vehicles.
   // Plate is normalised to upper-case + trimmed; we de-dupe so the same
   // customer can't have the same plate twice on their list.
+  // photo_url: data: URL (image/jpeg or image/png) capped at ~2MB after
+  // base64 inflation. Client-side resize keeps real-world payloads
+  // around 100-200KB. We accept null to clear the photo.
   const customerCarSchema = z.object({
     license_plate: z.string().trim().min(1).max(20),
     brand: z.string().trim().max(60).optional().nullable(),
     model: z.string().trim().max(60).optional().nullable(),
     color: z.string().trim().max(40).optional().nullable(),
+    photo_url: z.string()
+      .max(2_800_000)
+      .regex(/^data:image\/(jpeg|png|webp);base64,/, 'must be a data: image URL')
+      .optional()
+      .nullable(),
   });
   app.post('/api/customer/cars', requireLuciaUser, async (req, res) => {
     const parsed = customerCarSchema.safeParse(req.body);
@@ -3863,10 +3871,11 @@ export async function registerRoutes(app: Express): Promise<Server> {
       `)).rows[0];
       if (dupe) return res.status(409).json({ ok: false, reason: 'duplicate_plate' });
       const inserted = (await db.execute(sql`
-        INSERT INTO cars (user_id, customer_id, license_plate, brand, model, color)
+        INSERT INTO cars (user_id, customer_id, license_plate, brand, model, color, photo_url)
         VALUES (${userId}, ${cust?.id ?? null}, ${plate},
-                ${parsed.data.brand ?? null}, ${parsed.data.model ?? null}, ${parsed.data.color ?? null})
-        RETURNING id, license_plate, brand, model, color, last_seen_at
+                ${parsed.data.brand ?? null}, ${parsed.data.model ?? null},
+                ${parsed.data.color ?? null}, ${parsed.data.photo_url ?? null})
+        RETURNING id, license_plate, brand, model, color, photo_url, last_seen_at
       `)).rows[0];
       res.json({ ok: true, car: inserted });
     } catch (err) {
@@ -3887,15 +3896,21 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
     const userId = Number(req.lucia!.user!.id);
     try {
+      // photo_url uses key-presence semantics: when the client omits the
+      // key we keep the existing photo; when they explicitly send `null`
+      // we clear it; when they send a data URL we replace it.
+      const photoTouched = Object.prototype.hasOwnProperty.call(req.body ?? {}, 'photo_url');
+      const newPhoto = photoTouched ? (parsed.data.photo_url ?? null) : undefined;
       const updated = (await db.execute(sql`
         UPDATE cars SET
-          brand = COALESCE(${parsed.data.brand ?? null}, brand),
-          model = COALESCE(${parsed.data.model ?? null}, model),
-          color = COALESCE(${parsed.data.color ?? null}, color)
+          brand     = COALESCE(${parsed.data.brand ?? null}, brand),
+          model     = COALESCE(${parsed.data.model ?? null}, model),
+          color     = COALESCE(${parsed.data.color ?? null}, color),
+          photo_url = CASE WHEN ${photoTouched}::boolean THEN ${newPhoto ?? null} ELSE photo_url END
         WHERE id = ${id}
           AND (user_id = ${userId}
                OR customer_id = (SELECT id FROM customers WHERE user_id = ${userId} LIMIT 1))
-        RETURNING id, license_plate, brand, model, color, last_seen_at
+        RETURNING id, license_plate, brand, model, color, photo_url, last_seen_at
       `)).rows[0];
       if (!updated) return res.status(404).json({ ok: false, reason: 'not_found' });
       res.json({ ok: true, car: updated });

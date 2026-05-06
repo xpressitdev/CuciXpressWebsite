@@ -55,6 +55,7 @@ export interface CarRow {
   brand: string | null;
   model: string | null;
   color: string | null;
+  photo_url: string | null;
   last_seen_at: string | null;
   total_washes: number;
 }
