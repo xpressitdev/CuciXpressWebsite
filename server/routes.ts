@@ -2752,7 +2752,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
            WHERE o.qr_provider IN ('pocket_pay','loyalty')
              AND o.payment_ref = ${ppOrderId}
            LIMIT 1
-           FOR UPDATE
+           FOR UPDATE OF o
         `)).rows as any[];
 
         if (orderRows.length === 0) {
