@@ -4,6 +4,8 @@ import { motion } from "framer-motion";
 import { Check, Crown, Users, Building2, ShieldCheck, ArrowRight } from "lucide-react";
 import Navigation from "@/components/Navigation";
 import Footer from "@/components/Footer";
+import { AppShell } from "@/components/dashboard/AppShell";
+import type { Whoami } from "@/components/dashboard/types";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -161,10 +163,15 @@ export default function Subscriptions() {
     });
   };
 
-  return (
-    <div className="min-h-screen">
-      <Navigation />
-      <main className="cuci-page-bg pt-20 pb-16">
+  // Signed-in users see the same sidebar shell as /dashboard so they don't
+  // get bounced out to the marketing chrome. Guests still get the public
+  // navbar/footer.
+  const { data: who } = useQuery<Whoami>({ queryKey: ["/api/auth/whoami"] });
+  const signedIn = !!who?.authenticated;
+
+  const pageBody = (
+    <>
+      <main className={signedIn ? "" : "cuci-page-bg pt-20 pb-16"}>
         {/* --- Hero --- */}
         <section className="py-16 md:py-20">
           <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 text-center">
@@ -475,7 +482,20 @@ export default function Subscriptions() {
           </div>
         </section>
       </main>
-      <Footer />
+    </>
+  );
+
+  return (
+    <div className="min-h-screen">
+      {signedIn ? (
+        <AppShell activeTab="subscription">{pageBody}</AppShell>
+      ) : (
+        <>
+          <Navigation />
+          {pageBody}
+          <Footer />
+        </>
+      )}
 
       {/* --- Subscribe / Contact dialog --- */}
       <Dialog open={openPlan !== null} onOpenChange={(o) => !o && setOpenPlan(null)}>

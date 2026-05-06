@@ -19,10 +19,33 @@ import {
 } from "@/components/dashboard/types";
 
 export default function DashboardPage() {
-  const [, navigate] = useLocation();
+  const [location, navigate] = useLocation();
   const qc = useQueryClient();
   const { toast } = useToast();
-  const [tab, setTab] = useState<DashTab>("overview");
+
+  // Read initial tab from ?tab= so other pages (e.g. /checkout sidebar
+  // clicks) can deep-link into a specific dashboard section.
+  const initialTab: DashTab = (() => {
+    const valid: DashTab[] = ["overview", "history", "vehicles", "subscription", "receipts"];
+    const params = new URLSearchParams(window.location.search);
+    const t = params.get("tab") as DashTab | null;
+    return t && valid.includes(t) ? t : "overview";
+  })();
+  const [tab, setTab] = useState<DashTab>(initialTab);
+
+  // Keep URL in sync when the user clicks sidebar tabs on this page —
+  // makes deep-link/refresh land on the same tab.
+  useEffect(() => {
+    const params = new URLSearchParams(window.location.search);
+    const current = params.get("tab");
+    if (tab === "overview" && !current) return;
+    if (current === tab) return;
+    if (tab === "overview") {
+      window.history.replaceState({}, "", "/dashboard");
+    } else {
+      window.history.replaceState({}, "", `/dashboard?tab=${tab}`);
+    }
+  }, [tab, location]);
 
   // Auth gate
   const { data: who, isLoading: whoLoading } = useQuery<Whoami>({
