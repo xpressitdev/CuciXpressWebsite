@@ -1,12 +1,13 @@
-import { users, serviceHistory, type User, type InsertUser, type ServiceHistory, type InsertServiceHistory } from "@shared/schema";
+import { users, serviceHistory, customers, type User, type InsertUser, type ServiceHistory, type InsertServiceHistory } from "@shared/schema";
 import { db } from "./db";
-import { eq, desc } from "drizzle-orm";
+import { eq, desc, sql } from "drizzle-orm";
 
 export interface IStorage {
   getUser(id: number): Promise<User | undefined>;
   getUserByEmail(email: string): Promise<User | undefined>;
   createUser(user: InsertUser): Promise<User>;
   updateUser(id: number, updates: Partial<InsertUser>): Promise<User | null>;
+  updateCustomerName(userId: number, firstName: string, lastName: string): Promise<User | null>;
   
   // Service History
   createServiceHistory(entry: InsertServiceHistory): Promise<ServiceHistory>;
@@ -53,6 +54,26 @@ export class DatabaseStorage implements IStorage {
       console.error('Error updating user:', error);
       return null;
     }
+  }
+
+  async updateCustomerName(userId: number, firstName: string, lastName: string): Promise<User | null> {
+    // Note: errors are intentionally NOT caught here so the route layer can
+    // distinguish a true "user not found" (returns null) from an internal
+    // failure (throws → route maps to 500).
+    return await db.transaction(async (tx) => {
+      const [user] = await tx
+        .update(users)
+        .set({ first_name: firstName, last_name: lastName })
+        .where(eq(users.id, userId))
+        .returning();
+      if (!user) return null;
+      const fullName = `${firstName} ${lastName}`.trim();
+      await tx
+        .update(customers)
+        .set({ name: fullName, updated_at: sql`now()` })
+        .where(eq(customers.user_id, userId));
+      return user;
+    });
   }
 
   async createServiceHistory(entry: InsertServiceHistory): Promise<ServiceHistory> {

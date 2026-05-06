@@ -1,5 +1,10 @@
-import { Home, Clock, Car, Crown, Receipt, LogOut, ChevronUp } from "lucide-react";
+import { useEffect, useState } from "react";
+import { Home, Clock, Car, Crown, Receipt, LogOut, ChevronUp, Pencil, Loader2 } from "lucide-react";
 import { Link } from "wouter";
+import { useForm } from "react-hook-form";
+import { zodResolver } from "@hookform/resolvers/zod";
+import { z } from "zod";
+import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { Button } from "@/components/ui/button";
 import {
   DropdownMenu,
@@ -9,6 +14,26 @@ import {
   DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog";
+import {
+  Form,
+  FormControl,
+  FormField,
+  FormItem,
+  FormLabel,
+  FormMessage,
+} from "@/components/ui/form";
+import { Input } from "@/components/ui/input";
+import { apiRequest } from "@/lib/queryClient";
+import { useToast } from "@/hooks/use-toast";
+import { MeResp } from "./types";
 
 export type DashTab =
   | "overview"
@@ -24,7 +49,25 @@ interface Props {
   membershipLabel: string;
   onLogout: () => void;
   loggingOut: boolean;
+  /** Pre-fill values for the "Edit name" dialog. When omitted, the dialog
+   *  is hidden — pages without a `me` profile loaded shouldn't try to
+   *  expose name editing. */
+  profile?: { first_name: string; last_name: string };
 }
+
+const editNameSchema = z.object({
+  first_name: z
+    .string()
+    .trim()
+    .min(1, "First name is required")
+    .max(80, "Keep it under 80 characters"),
+  last_name: z
+    .string()
+    .trim()
+    .min(1, "Last name is required")
+    .max(80, "Keep it under 80 characters"),
+});
+type EditNameValues = z.infer<typeof editNameSchema>;
 
 const items: { id: DashTab; label: string; icon: any }[] = [
   { id: "overview", label: "Overview", icon: Home },
@@ -41,7 +84,9 @@ export function DashSidebar({
   membershipLabel,
   onLogout,
   loggingOut,
+  profile,
 }: Props) {
+  const [editOpen, setEditOpen] = useState(false);
   const initials = fullName
     .split(" ")
     .filter(Boolean)
@@ -111,6 +156,15 @@ export function DashSidebar({
           <DropdownMenuContent align="end" side="top" className="w-56">
             <DropdownMenuLabel>My account</DropdownMenuLabel>
             <DropdownMenuSeparator />
+            {profile && (
+              <DropdownMenuItem
+                onClick={() => setEditOpen(true)}
+                data-testid="button-dash-edit-name"
+              >
+                <Pencil className="w-3.5 h-3.5 mr-2" />
+                Edit name
+              </DropdownMenuItem>
+            )}
             <DropdownMenuItem
               onClick={onLogout}
               disabled={loggingOut}
@@ -123,7 +177,141 @@ export function DashSidebar({
           </DropdownMenuContent>
         </DropdownMenu>
       </div>
+
+      {profile && (
+        <EditNameDialog
+          open={editOpen}
+          onOpenChange={setEditOpen}
+          firstName={profile.first_name}
+          lastName={profile.last_name}
+        />
+      )}
     </aside>
+  );
+}
+
+function EditNameDialog({
+  open,
+  onOpenChange,
+  firstName,
+  lastName,
+}: {
+  open: boolean;
+  onOpenChange: (next: boolean) => void;
+  firstName: string;
+  lastName: string;
+}) {
+  const qc = useQueryClient();
+  const { toast } = useToast();
+  const form = useForm<EditNameValues>({
+    resolver: zodResolver(editNameSchema),
+    defaultValues: { first_name: firstName, last_name: lastName },
+  });
+
+  // Sync the form whenever the dialog re-opens or the upstream profile
+  // changes (e.g. after a successful save the cached `me` updates).
+  useEffect(() => {
+    if (open) {
+      form.reset({ first_name: firstName, last_name: lastName });
+    }
+  }, [open, firstName, lastName, form]);
+
+  const mutation = useMutation({
+    mutationFn: async (values: EditNameValues) => {
+      const r = await apiRequest("PATCH", "/api/customer/me", values);
+      return r.json() as Promise<{ profile: MeResp["profile"] }>;
+    },
+    onSuccess: (data) => {
+      qc.setQueryData<MeResp | undefined>(["/api/customer/me"], (prev) =>
+        prev ? { ...prev, profile: { ...prev.profile, ...data.profile } } : prev,
+      );
+      qc.invalidateQueries({ queryKey: ["/api/customer/me"] });
+      toast({ title: "Name updated" });
+      onOpenChange(false);
+    },
+    onError: () => {
+      toast({
+        title: "Could not update name",
+        description: "Please try again.",
+        variant: "destructive",
+      });
+    },
+  });
+
+  return (
+    <Dialog open={open} onOpenChange={onOpenChange}>
+      <DialogContent className="sm:max-w-[420px]" data-testid="dialog-edit-name">
+        <DialogHeader>
+          <DialogTitle>Edit your name</DialogTitle>
+          <DialogDescription>
+            This is how you'll appear on receipts and in your dashboard.
+          </DialogDescription>
+        </DialogHeader>
+        <Form {...form}>
+          <form
+            onSubmit={form.handleSubmit((values) => mutation.mutate(values))}
+            className="space-y-4"
+          >
+            <FormField
+              control={form.control}
+              name="first_name"
+              render={({ field }) => (
+                <FormItem>
+                  <FormLabel>First name</FormLabel>
+                  <FormControl>
+                    <Input
+                      autoFocus
+                      maxLength={80}
+                      data-testid="input-first-name"
+                      {...field}
+                    />
+                  </FormControl>
+                  <FormMessage />
+                </FormItem>
+              )}
+            />
+            <FormField
+              control={form.control}
+              name="last_name"
+              render={({ field }) => (
+                <FormItem>
+                  <FormLabel>Last name</FormLabel>
+                  <FormControl>
+                    <Input
+                      maxLength={80}
+                      data-testid="input-last-name"
+                      {...field}
+                    />
+                  </FormControl>
+                  <FormMessage />
+                </FormItem>
+              )}
+            />
+            <DialogFooter className="gap-2">
+              <Button
+                type="button"
+                variant="outline"
+                onClick={() => onOpenChange(false)}
+                disabled={mutation.isPending}
+                data-testid="button-edit-name-cancel"
+              >
+                Cancel
+              </Button>
+              <Button
+                type="submit"
+                disabled={mutation.isPending}
+                data-testid="button-edit-name-save"
+              >
+                {mutation.isPending && (
+                  <Loader2 className="w-3.5 h-3.5 mr-2 animate-spin" />
+                )}
+                Save changes
+              </Button>
+            </DialogFooter>
+          </form>
+        </Form>
+      </DialogContent>
+    </Dialog>
   );
 }
 

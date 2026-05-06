@@ -85,6 +85,10 @@ export function AppShell({ children, activeTab }: Props) {
         membershipLabel={membershipLabel}
         onLogout={() => logout.mutate()}
         loggingOut={logout.isPending}
+        profile={{
+          first_name: me.profile.first_name ?? "",
+          last_name: me.profile.last_name ?? "",
+        }}
       />
       <div className="flex-1 min-w-0">
         <DashTopbar

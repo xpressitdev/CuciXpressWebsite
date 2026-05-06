@@ -3564,6 +3564,47 @@ export async function registerRoutes(app: Express): Promise<Server> {
     });
   });
 
+  // PATCH /api/customer/me — update the signed-in customer's first/last name.
+  // Mirrors the response shape of GET /api/customer/me so the cache update
+  // on the client just slots in.
+  const updateCustomerNameSchema = z.object({
+    first_name: z.string().trim().min(1, 'First name is required').max(80),
+    last_name: z.string().trim().min(1, 'Last name is required').max(80),
+  });
+
+  app.patch('/api/customer/me', requireLuciaUser, async (req, res) => {
+    const parsed = updateCustomerNameSchema.safeParse(req.body);
+    if (!parsed.success) {
+      return res.status(400).json({
+        error: 'invalid_request',
+        details: parsed.error.flatten().fieldErrors,
+      });
+    }
+    const userId = Number(req.lucia!.user!.id);
+    let updated;
+    try {
+      updated = await storage.updateCustomerName(
+        userId,
+        parsed.data.first_name,
+        parsed.data.last_name,
+      );
+    } catch (err) {
+      console.error('[customer/me PATCH] failed', err);
+      return res.status(500).json({ error: 'server_error' });
+    }
+    if (!updated) return res.status(404).json({ error: 'not_found' });
+
+    const profile = (await db.execute(sql`
+      SELECT u.id, u.first_name, u.last_name, u.phone_number, u.email,
+             c.id AS customer_id, c.name AS customer_name, c.phone AS customer_phone
+      FROM users u
+      LEFT JOIN customers c ON c.user_id = u.id
+      WHERE u.id = ${userId}
+      LIMIT 1
+    `)).rows[0];
+    res.json({ profile });
+  });
+
   app.get('/api/customer/orders', requireLuciaUser, async (req, res) => {
     const userId = Number(req.lucia!.user!.id);
     const rows = (await db.execute(sql`
