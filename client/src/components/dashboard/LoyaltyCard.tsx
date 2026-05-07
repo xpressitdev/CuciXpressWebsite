@@ -166,7 +166,7 @@ export function LoyaltyCard({ cars }: Props) {
             <DialogTitle>Redeem your free wash</DialogTitle>
             <DialogDescription>
               We'll consume 4 of your B$12 receipts and issue a QR voucher.
-              Show the QR at the lane on your next visit.
+              Show the QR at any Cuci Xpress branch on your next visit.
             </DialogDescription>
           </DialogHeader>
 
@@ -192,8 +192,8 @@ export function LoyaltyCard({ cars }: Props) {
                 </SelectContent>
               </Select>
               <p className="text-[11px] text-gray-500 mt-2">
-                Drive into any Cuci Xpress branch and show the QR — the lane
-                that scans you adds your free wash to its queue.
+                Drive into any Cuci Xpress branch and show the QR — the
+                branch that scans you adds your free wash to its queue.
               </p>
             </div>
           </div>
@@ -269,8 +269,8 @@ function VoucherDialog({
             Your free wash QR
           </DialogTitle>
           <DialogDescription>
-            Show this code to staff at the lane. They'll scan it and queue
-            your <strong>{packageName}</strong>.
+            Show this code to staff at any Cuci Xpress branch. They'll
+            scan it and queue your <strong>{packageName}</strong>.
           </DialogDescription>
         </DialogHeader>
         <div className="flex justify-center py-4 min-h-[280px] items-center">
