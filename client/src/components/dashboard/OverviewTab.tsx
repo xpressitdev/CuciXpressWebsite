@@ -1,5 +1,5 @@
 import { useQuery } from "@tanstack/react-query";
-import { ArrowRight, Droplet } from "lucide-react";
+import { ArrowRight, Crown, Droplet } from "lucide-react";
 import { Link } from "wouter";
 import { Badge } from "@/components/ui/badge";
 import {
@@ -9,8 +9,6 @@ import {
   CarRow,
   QueueBranch,
   formatBND,
-  formatBNDFull,
-  packageBadgeClass,
 } from "./types";
 import { LoyaltyCard } from "./LoyaltyCard";
 
@@ -28,7 +26,7 @@ export function OverviewTab({ me, orders, memberships, cars, fullName, onChangeT
   const activeMembership = memberships.find((m) => m.status === "active");
 
   // One-tap wash banner: pick the OPEN branch with the shortest queue.
-  const { data: queueData } = useQuery<{ branches: QueueBranch[] }>({
+  const { data: queueData } = useQuery<{ branches: QueueBranch[]; server_time?: string }>({
     queryKey: ["/api/queue/snapshot"],
     refetchInterval: 30_000,
   });
@@ -59,48 +57,61 @@ export function OverviewTab({ me, orders, memberships, cars, fullName, onChangeT
         </h1>
       </div>
 
-      {/* One-tap wash banner */}
-      <div
-        className="cuci-cta rounded-2xl p-5 md:p-6 text-white relative overflow-hidden"
-        style={{
-          background:
-            "linear-gradient(120deg, hsl(257, 74%, 50%) 0%, hsl(36, 100%, 55%) 100%)",
-        }}
-        data-testid="banner-onetap"
-      >
-        <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-3">
-          <div>
-            <p className="text-[11px] uppercase tracking-wider font-bold text-white/90">
-              One-tap wash
-            </p>
-            <h2 className="text-xl md:text-2xl font-black mt-1">
-              {bestBranch
-                ? `Drive to ${bestBranch.name}, queue is ${
-                    bestBranch.queued_count <= 2 ? "short" : "moving"
-                  }.`
-                : "Pick a branch and pre-pay your wash."}
-            </h2>
-            <p className="text-sm text-white/90 mt-1">
-              {bestBranch ? (
-                <>
-                  {bestBranch.queued_count} cars in queue · ~{bestBranch.est_wait_minutes} min
-                  wait
-                  {activeMembership ? " · Your subscription covers this wash." : ""}
-                </>
-              ) : (
-                "All branches are currently closed. Try again during opening hours."
-              )}
-            </p>
+      {/* Hero: subscription card if active, otherwise one-tap CTA. */}
+      {activeMembership ? (
+        <ActiveSubscriptionHero
+          membership={activeMembership}
+          bestBranch={bestBranch}
+          onManage={() => onChangeTab("subscription")}
+        />
+      ) : (
+        <div
+          className="cuci-cta rounded-2xl p-5 md:p-6 text-white relative overflow-hidden"
+          style={{
+            background:
+              "linear-gradient(120deg, hsl(257, 74%, 50%) 0%, hsl(36, 100%, 55%) 100%)",
+          }}
+          data-testid="banner-onetap"
+        >
+          <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-3">
+            <div>
+              <p className="text-[11px] uppercase tracking-wider font-bold text-white/90">
+                One-tap wash
+              </p>
+              <h2 className="text-xl md:text-2xl font-black mt-1">
+                {bestBranch
+                  ? `Drive to ${bestBranch.name}, queue is ${
+                      bestBranch.queued_count <= 2 ? "short" : "moving"
+                    }.`
+                  : "Pick a branch and pre-pay your wash."}
+              </h2>
+              <p className="text-sm text-white/90 mt-1">
+                {bestBranch ? (
+                  <>
+                    {bestBranch.queued_count} cars in queue · ~{bestBranch.est_wait_minutes} min
+                    wait
+                  </>
+                ) : (
+                  "All branches are currently closed. Try again during opening hours."
+                )}
+              </p>
+            </div>
+            <Link
+              href="/checkout"
+              className="inline-flex items-center justify-center gap-1 px-5 py-3 bg-white text-gray-900 rounded-xl font-bold border-2 border-black whitespace-nowrap hover:translate-x-[-1px] hover:translate-y-[-1px] transition-transform"
+              data-testid="button-onetap-pay"
+            >
+              Pay &amp; Queue <ArrowRight className="w-4 h-4" />
+            </Link>
           </div>
-          <Link
-            href="/checkout"
-            className="inline-flex items-center justify-center gap-1 px-5 py-3 bg-white text-gray-900 rounded-xl font-bold border-2 border-black whitespace-nowrap hover:translate-x-[-1px] hover:translate-y-[-1px] transition-transform"
-            data-testid="button-onetap-pay"
-          >
-            Pay &amp; Queue <ArrowRight className="w-4 h-4" />
-          </Link>
         </div>
-      </div>
+      )}
+
+      {/* Live queue strip — inline, reuses queueData already fetched above. */}
+      <LiveQueueStrip
+        branches={queueData?.branches ?? []}
+        serverTime={(queueData as any)?.server_time}
+      />
 
       {/* Loyalty punch card */}
       <LoyaltyCard cars={cars} />
@@ -151,73 +162,298 @@ export function OverviewTab({ me, orders, memberships, cars, fullName, onChangeT
         />
       </div>
 
-      {/* Recent washes + Subscription side by side */}
-      <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
-        <section className="lg:col-span-2 cuci-card-soft p-5">
-          <div className="flex items-center justify-between mb-4">
-            <h2 className="text-lg font-bold text-gray-900">Recent washes</h2>
-            <button
-              onClick={() => onChangeTab("history")}
-              className="text-sm text-cuci-primary hover:underline inline-flex items-center gap-1"
-              data-testid="link-view-all-history"
-            >
-              View all <ArrowRight className="w-3.5 h-3.5" />
-            </button>
-          </div>
+      {/* Recent washes — full width now that subscription is the hero. */}
+      <section className="cuci-card-soft p-5">
+        <div className="flex items-center justify-between mb-4">
+          <h2 className="text-lg font-bold text-gray-900">Recent washes</h2>
+          <button
+            onClick={() => onChangeTab("history")}
+            className="text-sm text-cuci-primary hover:underline inline-flex items-center gap-1"
+            data-testid="link-view-all-history"
+          >
+            View all <ArrowRight className="w-3.5 h-3.5" />
+          </button>
+        </div>
 
-          {recent.length === 0 ? (
-            <EmptyRow text="No washes on your account yet." />
-          ) : (
-            <div className="space-y-1">
-              {recent.map((o) => (
-                <div
-                  key={o.id}
-                  className="flex items-center gap-3 py-2.5 px-2 rounded-lg hover:bg-gray-50"
-                  data-testid={`row-recent-${o.id}`}
+        {recent.length === 0 ? (
+          <EmptyRow text="No washes on your account yet." />
+        ) : (
+          <div className="space-y-1">
+            {recent.map((o) => (
+              <div
+                key={o.id}
+                className="flex items-center gap-3 py-2.5 px-2 rounded-lg hover:bg-gray-50"
+                data-testid={`row-recent-${o.id}`}
+              >
+                <div className="w-10 h-10 rounded-[10px] bg-cuci-primary/10 grid place-items-center shrink-0">
+                  <Droplet className="w-4 h-4 text-cuci-primary" />
+                </div>
+                <div className="min-w-0 flex-1">
+                  <p className="font-bold text-sm text-gray-900 truncate">
+                    {o.package_name}
+                  </p>
+                  <p className="text-xs text-gray-500 truncate">
+                    {o.branch_name ?? "—"} · {o.plate} ·{" "}
+                    {new Date(o.created_at).toLocaleDateString("en-CA")}
+                  </p>
+                </div>
+                <Badge
+                  variant="secondary"
+                  className="hidden sm:inline-flex text-[10px] uppercase font-semibold border-0"
                 >
-                  <div className="w-10 h-10 rounded-[10px] bg-cuci-primary/10 grid place-items-center shrink-0">
-                    <Droplet className="w-4 h-4 text-cuci-primary" />
-                  </div>
-                  <div className="min-w-0 flex-1">
-                    <p className="font-bold text-sm text-gray-900 truncate">
-                      {o.package_name}
-                    </p>
-                    <p className="text-xs text-gray-500 truncate">
-                      {o.branch_name ?? "—"} · {o.plate} ·{" "}
-                      {new Date(o.created_at).toLocaleDateString("en-CA")}
-                    </p>
-                  </div>
-                  <Badge
-                    variant="secondary"
-                    className="hidden sm:inline-flex text-[10px] uppercase font-semibold border-0"
-                  >
-                    {o.payment_method === "qr_code"
-                      ? "QR"
-                      : o.payment_method === "cash"
-                        ? "Cash"
-                        : o.payment_method}
-                  </Badge>
-                  <span className="font-bold text-sm whitespace-nowrap">
-                    {formatBND(o.total_cents)}
+                  {o.payment_method === "qr_code"
+                    ? "QR"
+                    : o.payment_method === "cash"
+                      ? "Cash"
+                      : o.payment_method}
+                </Badge>
+                <span className="font-bold text-sm whitespace-nowrap">
+                  {formatBND(o.total_cents)}
+                </span>
+              </div>
+            ))}
+          </div>
+        )}
+      </section>
+    </div>
+  );
+}
+
+// ----------------------------------------------------------------------
+// ActiveSubscriptionHero — full-width hero shown at the top of Overview
+// when the customer has an active membership. Same gradient + twinkles
+// as the SubscriptionTab ActiveCard so the brand feels consistent, but
+// laid out wide with a Pay & Queue CTA on the right that picks the
+// shortest open branch from the same /api/queue/snapshot fetch.
+// ----------------------------------------------------------------------
+function ActiveSubscriptionHero({
+  membership,
+  bestBranch,
+  onManage,
+}: {
+  membership: MembershipRow;
+  bestBranch: QueueBranch | undefined;
+  onManage: () => void;
+}) {
+  const renewLabel = membership.expires_at
+    ? new Date(membership.expires_at).toLocaleDateString("en-GB", {
+        day: "numeric",
+        month: "short",
+        year: "numeric",
+      })
+    : "Ongoing";
+  const isUnlimited = membership.kind === "unlimited";
+  const planName = isUnlimited ? "Unlimited Xpress" : "Wash Pack";
+
+  const TWINKLES = [
+    { top: 12, left: "30%", size: 11, delay: "0s" },
+    { top: 70, left: "55%", size: 8, delay: "0.4s" },
+    { top: 40, left: "82%", size: 9, delay: "0.8s" },
+    { top: 110, left: "10%", size: 10, delay: "1.2s" },
+  ];
+
+  return (
+    <article
+      className="relative overflow-hidden rounded-2xl text-white"
+      style={{
+        background:
+          "linear-gradient(135deg, #7C5CE7 0%, #B47CF7 45%, #FF9500 100%)",
+        padding: "24px 24px",
+        boxShadow:
+          "0 0 50px rgba(255,149,0,0.4), 0 0 90px rgba(124,92,231,0.3)",
+      }}
+      data-testid="hero-subscription-active"
+    >
+      <div className="cuci-gloss" aria-hidden />
+      <div className="cuci-shimmer-wrap" aria-hidden />
+      {TWINKLES.map((t, ti) => (
+        <svg
+          key={ti}
+          className="cuci-twinkle"
+          width={t.size}
+          height={t.size}
+          viewBox="0 0 24 24"
+          style={{ top: t.top, left: t.left, animationDelay: t.delay }}
+          aria-hidden
+        >
+          <path
+            d="M12 0 L13.5 10.5 L24 12 L13.5 13.5 L12 24 L10.5 13.5 L0 12 L10.5 10.5 Z"
+            fill="#fff"
+          />
+        </svg>
+      ))}
+
+      <div
+        className="relative flex flex-col md:flex-row md:items-center md:justify-between gap-4"
+        style={{ zIndex: 1 }}
+      >
+        <div className="min-w-0">
+          <div className="flex items-center gap-2">
+            <span
+              className="inline-flex items-center text-[10px] uppercase font-extrabold px-2 py-0.5 rounded"
+              style={{
+                background: "#FF9500",
+                color: "#1a1208",
+                border: "1.5px solid rgba(0,0,0,0.6)",
+                letterSpacing: 1.1,
+              }}
+            >
+              {isUnlimited ? "Unlimited" : "Pack"} · Active
+            </span>
+            <Crown className="w-5 h-5" style={{ color: "#FFE89E" }} />
+          </div>
+          <h2
+            className="text-2xl md:text-3xl font-black mt-2 tracking-tight"
+            style={{ textShadow: "0 2px 14px rgba(0,0,0,0.25)" }}
+            data-testid="hero-plan-name"
+          >
+            {planName}
+          </h2>
+          <p
+            className="text-sm mt-1"
+            style={{ color: "rgba(255,255,255,0.85)" }}
+          >
+            Renews {renewLabel}
+            {!isUnlimited &&
+              ` · ${membership.remaining_washes}/${membership.total_washes} washes left`}
+          </p>
+          <p
+            className="text-sm mt-2 font-semibold"
+            style={{ color: "#FFE89E" }}
+          >
+            {bestBranch
+              ? `Your subscription covers a wash at ${bestBranch.name} now (~${bestBranch.est_wait_minutes} min).`
+              : "All branches are currently closed."}
+          </p>
+        </div>
+        <div className="flex flex-col gap-2 md:items-end shrink-0">
+          <Link
+            href="/checkout"
+            className="inline-flex items-center justify-center gap-1 px-5 py-3 bg-white text-gray-900 rounded-xl font-bold border-2 border-black whitespace-nowrap hover:translate-x-[-1px] hover:translate-y-[-1px] transition-transform"
+            data-testid="button-hero-pay"
+          >
+            Use my plan <ArrowRight className="w-4 h-4" />
+          </Link>
+          <button
+            onClick={onManage}
+            className="text-xs font-bold hover:underline"
+            style={{ color: "#FFE89E" }}
+            data-testid="link-hero-manage"
+          >
+            Manage subscription →
+          </button>
+        </div>
+      </div>
+    </article>
+  );
+}
+
+// ----------------------------------------------------------------------
+// LiveQueueStrip — compact horizontal queue read-out for the Overview
+// tab. Same data source as the public /queue page (no extra fetch — we
+// reuse the snapshot the parent already pulled for the hero CTA).
+// ----------------------------------------------------------------------
+function LiveQueueStrip({
+  branches,
+  serverTime,
+}: {
+  branches: QueueBranch[];
+  serverTime: string | undefined;
+}) {
+  const time = new Date(serverTime ?? Date.now()).toLocaleTimeString([], {
+    hour: "2-digit",
+    minute: "2-digit",
+  });
+  const totalToday = branches.reduce((s, b) => s + (b.today_total ?? 0), 0);
+  const shortName = (n: string) => n.replace(/^Cuci Xpress\s+/i, "");
+
+  return (
+    <section
+      className="bg-white rounded-2xl border border-gray-200 p-5"
+      data-testid="strip-live-queue"
+    >
+      <div className="flex items-center justify-between mb-4 flex-wrap gap-2">
+        <div className="flex items-center gap-2">
+          <span className="inline-flex items-center gap-2 text-emerald-600 text-xs font-semibold">
+            <span className="relative flex h-2 w-2">
+              <span className="absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75 animate-ping" />
+              <span className="relative inline-flex rounded-full h-2 w-2 bg-emerald-500" />
+            </span>
+            LIVE · {time}
+          </span>
+          <h2 className="text-base font-bold text-gray-900 ml-2">
+            Queue right now
+          </h2>
+        </div>
+        <div className="flex items-center gap-3">
+          {totalToday > 0 && (
+            <span className="text-[11px] bg-gray-900 text-white px-2.5 py-1 rounded-full font-semibold">
+              Today · {totalToday} washed
+            </span>
+          )}
+          <Link
+            href="/queue"
+            className="text-sm text-cuci-primary hover:underline inline-flex items-center gap-1"
+            data-testid="link-strip-see-queue"
+          >
+            See full <ArrowRight className="w-3.5 h-3.5" />
+          </Link>
+        </div>
+      </div>
+
+      {branches.length === 0 ? (
+        <p className="text-sm text-gray-500">Loading queue…</p>
+      ) : (
+        <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-5 gap-2">
+          {branches.map((b) => {
+            const closed = !b.is_open;
+            const quiet = b.queued_count === 0;
+            const busy = b.est_wait_minutes >= 20;
+            const dot = closed
+              ? "bg-gray-300"
+              : quiet
+                ? "bg-emerald-500"
+                : busy
+                  ? "bg-red-500"
+                  : "bg-amber-500";
+            const waitLabel = closed
+              ? "Closed"
+              : quiet
+                ? "Drive in"
+                : `~${b.est_wait_minutes} min`;
+            const waitColor = closed
+              ? "text-gray-400"
+              : quiet
+                ? "text-emerald-600"
+                : busy
+                  ? "text-red-500"
+                  : "text-amber-600";
+            return (
+              <div
+                key={b.id}
+                className="flex flex-col gap-1 p-3 rounded-lg border border-gray-100 bg-gray-50"
+                data-testid={`strip-branch-${b.id}`}
+              >
+                <div className="flex items-center gap-1.5">
+                  <span className={`w-2 h-2 rounded-full ${dot}`} />
+                  <span className="text-xs font-semibold text-gray-800 truncate">
+                    {shortName(b.name)}
                   </span>
                 </div>
-              ))}
-            </div>
-          )}
-        </section>
-
-        <section className="lg:col-span-1">
-          {activeMembership ? (
-            <ActiveSubscriptionMini
-              membership={activeMembership}
-              onManage={() => onChangeTab("subscription")}
-            />
-          ) : (
-            <NoSubscriptionMini onSeePlans={() => onChangeTab("subscription")} />
-          )}
-        </section>
-      </div>
-    </div>
+                <span className={`text-sm font-black ${waitColor}`}>
+                  {waitLabel}
+                </span>
+                {!closed && (
+                  <span className="text-[10px] text-gray-500">
+                    {b.queued_count} in queue · {b.washing_count} washing
+                  </span>
+                )}
+              </div>
+            );
+          })}
+        </div>
+      )}
+    </section>
   );
 }
 
@@ -241,153 +477,6 @@ function KpiTile({
       </p>
       <p className={`text-3xl font-black mt-1 ${color}`}>{value}</p>
       <p className="text-xs text-gray-500 mt-1">{sub}</p>
-    </div>
-  );
-}
-
-function ActiveSubscriptionMini({
-  membership,
-  onManage,
-}: {
-  membership: MembershipRow;
-  onManage: () => void;
-}) {
-  // Compact twinkles tuned for the smaller overview-tab card.
-  const TWINKLES = [
-    { top: 10,  left: "55%", size: 11, delay: "0s"   },
-    { top: 70,  left: "12%", size: 8,  delay: "0.3s" },
-    { top: 40,  left: "85%", size: 8,  delay: "0.6s" },
-    { top: 180, left: "75%", size: 10, delay: "1.2s" },
-    { top: 230, left: "20%", size: 9,  delay: "1.8s" },
-  ];
-
-  return (
-    <div
-      className="relative overflow-hidden rounded-2xl text-white p-5 h-full flex flex-col"
-      style={{
-        background:
-          "linear-gradient(135deg, #7C5CE7 0%, #B47CF7 45%, #FF9500 100%)",
-        boxShadow:
-          "0 0 40px rgba(255,149,0,0.35), 0 0 70px rgba(124,92,231,0.3)",
-      }}
-      data-testid="card-subscription-mini"
-    >
-      {/* Same gloss + shimmer + twinkles as the SubscriptionTab active card. */}
-      <div className="cuci-gloss" aria-hidden />
-      <div className="cuci-shimmer-wrap" aria-hidden />
-      {TWINKLES.map((t, ti) => (
-        <svg
-          key={ti}
-          className="cuci-twinkle"
-          width={t.size}
-          height={t.size}
-          viewBox="0 0 24 24"
-          style={{ top: t.top, left: t.left, animationDelay: t.delay }}
-          aria-hidden
-        >
-          <path
-            d="M12 0 L13.5 10.5 L24 12 L13.5 13.5 L12 24 L10.5 13.5 L0 12 L10.5 10.5 Z"
-            fill="#fff"
-          />
-        </svg>
-      ))}
-
-      <div className="relative flex flex-col flex-1" style={{ zIndex: 1 }}>
-        <div className="flex items-center justify-between mb-2">
-          <h3 className="text-base font-bold">Your subscription</h3>
-          <span style={{ color: "#FFE89E" }} className="text-lg">👑</span>
-        </div>
-        <span
-          className="self-start text-[10px] uppercase font-extrabold px-2 py-0.5 rounded"
-          style={{
-            background: "#FF9500",
-            color: "#1a1208",
-            border: "1.5px solid rgba(0,0,0,0.6)",
-            letterSpacing: 1.1,
-          }}
-        >
-          {membership.kind === "unlimited" ? "Unlimited" : "Wash Pack"}
-        </span>
-        <p
-          className="text-xs mt-3"
-          style={{ color: "rgba(255,255,255,0.85)" }}
-        >
-          Active until
-        </p>
-        <p
-          className="text-xl font-black"
-          style={{ textShadow: "0 2px 12px rgba(0,0,0,0.2)" }}
-        >
-          {membership.expires_at
-            ? new Date(membership.expires_at).toLocaleDateString("en-GB", {
-                day: "numeric",
-                month: "short",
-                year: "numeric",
-              })
-            : "Ongoing"}
-        </p>
-        <div
-          className="my-3"
-          style={{ borderTop: "1px solid rgba(255,255,255,0.25)" }}
-        />
-        <dl className="text-xs space-y-1.5">
-          <Stat
-            label="Plan"
-            value={
-              membership.kind === "unlimited" ? "Unlimited Xpress" : "Wash Pack"
-            }
-          />
-          <Stat label="Price" value={formatBNDFull(membership.price_cents)} />
-          <Stat
-            label="Remaining"
-            value={
-              membership.kind === "unlimited"
-                ? "Unlimited"
-                : `${membership.remaining_washes} / ${membership.total_washes}`
-            }
-          />
-        </dl>
-        <button
-          onClick={onManage}
-          className="mt-auto pt-4 text-xs font-bold hover:underline self-start"
-          style={{ color: "#FFE89E" }}
-          data-testid="link-manage-subscription"
-        >
-          Manage →
-        </button>
-      </div>
-    </div>
-  );
-}
-
-function NoSubscriptionMini({ onSeePlans }: { onSeePlans: () => void }) {
-  return (
-    <div
-      className="rounded-2xl border-2 border-dashed border-gray-300 p-5 h-full flex flex-col"
-      data-testid="card-subscription-empty"
-    >
-      <h3 className="text-base font-bold text-gray-900">No subscription yet</h3>
-      <p className="text-sm text-gray-500 mt-1">
-        Save up to BND 32/mo by switching from pay-as-you-go.
-      </p>
-      <button
-        onClick={onSeePlans}
-        className="mt-auto self-start px-3 py-1.5 text-sm font-bold text-cuci-primary hover:underline"
-        data-testid="link-see-plans"
-      >
-        See plans →
-      </button>
-    </div>
-  );
-}
-
-function Stat({ label, value }: { label: string; value: string }) {
-  // Used inside the gradient subscription mini-card — styled for the
-  // light-on-gradient context (white-ish label, bright white value).
-  return (
-    <div className="flex items-center justify-between">
-      <dt style={{ color: "rgba(255,255,255,0.75)" }}>{label}</dt>
-      <dd className="font-bold text-white">{value}</dd>
     </div>
   );
 }
