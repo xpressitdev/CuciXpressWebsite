@@ -6,6 +6,16 @@ import { collaborationSubmissions, insertCollaborationSubmissionSchema, subscrip
 import { sendCollaborationEmail, sendPaymentConfirmation, sendSubscriptionNotification } from "./email";
 import { processPocketPayPayment, handlePaymentCallback, queryTransactionStatus } from "./payment";
 import { kedaiPOSIntegration } from "./kedaipos-integration";
+import {
+  testSharePointConnection,
+  resetSharePointCaches,
+  isSharePointConfigured,
+} from "./integrations/sharepoint";
+import {
+  drainOnce as sharepointDrainOnce,
+  getOutboxSnapshot as getSharePointSnapshot,
+  retryOutboxRow as retrySharePointRow,
+} from "./integrations/sharepointOutbox";
 import { handleKedaiPOSWebhook, getOrderStatus, updateQueueStatus } from "./kedaipos-webhooks";
 import { unifiedAuth } from "./unified-auth";
 import { lucia } from "./auth/lucia";
@@ -1255,6 +1265,92 @@ export async function registerRoutes(app: Express): Promise<Server> {
   // GET /api/admin/catalog/packages
   // GET /api/admin/branches  — small helper used by the package edit
   // dialog (and anywhere else admin needs to render branch checkboxes).
+  // ==========================================================================
+  // SharePoint integration (admin only) — Phase 13.
+  //
+  // GET    /api/admin/integrations/sharepoint           snapshot of outbox
+  // POST   /api/admin/integrations/sharepoint/test      ping Excel table
+  // POST   /api/admin/integrations/sharepoint/drain     fire one drain pass now
+  // POST   /api/admin/integrations/sharepoint/retry/:id flip a failed row -> pending
+  // POST   /api/admin/integrations/sharepoint/reset     clear token + path caches
+  //
+  // All locked behind owner role — these touch business-critical config.
+  // ==========================================================================
+  app.get(
+    '/api/admin/integrations/sharepoint',
+    requireStaff,
+    requireStaffRole('owner', 'manager'),
+    async (_req, res) => {
+      try {
+        const snap = await getSharePointSnapshot();
+        res.json({ ok: true, ...snap });
+      } catch (err) {
+        console.error('[admin.sharepoint.snapshot] failed:', err);
+        res.status(500).json({ error: 'snapshot_failed' });
+      }
+    },
+  );
+
+  app.post(
+    '/api/admin/integrations/sharepoint/test',
+    requireStaff,
+    requireStaffRole('owner'),
+    async (_req, res) => {
+      try {
+        const status = await testSharePointConnection();
+        res.json({ ok: true, ...status });
+      } catch (err: any) {
+        res.status(500).json({ error: 'test_failed', detail: String(err?.message ?? err) });
+      }
+    },
+  );
+
+  app.post(
+    '/api/admin/integrations/sharepoint/drain',
+    requireStaff,
+    requireStaffRole('owner'),
+    async (_req, res) => {
+      try {
+        if (!isSharePointConfigured()) {
+          return res.status(400).json({ error: 'not_configured' });
+        }
+        const result = await sharepointDrainOnce();
+        res.json({ ok: true, ...result });
+      } catch (err: any) {
+        console.error('[admin.sharepoint.drain] failed:', err);
+        res.status(500).json({ error: 'drain_failed', detail: String(err?.message ?? err) });
+      }
+    },
+  );
+
+  app.post(
+    '/api/admin/integrations/sharepoint/retry/:id',
+    requireStaff,
+    requireStaffRole('owner'),
+    async (req, res) => {
+      try {
+        const id = Number(req.params.id);
+        if (!Number.isFinite(id)) return res.status(400).json({ error: 'bad_id' });
+        const found = await retrySharePointRow(id);
+        if (!found) return res.status(404).json({ error: 'not_found_or_already_sent' });
+        res.json({ ok: true });
+      } catch (err) {
+        console.error('[admin.sharepoint.retry] failed:', err);
+        res.status(500).json({ error: 'retry_failed' });
+      }
+    },
+  );
+
+  app.post(
+    '/api/admin/integrations/sharepoint/reset',
+    requireStaff,
+    requireStaffRole('owner'),
+    async (_req, res) => {
+      resetSharePointCaches();
+      res.json({ ok: true });
+    },
+  );
+
   app.get('/api/admin/branches', requireStaff, requireStaffRole('owner', 'manager'), async (_req, res) => {
     try {
       const rows = (await db.execute(

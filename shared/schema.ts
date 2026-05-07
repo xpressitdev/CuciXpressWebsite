@@ -630,3 +630,24 @@ export const insertCashierShiftSchema = createInsertSchema(cashierShifts).omit({
 });
 export type CashierShift = typeof cashierShifts.$inferSelect;
 export type InsertCashierShift = z.infer<typeof insertCashierShiftSchema>;
+
+// --- SharePoint outbox (2026-05-07_01) -----------------------
+// Every reportable order (POS sale, web-checkout-paid, voucher
+// redemption, refund) is enqueued here by a Postgres AFTER trigger
+// on `orders`. A background worker drains pending rows and appends
+// them into the SharePoint Excel master file via Microsoft Graph.
+// POS NEVER blocks on SharePoint — failures stay queued for retry.
+export const sharepointOutbox = pgTable("sharepoint_outbox", {
+  id: bigserial("id", { mode: "number" }).primaryKey(),
+  order_id: text("order_id").references(() => orders.id, { onDelete: "cascade" }).notNull(),
+  op: text("op").notNull(), // 'sale' | 'refund'
+  cx_number: text("cx_number").notNull(), // e.g. "CX-1" — written to Excel col J
+  status: text("status").default("pending").notNull(), // 'pending' | 'sent' | 'failed'
+  attempts: integer("attempts").default(0).notNull(),
+  last_error: text("last_error"),
+  excel_row_id: text("excel_row_id"),
+  enqueued_at: timestamp("enqueued_at", { withTimezone: true }).defaultNow().notNull(),
+  sent_at: timestamp("sent_at", { withTimezone: true }),
+  next_attempt_at: timestamp("next_attempt_at", { withTimezone: true }).defaultNow().notNull(),
+});
+export type SharepointOutboxRow = typeof sharepointOutbox.$inferSelect;
