@@ -1,0 +1,8 @@
+uploads = []
+generated = []
+
+[[outputs]]
+id = "_56_Mg7frYQB2QrrrmcDW"
+uri = "file://exports/merge_candidates_2026-05-06.csv"
+type = "table"
+title = "Phone duplicate merge candidates — 2026-05-06"
