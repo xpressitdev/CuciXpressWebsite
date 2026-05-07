@@ -321,18 +321,20 @@ function ActiveSubscriptionHero({
             className="text-sm mt-2 font-semibold"
             style={{ color: "#FFE89E" }}
           >
-            {bestBranch
-              ? `Your subscription covers a wash at ${bestBranch.name} now (~${bestBranch.est_wait_minutes} min).`
-              : "All branches are currently closed."}
+            {isUnlimited
+              ? "Thank you for being a VIP member — unlimited washes at every Cuci Xpress branch."
+              : bestBranch
+                ? `Your wash pack covers a wash at ${bestBranch.name} now (~${bestBranch.est_wait_minutes} min).`
+                : "All branches are currently closed."}
           </p>
         </div>
         <div className="flex flex-col gap-2 md:items-end shrink-0">
           <Link
-            href="/checkout"
+            href={isUnlimited ? "/subscriptions" : "/checkout"}
             className="inline-flex items-center justify-center gap-1 px-5 py-3 bg-white text-gray-900 rounded-xl font-bold border-2 border-black whitespace-nowrap hover:translate-x-[-1px] hover:translate-y-[-1px] transition-transform"
             data-testid="button-hero-pay"
           >
-            Use my plan <ArrowRight className="w-4 h-4" />
+            {isUnlimited ? "Renew" : "Use my plan"} <ArrowRight className="w-4 h-4" />
           </Link>
           <button
             onClick={onManage}
