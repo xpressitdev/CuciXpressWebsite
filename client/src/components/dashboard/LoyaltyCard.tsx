@@ -107,7 +107,7 @@ export function LoyaltyCard({ cars }: Props) {
                 <> You've earned a free wash — claim it now!</>
               )}
               {hasVoucher && (
-                <> Your free-wash QR is ready to scan at the lane.</>
+                <> Your free-wash QR is ready to scan at any Cuci Xpress branch.</>
               )}
             </p>
           </div>
