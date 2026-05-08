@@ -2061,7 +2061,24 @@ export async function registerRoutes(app: Express): Promise<Server> {
     price_cents: z.number().int().min(0).max(1_000_00),
     is_active: z.boolean().optional(),
     sort_order: z.number().int().min(0).max(999).optional(),
+    // Same empty-set semantics as package_branches: [] = available at
+    // every branch. Added 2026-05-08_02 (addon_branches migration).
+    branch_ids: z.array(z.number().int().positive()).max(50).optional(),
   });
+
+  // Replace the addon_branches join rows for a given add-on with
+  // exactly the supplied list. Mirrors rewritePackageBranches above.
+  async function rewriteAddonBranches(addonId: string, branchIds: number[]) {
+    await db.execute(sql`DELETE FROM addon_branches WHERE addon_id = ${addonId}`);
+    if (branchIds.length === 0) return;
+    for (const bid of branchIds) {
+      await db.execute(sql`
+        INSERT INTO addon_branches (addon_id, branch_id)
+        VALUES (${addonId}, ${bid})
+        ON CONFLICT DO NOTHING
+      `);
+    }
+  }
 
   // GET /api/admin/catalog/addons
   app.get('/api/admin/catalog/addons', requireStaff, requireStaffRole('owner'), async (_req, res) => {
@@ -2079,8 +2096,22 @@ export async function registerRoutes(app: Express): Promise<Server> {
          GROUP BY 1
       `)).rows as Array<{ addon_id: string; n: number }>;
       const usage = new Map(used.map((u) => [u.addon_id, u.n]));
+      // Branch assignments — same empty-array-means-all rule as packages.
+      const ab = (await db.execute(sql`
+        SELECT addon_id, branch_id FROM addon_branches
+      `)).rows as Array<{ addon_id: string; branch_id: number }>;
+      const branchMap = new Map<string, number[]>();
+      for (const r of ab) {
+        const arr = branchMap.get(r.addon_id) ?? [];
+        arr.push(r.branch_id);
+        branchMap.set(r.addon_id, arr);
+      }
       res.json({
-        rows: rows.map((r: any) => ({ ...r, order_count: usage.get(r.id) ?? 0 })),
+        rows: rows.map((r: any) => ({
+          ...r,
+          order_count: usage.get(r.id) ?? 0,
+          branch_ids: (branchMap.get(r.id) ?? []).sort((a, b) => a - b),
+        })),
       });
     } catch (err) {
       console.error('[admin.catalog.addons.list] failed:', err);
@@ -2094,7 +2125,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
     if (!parsed.success) {
       return res.status(400).json({ error: 'invalid_body', details: parsed.error.flatten() });
     }
-    const { name, price_cents, is_active, sort_order } = parsed.data;
+    const { name, price_cents, is_active, sort_order, branch_ids } = parsed.data;
     const id = `addon_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 8)}`;
     try {
       const inserted = (await db.execute(sql`
@@ -2102,7 +2133,12 @@ export async function registerRoutes(app: Express): Promise<Server> {
         VALUES (${id}, ${name}, ${price_cents}, ${is_active ?? true}, ${sort_order ?? 0})
         RETURNING id, name, price_cents, is_active, sort_order
       `)).rows[0];
-      res.json({ row: inserted });
+      if (branch_ids && branch_ids.length > 0) {
+        await rewriteAddonBranches(id, branch_ids);
+      }
+      res.json({
+        row: { ...inserted, branch_ids: (branch_ids ?? []).slice().sort((a, b) => a - b) },
+      });
     } catch (err) {
       console.error('[admin.catalog.addons.create] failed:', err);
       res.status(500).json({ error: 'create_failed' });
@@ -2129,7 +2165,15 @@ export async function registerRoutes(app: Express): Promise<Server> {
          RETURNING id, name, price_cents, is_active, sort_order
       `)).rows[0];
       if (!updated) return res.status(404).json({ error: 'not_found' });
-      res.json({ row: updated });
+      // Only rewrite the join when the caller actually sent the field.
+      // `branch_ids: []` is meaningful ("available everywhere again").
+      if (p.branch_ids !== undefined) {
+        await rewriteAddonBranches(id, p.branch_ids);
+      }
+      const currentBranches = (await db.execute(sql`
+        SELECT branch_id FROM addon_branches WHERE addon_id = ${id} ORDER BY branch_id
+      `)).rows as Array<{ branch_id: number }>;
+      res.json({ row: { ...updated, branch_ids: currentBranches.map((r) => r.branch_id) } });
     } catch (err) {
       console.error('[admin.catalog.addons.update] failed:', err);
       res.status(500).json({ error: 'update_failed' });
@@ -4419,12 +4463,30 @@ export async function registerRoutes(app: Express): Promise<Server> {
         sort_order: number;
       }>;
 
-      const addonsRows = (await db.execute(sql`
-        SELECT id, name, price_cents, sort_order
-          FROM addons_catalog
-         WHERE is_active = true
-         ORDER BY sort_order ASC, name ASC
-      `)).rows as Array<{
+      // Same branch-restriction rule as packages above (added 2026-05-08_02):
+      // an add-on with no rows in addon_branches is visible everywhere.
+      const addonsRows = (await db.execute(
+        useBranchFilter
+          ? sql`
+              SELECT a.id, a.name, a.price_cents, a.sort_order
+                FROM addons_catalog a
+               WHERE a.is_active = true
+                 AND (
+                   NOT EXISTS (SELECT 1 FROM addon_branches ab WHERE ab.addon_id = a.id)
+                   OR EXISTS (
+                     SELECT 1 FROM addon_branches ab
+                      WHERE ab.addon_id = a.id AND ab.branch_id = ${branchId}
+                   )
+                 )
+               ORDER BY a.sort_order ASC, a.name ASC
+            `
+          : sql`
+              SELECT id, name, price_cents, sort_order
+                FROM addons_catalog
+               WHERE is_active = true
+               ORDER BY sort_order ASC, name ASC
+            `,
+      )).rows as Array<{
         id: string;
         name: string;
         price_cents: number;

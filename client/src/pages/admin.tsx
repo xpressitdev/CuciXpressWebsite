@@ -1548,6 +1548,9 @@ interface CatalogAddon {
   is_active: boolean;
   sort_order: number;
   order_count: number;
+  // Empty array = available at every branch (matches the package
+  // semantics in 2026-05-08_02_addon_branches.sql).
+  branch_ids: number[];
 }
 
 const formatBndInput = (cents: number) => (cents / 100).toFixed(2);
@@ -1962,6 +1965,7 @@ function AddonsSection({ canEdit }: { canEdit: boolean }) {
               <TableHeader>
                 <TableRow>
                   <TableHead>Name</TableHead>
+                  <TableHead>Branches</TableHead>
                   <TableHead className="text-right">Price</TableHead>
                   <TableHead className="text-right">Sort</TableHead>
                   <TableHead className="text-right">Used in</TableHead>
@@ -1973,6 +1977,15 @@ function AddonsSection({ canEdit }: { canEdit: boolean }) {
                 {rows.map((r) => (
                   <TableRow key={r.id} className={!r.is_active ? "opacity-60" : ""} data-testid={`row-addon-${r.id}`}>
                     <TableCell className="font-medium text-sm">{r.name}</TableCell>
+                    <TableCell>
+                      {r.branch_ids.length === 0 ? (
+                        <Badge variant="outline" className="border-blue-200 text-blue-700 bg-blue-50">
+                          All branches
+                        </Badge>
+                      ) : (
+                        <BranchBadges ids={r.branch_ids} />
+                      )}
+                    </TableCell>
                     <TableCell className="text-right text-sm font-medium">{formatBND(r.price_cents)}</TableCell>
                     <TableCell className="text-right text-xs">{r.sort_order}</TableCell>
                     <TableCell className="text-right text-xs">{r.order_count.toLocaleString()}</TableCell>
@@ -2028,7 +2041,25 @@ function AddonEditDialog({
   const [price, setPrice] = useState(initial ? formatBndInput(initial.price_cents) : "");
   const [isActive, setIsActive] = useState(initial?.is_active ?? true);
   const [sortOrder, setSortOrder] = useState(initial?.sort_order != null ? String(initial.sort_order) : "0");
+  // Branch availability — mirrors the PackageEditDialog pattern. Empty
+  // assignment ⇒ available at every branch (the safe default).
+  const [allBranches, setAllBranches] = useState<boolean>(
+    !initial || initial.branch_ids.length === 0,
+  );
+  const [selectedBranches, setSelectedBranches] = useState<Set<number>>(
+    new Set(initial?.branch_ids ?? []),
+  );
+  const { data: branchesData } = useBranches();
+  const branches = branchesData?.rows ?? [];
   const [err, setErr] = useState<string | null>(null);
+
+  const toggleBranch = (id: number) => {
+    setSelectedBranches((prev) => {
+      const next = new Set(prev);
+      next.has(id) ? next.delete(id) : next.add(id);
+      return next;
+    });
+  };
 
   const submit = () => {
     setErr(null);
@@ -2037,11 +2068,15 @@ function AddonEditDialog({
     if (cents === null) return setErr("Price must be a non-negative number (e.g. 1.00).");
     const so = Number(sortOrder);
     if (!Number.isInteger(so) || so < 0 || so > 999) return setErr("Sort order must be 0–999.");
+    if (!allBranches && selectedBranches.size === 0) {
+      return setErr("Pick at least one branch, or switch to 'All branches'.");
+    }
     onSave({
       name: name.trim(),
       price_cents: cents,
       is_active: isActive,
       sort_order: so,
+      branch_ids: allBranches ? [] : Array.from(selectedBranches).sort((a, b) => a - b),
     });
   };
 
@@ -2073,6 +2108,48 @@ function AddonEditDialog({
             <input type="checkbox" checked={isActive} onChange={(e) => setIsActive(e.target.checked)} data-testid="input-addon-active" />
             Active (shown in POS)
           </label>
+
+          {/* Branch availability. "All branches" is the safe default;
+              tick specific branches only for restricted upsells like
+              an Engine Bay Wash that's not available at every till. */}
+          <div className="border-t pt-3 space-y-2">
+            <p className="text-xs font-medium text-gray-700">Available at</p>
+            <label className="flex items-center gap-2 text-sm">
+              <input
+                type="radio"
+                checked={allBranches}
+                onChange={() => setAllBranches(true)}
+                data-testid="input-addon-allbranches"
+              />
+              <span>All branches (default)</span>
+            </label>
+            <label className="flex items-center gap-2 text-sm">
+              <input
+                type="radio"
+                checked={!allBranches}
+                onChange={() => setAllBranches(false)}
+                data-testid="input-addon-specificbranches"
+              />
+              <span>Only specific branches</span>
+            </label>
+            {!allBranches && (
+              <div className="grid grid-cols-2 gap-2 pl-6">
+                {branches.map((b) => (
+                  <label key={b.id} className="flex items-center gap-2 text-sm">
+                    <input
+                      type="checkbox"
+                      checked={selectedBranches.has(b.id)}
+                      onChange={() => toggleBranch(b.id)}
+                      data-testid={`input-addon-branch-${b.id}`}
+                    />
+                    <span>{b.name}</span>
+                  </label>
+                ))}
+                {branches.length === 0 && <p className="text-xs text-gray-500">Loading branches…</p>}
+              </div>
+            )}
+          </div>
+
           {err && <p className="text-sm text-red-600">{err}</p>}
         </CardContent>
         <div className="flex justify-end gap-2 px-6 pb-6">
