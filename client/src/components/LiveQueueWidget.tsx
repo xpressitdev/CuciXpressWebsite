@@ -47,6 +47,15 @@ export default function LiveQueueWidget() {
             </span>
             LIVE · {time}
           </span>
+          {shortest && (
+            <span
+              className="text-xs bg-gray-900 text-white px-3 py-1 rounded-full font-semibold"
+              data-testid="badge-fastest-lane"
+            >
+              Fastest lane · {shortBranchName(shortest.name)}
+              {shortest.queued_count > 0 ? ` · ~${shortest.est_wait_minutes}m` : " · open now"}
+            </span>
+          )}
         </div>
         <h3 className="text-lg md:text-xl font-bold text-gray-900 mb-4">
           Queue across all branches
