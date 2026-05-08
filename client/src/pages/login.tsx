@@ -1,7 +1,7 @@
 import { useState, useEffect } from "react";
 import { useLocation, Link } from "wouter";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
-import { Phone, KeyRound, ArrowLeft, Loader2 } from "lucide-react";
+import { Phone, KeyRound, ArrowLeft, Loader2, Car } from "lucide-react";
 import Navigation from "@/components/Navigation";
 import Footer from "@/components/Footer";
 import { Button } from "@/components/ui/button";
@@ -37,7 +37,38 @@ export default function LoginPage() {
   const [phone, setPhone] = useState("");
   const [name, setName] = useState("");
   const [code, setCode] = useState("");
+  const [plate, setPlate] = useState("");
+  const [plateSuggestions, setPlateSuggestions] = useState<string[]>([]);
   const [busy, setBusy] = useState(false);
+
+  // Debounced plate autocomplete (Phase 2). Hits a public endpoint that
+  // returns plate strings only — no owner names — so it's safe to expose
+  // before login. Helps a returning customer type the exact plate we
+  // already have in our 25k-vehicle history.
+  useEffect(() => {
+    const q = plate.trim();
+    if (q.length < 2) {
+      setPlateSuggestions([]);
+      return;
+    }
+    const handle = setTimeout(async () => {
+      try {
+        const r = await fetch(
+          `/api/auth/customer/plate-suggest?q=${encodeURIComponent(q)}`,
+        );
+        if (!r.ok) return;
+        const data = (await r.json()) as { plates: { license_plate: string }[] };
+        const exact = data.plates.find(
+          (p) => p.license_plate.toUpperCase().replace(/\s+/g, "") === q.toUpperCase().replace(/\s+/g, ""),
+        );
+        // Hide the popover when the typed plate already matches exactly.
+        setPlateSuggestions(exact ? [] : data.plates.map((p) => p.license_plate));
+      } catch {
+        /* ignore */
+      }
+    }, 200);
+    return () => clearTimeout(handle);
+  }, [plate]);
 
   const sendCode = async () => {
     if (!phone.trim()) return;
@@ -83,6 +114,7 @@ export default function LoginPage() {
           phone,
           code,
           name: name.trim() || undefined,
+          plate: plate.trim() || undefined,
         }),
       });
       const data = await res.json();
@@ -156,6 +188,43 @@ export default function LoginPage() {
                   className="border-2 border-black focus-visible:ring-cuci-primary"
                   data-testid="input-login-name"
                 />
+              </div>
+              <div className="space-y-1 relative">
+                <label className="cuci-eyebrow flex items-center gap-1">
+                  <Car className="w-3 h-3" /> License plate{" "}
+                  <span className="text-gray-400 normal-case font-normal">
+                    (optional · unlocks your wash history)
+                  </span>
+                </label>
+                <Input
+                  value={plate}
+                  onChange={(e) => setPlate(e.target.value.toUpperCase())}
+                  placeholder="e.g. BBG2629"
+                  autoComplete="off"
+                  className="border-2 border-black focus-visible:ring-cuci-primary uppercase tracking-wider"
+                  data-testid="input-login-plate"
+                />
+                {plateSuggestions.length > 0 && (
+                  <div
+                    className="absolute z-20 left-0 right-0 mt-1 max-h-44 overflow-y-auto rounded-md border-2 border-black bg-white shadow-lg"
+                    data-testid="popover-plate-suggestions"
+                  >
+                    {plateSuggestions.map((p) => (
+                      <button
+                        key={p}
+                        type="button"
+                        onClick={() => {
+                          setPlate(p);
+                          setPlateSuggestions([]);
+                        }}
+                        className="w-full text-left px-3 py-2 text-sm font-mono hover:bg-cuci-primary/10 border-b border-gray-100 last:border-0"
+                        data-testid={`option-plate-${p.replace(/\s+/g, "")}`}
+                      >
+                        {p}
+                      </button>
+                    ))}
+                  </div>
+                )}
               </div>
               <Button
                 onClick={sendCode}

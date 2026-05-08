@@ -122,8 +122,9 @@ interface VehicleSuggestion {
   last_seen_at: string | null;
   customer: { id: number; phone: string; name: string } | null;
 }
+type VipTier = "gold" | "silver" | "bronze";
 interface VehicleHistory {
-  vehicle: VehicleSuggestion;
+  vehicle: VehicleSuggestion & { vip_tier: VipTier | null; vip_rank: number | null };
   customer: { id: number; phone: string; name: string } | null;
   total_visits: number;
   total_spent_cents: number;
@@ -1102,13 +1103,40 @@ export default function POS() {
                     >
                       <div className="flex items-start justify-between gap-2">
                         <div className="text-sm">
-                          <div className="font-semibold text-gray-900">
-                            {[vehicleHistory.vehicle.brand, vehicleHistory.vehicle.model]
-                              .filter(Boolean)
-                              .join(" ") || "Vehicle on file"}
-                            {vehicleHistory.vehicle.color && (
-                              <span className="text-gray-600 font-normal">
-                                {" · "}{vehicleHistory.vehicle.color}
+                          <div className="font-semibold text-gray-900 flex items-center gap-2 flex-wrap">
+                            <span>
+                              {[vehicleHistory.vehicle.brand, vehicleHistory.vehicle.model]
+                                .filter(Boolean)
+                                .join(" ") || "Vehicle on file"}
+                              {vehicleHistory.vehicle.color && (
+                                <span className="text-gray-600 font-normal">
+                                  {" · "}{vehicleHistory.vehicle.color}
+                                </span>
+                              )}
+                            </span>
+                            {vehicleHistory.vehicle.vip_tier && (
+                              <span
+                                className={
+                                  "inline-flex items-center gap-1 rounded-full border px-2 py-0.5 text-[11px] font-bold uppercase tracking-wide " +
+                                  (vehicleHistory.vehicle.vip_tier === "gold"
+                                    ? "bg-amber-100 border-amber-400 text-amber-800"
+                                    : vehicleHistory.vehicle.vip_tier === "silver"
+                                    ? "bg-slate-100 border-slate-400 text-slate-700"
+                                    : "bg-orange-100 border-orange-400 text-orange-800")
+                                }
+                                data-testid={`badge-vip-${vehicleHistory.vehicle.vip_tier}`}
+                                title={
+                                  vehicleHistory.vehicle.vip_rank
+                                    ? `Rank #${vehicleHistory.vehicle.vip_rank} customer`
+                                    : undefined
+                                }
+                              >
+                                ★ {vehicleHistory.vehicle.vip_tier} VIP
+                                {vehicleHistory.vehicle.vip_rank && (
+                                  <span className="font-semibold opacity-70">
+                                    {" "}#{vehicleHistory.vehicle.vip_rank}
+                                  </span>
+                                )}
                               </span>
                             )}
                           </div>

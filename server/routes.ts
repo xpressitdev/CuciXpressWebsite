@@ -3491,6 +3491,11 @@ export async function registerRoutes(app: Express): Promise<Server> {
     phone: z.string().min(7).max(20),
     code: z.string().regex(/^\d{6}$/),
     name: z.string().min(1).max(100).optional(),
+    // Phase 2 (2026-05-08): optional plate the customer claims is theirs.
+    // We link/create a `cars` row pointing at this customer so their full
+    // historical wash record (including pre-Lucia legacy SharePoint rows)
+    // shows up under "My washes" on the dashboard.
+    plate: z.string().min(1).max(20).optional(),
   });
 
   // GET /api/dev/last-otp?phone=...
@@ -3601,6 +3606,53 @@ export async function registerRoutes(app: Express): Promise<Server> {
         }
       }
 
+      // Phase 2 (2026-05-08): if the customer typed a plate, link the
+      // matching `cars` row to them (or create one) so legacy SharePoint
+      // wash history shows up on their dashboard. The car's normalised
+      // plate is unique, so we look it up via the same expression the
+      // partial unique index uses, then either:
+      //   - bind it to this user (preserving any existing brand/model);
+      //   - or insert a fresh row owned by them.
+      const rawPlate = (parsed.data.plate ?? '').trim();
+      if (rawPlate) {
+        const plateNorm = rawPlate.toUpperCase().replace(/\s+/g, '');
+        if (plateNorm.length >= 2) {
+          // The customers row that's linked to this user (we always have
+          // one by now, either pre-existing or just created above).
+          const linkedCust = (await db.execute(sql`
+            SELECT id FROM customers WHERE user_id = ${userId} LIMIT 1
+          `)).rows[0] as { id: number } | undefined;
+          const custId = linkedCust?.id ?? null;
+
+          const existing = (await db.execute(sql`
+            SELECT id, customer_id, user_id FROM cars
+             WHERE UPPER(REGEXP_REPLACE(license_plate, '\\s+', '', 'g')) = ${plateNorm}
+             LIMIT 1
+          `)).rows[0] as { id: number; customer_id: number | null; user_id: number | null } | undefined;
+
+          if (existing) {
+            // Only attach if no other customer owns this plate yet — refuse
+            // to silently steal a car already linked to someone else.
+            const ownedByOther =
+              (existing.customer_id !== null && existing.customer_id !== custId) ||
+              (existing.user_id !== null && existing.user_id !== userId);
+            if (!ownedByOther) {
+              await db.execute(sql`
+                UPDATE cars
+                   SET user_id     = COALESCE(user_id, ${userId}),
+                       customer_id = COALESCE(customer_id, ${custId})
+                 WHERE id = ${existing.id}
+              `);
+            }
+          } else {
+            await db.execute(sql`
+              INSERT INTO cars (license_plate, user_id, customer_id)
+              VALUES (${rawPlate}, ${userId}, ${custId})
+            `);
+          }
+        }
+      }
+
       const session = await lucia.createSession(String(userId), {});
       const cookie = lucia.createSessionCookie(session.id);
       res.appendHeader('Set-Cookie', cookie.serialize());
@@ -3608,6 +3660,30 @@ export async function registerRoutes(app: Express): Promise<Server> {
     } catch (err) {
       console.error('[customer-login] failed', err);
       res.status(500).json({ ok: false, reason: 'server_error' });
+    }
+  });
+
+  // Public plate autocomplete for the customer login screen. Returns
+  // *only* the plate string and a coarse "we know this car" hint — no
+  // owner name, phone, or visit count — so an outsider can't fish for
+  // someone else's identity. Used by the login form to nudge a returning
+  // customer toward the exact plate spelling we have on file.
+  app.get('/api/auth/customer/plate-suggest', async (req, res) => {
+    const q = String(req.query.q ?? '').trim();
+    if (q.length < 2) return res.json({ plates: [] });
+    const norm = q.toUpperCase().replace(/\s+/g, '');
+    try {
+      const rows = (await db.execute(sql`
+        SELECT license_plate
+          FROM cars
+         WHERE UPPER(REGEXP_REPLACE(license_plate, '\\s+', '', 'g')) LIKE ${norm + '%'}
+         ORDER BY COALESCE(last_seen_at, 'epoch'::timestamptz) DESC, id DESC
+         LIMIT 8
+      `)).rows.map((r: any) => ({ license_plate: r.license_plate as string }));
+      res.json({ plates: rows });
+    } catch (err) {
+      console.error('[customer.plate-suggest] failed:', err);
+      res.json({ plates: [] });
     }
   });
 
@@ -3716,16 +3792,38 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
   app.get('/api/customer/orders', requireLuciaUser, async (req, res) => {
     const userId = Number(req.lucia!.user!.id);
+    // Show wash history matched any of three ways:
+    //   1. order.customer_id = userId  (POS-linked walk-in or self-pay)
+    //   2. order.vehicle_id  ∈ cars owned by this user  (saved-car link)
+    //   3. order.plate       ∈ plates of cars owned by this user
+    //      (catches pre-Lucia legacy SharePoint orders that were imported
+    //      before the customer linked their plate at login).
+    // De-dup by id so a row matched two ways shows up once.
     const rows = (await db.execute(sql`
-      SELECT o.id, o.branch_id, b.name AS branch_name, o.plate, o.package_name,
+      WITH my_cars AS (
+        SELECT c.id,
+               UPPER(REGEXP_REPLACE(c.license_plate, '\\s+', '', 'g')) AS plate_norm
+          FROM cars c
+         WHERE c.user_id = ${userId}
+            OR c.customer_id = (SELECT id FROM customers WHERE user_id = ${userId} LIMIT 1)
+      )
+      SELECT DISTINCT ON (o.id)
+             o.id, o.branch_id, b.name AS branch_name, o.plate, o.package_name,
              o.total_cents, o.status, o.created_at, o.completed_at, o.payment_method
       FROM orders o
       LEFT JOIN branches b ON b.id = o.branch_id
       WHERE o.customer_id = ${userId}
-      ORDER BY o.created_at DESC
-      LIMIT 50
+         OR o.vehicle_id IN (SELECT id FROM my_cars)
+         OR UPPER(REGEXP_REPLACE(o.plate, '\\s+', '', 'g'))
+              IN (SELECT plate_norm FROM my_cars)
+      ORDER BY o.id, o.created_at DESC
     `)).rows;
-    res.json({ orders: rows });
+    // The DISTINCT ON forces a primary sort by id; resort by date for
+    // the response so newest washes are first.
+    rows.sort((a: any, b: any) =>
+      String(b.created_at).localeCompare(String(a.created_at)),
+    );
+    res.json({ orders: rows.slice(0, 200) });
   });
 
   app.get('/api/customer/memberships', requireLuciaUser, async (req, res) => {
@@ -5508,6 +5606,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
     try {
       const vehicleRows = (await db.execute(sql`
         SELECT c.id, c.license_plate, c.brand, c.model, c.color, c."type", c.last_seen_at,
+               c.vip_tier, c.vip_rank,
                cu.id AS customer_id, cu.phone AS customer_phone, cu.name AS customer_name
           FROM cars c
           LEFT JOIN customers cu ON cu.id = c.customer_id
@@ -5536,6 +5635,8 @@ export async function registerRoutes(app: Express): Promise<Server> {
         vehicle: {
           id: v.id, license_plate: v.license_plate, brand: v.brand, model: v.model,
           color: v.color, type: v.type, last_seen_at: v.last_seen_at,
+          vip_tier: v.vip_tier ?? null,
+          vip_rank: v.vip_rank ?? null,
         },
         customer: v.customer_id
           ? { id: v.customer_id, phone: v.customer_phone, name: v.customer_name }
