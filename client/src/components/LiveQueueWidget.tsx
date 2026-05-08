@@ -47,11 +47,6 @@ export default function LiveQueueWidget() {
             </span>
             LIVE · {time}
           </span>
-          {totalToday > 0 && (
-            <span className="text-xs bg-gray-900 text-white px-3 py-1 rounded-full font-semibold">
-              Today · {totalToday} washed
-            </span>
-          )}
         </div>
         <h3 className="text-lg md:text-xl font-bold text-gray-900 mb-4">
           Queue across all branches
