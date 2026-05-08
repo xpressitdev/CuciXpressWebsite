@@ -321,24 +321,6 @@ export default function POS() {
   }, [catalog, selectedAddons]);
 
   const subtotal = (packagePrice ?? 0) + addonsTotal;
-  // When the cashier picks "Subscription" AND we have an active wash-pack
-  // for the customer, the pack covers the full subtotal (Phase 2 model —
-  // matches the server-side discount calculation).
-  const useMembership =
-    paymentMethod === "subscription" && activeMembership !== null;
-  const discount = useMembership ? subtotal : 0;
-  const total = subtotal - discount;
-
-  const canSubmit =
-    !!activePackage &&
-    packagePrice !== null &&
-    plate.trim().length > 0 &&
-    branchId !== null &&
-    // Subscription payment requires an active wash-pack on file. Block
-    // submit until the cashier either resolves a customer with a pack
-    // or switches payment method — the server enforces this too, but
-    // catching it client-side avoids a confusing 400 round-trip.
-    (paymentMethod !== "subscription" || activeMembership !== null);
 
   // Debounced plate autocomplete. Hits /api/pos/vehicles/search 200ms after
   // the user pauses typing. Skipped when a suggestion is already matched.
@@ -409,6 +391,26 @@ export default function POS() {
     const pinned = list.find(m => m.vehicle_id === matchedVehicleId);
     return pinned ?? list[0];
   }, [membershipData, matchedVehicleId]);
+
+  // When the cashier picks "Subscription" AND we have an active wash-pack
+  // for the customer, the pack covers the full subtotal (Phase 2 model —
+  // matches the server-side discount calculation).
+  // NB: must be defined AFTER activeMembership to avoid a TDZ ReferenceError.
+  const useMembership =
+    paymentMethod === "subscription" && activeMembership !== null;
+  const discount = useMembership ? subtotal : 0;
+  const total = subtotal - discount;
+
+  const canSubmit =
+    !!activePackage &&
+    packagePrice !== null &&
+    plate.trim().length > 0 &&
+    branchId !== null &&
+    // Subscription payment requires an active wash-pack on file. Block
+    // submit until the cashier either resolves a customer with a pack
+    // or switches payment method — the server enforces this too, but
+    // catching it client-side avoids a confusing 400 round-trip.
+    (paymentMethod !== "subscription" || activeMembership !== null);
 
   // When picking a suggestion, prefill plate + customer info (if any) so
   // the cashier doesn't retype it. They can still edit before submitting.
