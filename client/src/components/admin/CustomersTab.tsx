@@ -47,7 +47,9 @@ type VipTier = "gold" | "silver" | "bronze";
 
 interface CustomerRow {
   id: number;
-  phone: string;
+  kind: "customer" | "ghost";
+  has_account: boolean;
+  phone: string | null;
   name: string;
   notes: string | null;
   created_at: string;
@@ -59,11 +61,15 @@ interface CustomerRow {
   favourite_branch: string | null;
   branches_visited: number;
   has_legacy: boolean;
+  is_online: boolean;
 }
 
 interface CustomerStats {
   total_customers: number;
   active_customers: number;
+  registered_count: number;
+  ghost_count: number;
+  has_account_count: number;
   gold_count: number;
   silver_count: number;
   bronze_count: number;
@@ -117,10 +123,15 @@ const SEGMENT_OPTIONS = [
   { value: "multi_branch", label: "Multi-branch",      icon: Building2,    hint: "Visited 2+ branches" },
   { value: "new",          label: "New (14 days)",     icon: Sparkles,     hint: "Joined in last 14 days" },
   { value: "legacy",       label: "Legacy customers",  icon: History,      hint: "Has imported historical visits" },
+  { value: "no_account",   label: "Not signed up",     icon: Users,        hint: "Walk-in / legacy plate, no account yet" },
 ] as const;
 
 interface CustomerDetailResp {
-  customer: { id: number; phone: string; name: string; notes: string | null; user_id: number | null; created_at: string };
+  customer: {
+    id: number; phone: string | null; name: string; notes: string | null;
+    user_id: number | null; created_at: string;
+    kind?: "customer" | "ghost"; has_account?: boolean;
+  };
   vehicles: Array<{
     id: number; license_plate: string; brand: string | null; model: string | null;
     color: string | null; type: string | null; last_seen_at: string | null;
@@ -287,6 +298,7 @@ export default function CustomersTab() {
                     <TableRow>
                       <TableHead>Customer</TableHead>
                       <TableHead>Tier</TableHead>
+                      <TableHead>Account</TableHead>
                       <TableHead>Favourite branch</TableHead>
                       <TableHead className="text-center">Vehicles</TableHead>
                       <TableHead className="text-center">Visits</TableHead>
@@ -303,9 +315,27 @@ export default function CustomersTab() {
                         data-testid={`row-customer-${c.id}`}
                       >
                         <TableCell>
-                          <div className="font-semibold leading-tight">{c.name}</div>
+                          <div className="font-semibold leading-tight flex items-center gap-1.5 flex-wrap">
+                            {c.kind === "ghost" ? (
+                              <span className="font-mono">{c.name}</span>
+                            ) : (
+                              c.name
+                            )}
+                            {c.kind === "ghost" && (
+                              <span
+                                title="Legacy plate — no customer record yet"
+                                className="inline-flex items-center gap-0.5 text-[9px] font-bold uppercase tracking-wide text-gray-700 bg-gray-100 border border-gray-300 rounded px-1 py-0.5"
+                              >
+                                Walk-in
+                              </span>
+                            )}
+                          </div>
                           <div className="text-[11px] text-gray-500 flex items-center gap-1 mt-0.5">
-                            <Phone className="w-3 h-3" /> {c.phone}
+                            {c.phone ? (
+                              <><Phone className="w-3 h-3" /> {c.phone}</>
+                            ) : (
+                              <span className="italic">no phone on file</span>
+                            )}
                             {c.has_legacy && (
                               <span title="Has imported historical visits" className="ml-1 inline-flex items-center gap-0.5 text-[10px] text-purple-700 font-semibold">
                                 <History className="w-3 h-3" /> legacy
@@ -315,6 +345,21 @@ export default function CustomersTab() {
                         </TableCell>
                         <TableCell>
                           {c.vip_tier ? <VipBadge tier={c.vip_tier} /> : <span className="text-[11px] text-gray-400">—</span>}
+                        </TableCell>
+                        <TableCell>
+                          {c.has_account ? (
+                            <span className="inline-flex items-center gap-1 text-[10px] font-bold uppercase text-green-800 bg-green-100 border-2 border-green-500 rounded-full px-2 py-0.5">
+                              <CheckCircle2 className="w-3 h-3" /> Signed in
+                            </span>
+                          ) : c.kind === "customer" ? (
+                            <span className="inline-flex items-center gap-1 text-[10px] font-bold uppercase text-amber-800 bg-amber-50 border-2 border-amber-400 rounded-full px-2 py-0.5">
+                              Walk-in
+                            </span>
+                          ) : (
+                            <span className="inline-flex items-center gap-1 text-[10px] font-bold uppercase text-gray-700 bg-gray-100 border-2 border-gray-400 rounded-full px-2 py-0.5">
+                              No account
+                            </span>
+                          )}
                         </TableCell>
                         <TableCell className="text-xs">
                           {c.favourite_branch ? (
@@ -899,6 +944,7 @@ function CustomerDetail({ id }: { id: number }) {
   if (error || !data) return <p className="text-sm text-red-600">Failed to load profile.</p>;
 
   const { customer, vehicles, orders, stats } = data;
+  const isGhost = customer.kind === "ghost" || id < 0;
 
   const startEdit = () => {
     setEditName(customer.name);
@@ -940,19 +986,37 @@ function CustomerDetail({ id }: { id: number }) {
           <>
             <div className="flex items-start justify-between gap-2">
               <div className="min-w-0">
-                <div className="text-xl font-extrabold tracking-tight truncate">{customer.name}</div>
+                <div className={`text-xl font-extrabold tracking-tight truncate ${isGhost ? "font-mono" : ""}`}>
+                  {customer.name}
+                </div>
                 <div className="text-xs text-gray-500 flex items-center gap-1 mt-0.5">
-                  <Phone className="w-3 h-3" /> {customer.phone}
+                  {customer.phone ? (
+                    <><Phone className="w-3 h-3" /> {customer.phone}</>
+                  ) : (
+                    <span className="italic">No phone on file — legacy plate only</span>
+                  )}
                 </div>
               </div>
-              <Button size="sm" variant="outline" className="border-2 border-black h-8" onClick={startEdit} data-testid="button-edit-customer">
-                <Pencil className="w-3 h-3 mr-1" /> Edit
-              </Button>
+              {!isGhost && (
+                <Button size="sm" variant="outline" className="border-2 border-black h-8" onClick={startEdit} data-testid="button-edit-customer">
+                  <Pencil className="w-3 h-3 mr-1" /> Edit
+                </Button>
+              )}
             </div>
             <div className="flex flex-wrap gap-1.5">
               {stats.vip_tier && <VipBadge tier={stats.vip_tier} />}
-              {customer.user_id && (
-                <Badge className="bg-green-600 text-white text-[10px]">Has account</Badge>
+              {customer.user_id ? (
+                <Badge className="bg-green-600 text-white text-[10px] gap-1">
+                  <CheckCircle2 className="w-3 h-3" /> Signed in
+                </Badge>
+              ) : isGhost ? (
+                <Badge variant="outline" className="border-2 border-gray-400 text-gray-700 text-[10px]">
+                  No account yet
+                </Badge>
+              ) : (
+                <Badge variant="outline" className="border-2 border-amber-400 text-amber-800 text-[10px]">
+                  Walk-in
+                </Badge>
               )}
               {stats.legacy_visits > 0 && (
                 <Badge variant="outline" className="border-2 border-purple-500 text-purple-800 text-[10px] gap-1">
@@ -1215,6 +1279,15 @@ function CustomerStatsHeader({
       seg: "legacy",
       accent: "border-purple-500 bg-purple-50",
       testId: "tile-cust-legacy",
+    },
+    {
+      label: "Not signed up",
+      value: (stats.total_customers - stats.has_account_count).toLocaleString(),
+      sub: `${stats.has_account_count} signed in`,
+      icon: Users,
+      seg: "no_account",
+      accent: "border-gray-400 bg-gray-50",
+      testId: "tile-cust-no-account",
     },
     {
       label: "Avg spend",

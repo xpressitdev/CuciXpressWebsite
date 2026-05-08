@@ -1372,60 +1372,116 @@ export async function registerRoutes(app: Express): Promise<Server> {
   // ---- Phase 12b-3: customer segment filters --------------------------------
   // Composable AND-fragments evaluated against alias `c` (customers).
   // Returned as Drizzle SQL fragments so they slot into list + CSV queries.
-  const SEGMENTS = ['vip', 'gold', 'silver', 'bronze', 'at_risk', 'online', 'multi_branch', 'new', 'legacy'] as const;
+  const SEGMENTS = ['vip', 'gold', 'silver', 'bronze', 'at_risk', 'online', 'multi_branch', 'new', 'legacy', 'no_account'] as const;
   type Segment = (typeof SEGMENTS)[number];
+
+  // All filtering happens against the unified `person` CTE (alias `p`),
+  // whose columns are pre-computed by personCte() below. This keeps
+  // the predicates short and lets ghost (unlinked-car) rows participate.
   function segmentFragment(seg: Segment | null) {
     if (seg === null) return sql``;
-    if (seg === 'vip') {
-      // Lifetime spend (excl. refunds) >= B$500.
-      return sql`AND (
-        SELECT COALESCE(SUM(o.total_cents),0)
-          FROM orders o JOIN cars car ON car.id = o.vehicle_id
-         WHERE car.customer_id = c.id AND o.status <> 'refunded'
-      ) >= 50000`;
-    }
-    if (seg === 'gold' || seg === 'silver' || seg === 'bronze') {
-      // VIP tier is cached per-car by recompute_vip_tiers.ts. A customer
-      // is considered "tier T" if any of their cars holds tier T.
-      return sql`AND EXISTS (
-        SELECT 1 FROM cars car
-         WHERE car.customer_id = c.id AND car.vip_tier = ${seg}
-      )`;
-    }
-    if (seg === 'legacy') {
-      // Customer has historical (pre-system) sales imported from SharePoint.
-      return sql`AND EXISTS (
-        SELECT 1 FROM orders o JOIN cars car ON car.id = o.vehicle_id
-         WHERE car.customer_id = c.id AND o.legacy_source IS NOT NULL
-      )`;
-    }
-    if (seg === 'at_risk') {
-      // 2+ paid visits AND last visit > 30 days ago.
-      return sql`AND (
-        SELECT COUNT(*) FROM orders o JOIN cars car ON car.id = o.vehicle_id
-         WHERE car.customer_id = c.id AND o.status NOT IN ('refunded','pending_payment','voided')
-      ) >= 2
-      AND (
-        SELECT MAX(o.created_at) FROM orders o JOIN cars car ON car.id = o.vehicle_id
-         WHERE car.customer_id = c.id AND o.status NOT IN ('refunded','pending_payment','voided')
-      ) < NOW() - INTERVAL '30 days'`;
-    }
-    if (seg === 'online') {
-      return sql`AND EXISTS (
-        SELECT 1 FROM orders o JOIN cars car ON car.id = o.vehicle_id
-         WHERE car.customer_id = c.id AND o.qr_provider = 'pocket_pay'
-      )`;
-    }
-    if (seg === 'multi_branch') {
-      return sql`AND (
-        SELECT COUNT(DISTINCT o.branch_id) FROM orders o JOIN cars car ON car.id = o.vehicle_id
-         WHERE car.customer_id = c.id AND o.status <> 'refunded'
-      ) >= 2`;
-    }
-    if (seg === 'new') {
-      return sql`AND c.created_at > NOW() - INTERVAL '14 days'`;
-    }
+    if (seg === 'vip')          return sql`AND p.total_spent_cents >= 50000`;
+    if (seg === 'gold' || seg === 'silver' || seg === 'bronze')
+                                 return sql`AND p.vip_tier = ${seg}`;
+    if (seg === 'legacy')       return sql`AND p.has_legacy`;
+    if (seg === 'online')       return sql`AND p.is_online`;
+    if (seg === 'multi_branch') return sql`AND p.branches_visited >= 2`;
+    if (seg === 'new')          return sql`AND p.created_at > NOW() - INTERVAL '14 days'`;
+    if (seg === 'no_account')   return sql`AND p.has_account = FALSE`;
+    if (seg === 'at_risk')
+      return sql`AND p.visits >= 2 AND p.last_visit_at < NOW() - INTERVAL '30 days'`;
     return sql``;
+  }
+
+  // Unified "person" CTE — every row is either:
+  //   • kind='customer' (ref_id = customers.id)        — registered or walk-in customer
+  //   • kind='ghost'    (ref_id = -cars.id)            — legacy/unlinked car (no signed-up
+  //                                                      customer record yet) that still has
+  //                                                      VIP-tier data or order history.
+  //
+  // Both branches expose the SAME column set so the rest of the queries (list,
+  // CSV, stats) just SELECT from `p` and apply the same filters.
+  function personCte() {
+    return sql`WITH person AS (
+      -- Registered/walk-in customers
+      SELECT
+        c.id                                                                                    AS ref_id,
+        'customer'::text                                                                        AS kind,
+        c.id                                                                                    AS customer_id,
+        NULL::int                                                                               AS ghost_car_id,
+        c.name                                                                                  AS name,
+        c.phone                                                                                 AS phone,
+        c.notes                                                                                 AS notes,
+        c.created_at                                                                            AS created_at,
+        (c.user_id IS NOT NULL)                                                                 AS has_account,
+        (SELECT COUNT(*)::int FROM cars car WHERE car.customer_id = c.id)                       AS vehicle_count,
+        (SELECT COUNT(*)::int FROM orders o JOIN cars car ON car.id = o.vehicle_id
+          WHERE car.customer_id = c.id AND o.status <> 'refunded')                              AS visits,
+        (SELECT COALESCE(SUM(o.total_cents),0)::bigint FROM orders o JOIN cars car ON car.id = o.vehicle_id
+          WHERE car.customer_id = c.id AND o.status <> 'refunded')                              AS total_spent_cents,
+        (SELECT MAX(o.created_at) FROM orders o JOIN cars car ON car.id = o.vehicle_id
+          WHERE car.customer_id = c.id)                                                         AS last_visit_at,
+        (SELECT car.vip_tier FROM cars car
+          WHERE car.customer_id = c.id AND car.vip_tier IS NOT NULL
+          ORDER BY CASE car.vip_tier WHEN 'gold' THEN 1 WHEN 'silver' THEN 2 WHEN 'bronze' THEN 3 ELSE 9 END
+          LIMIT 1)                                                                              AS vip_tier,
+        (SELECT b.name FROM orders o JOIN cars car ON car.id = o.vehicle_id JOIN branches b ON b.id = o.branch_id
+          WHERE car.customer_id = c.id AND o.status <> 'refunded'
+          GROUP BY b.id, b.name ORDER BY COUNT(*) DESC, MAX(o.created_at) DESC LIMIT 1)         AS favourite_branch,
+        (SELECT COUNT(DISTINCT o.branch_id)::int FROM orders o JOIN cars car ON car.id = o.vehicle_id
+          WHERE car.customer_id = c.id AND o.status <> 'refunded')                              AS branches_visited,
+        EXISTS (SELECT 1 FROM orders o JOIN cars car ON car.id = o.vehicle_id
+                 WHERE car.customer_id = c.id AND o.legacy_source IS NOT NULL)                  AS has_legacy,
+        EXISTS (SELECT 1 FROM orders o JOIN cars car ON car.id = o.vehicle_id
+                 WHERE car.customer_id = c.id AND o.qr_provider = 'pocket_pay')                 AS is_online,
+        (SELECT STRING_AGG(car.license_plate, '; ' ORDER BY car.id)
+           FROM cars car WHERE car.customer_id = c.id)                                          AS plates,
+        (SELECT ARRAY_AGG(DISTINCT o.branch_id) FROM orders o JOIN cars car ON car.id = o.vehicle_id
+          WHERE car.customer_id = c.id AND o.branch_id IS NOT NULL)                             AS branch_ids
+      FROM customers c
+
+      UNION ALL
+
+      -- "Ghost" customers — cars not linked to any customer record but with VIP tier
+      -- or order history (so they're worth surfacing in the CRM).
+      SELECT
+        -car.id                                                                                  AS ref_id,
+        'ghost'::text                                                                            AS kind,
+        NULL::int                                                                                AS customer_id,
+        car.id                                                                                   AS ghost_car_id,
+        car.license_plate                                                                        AS name,
+        NULL::text                                                                               AS phone,
+        NULL::text                                                                               AS notes,
+        COALESCE(car.last_seen_at, '2020-01-01'::timestamptz)                                   AS created_at,
+        FALSE                                                                                    AS has_account,
+        1                                                                                        AS vehicle_count,
+        (SELECT COUNT(*)::int FROM orders o WHERE o.vehicle_id = car.id AND o.status <> 'refunded')        AS visits,
+        GREATEST(
+          car.total_spent_cents,
+          COALESCE((SELECT SUM(o.total_cents)::bigint FROM orders o WHERE o.vehicle_id = car.id AND o.status <> 'refunded'), 0)
+        )                                                                                        AS total_spent_cents,
+        COALESCE(
+          (SELECT MAX(o.created_at) FROM orders o WHERE o.vehicle_id = car.id),
+          car.last_seen_at
+        )                                                                                        AS last_visit_at,
+        car.vip_tier                                                                             AS vip_tier,
+        (SELECT b.name FROM orders o JOIN branches b ON b.id = o.branch_id
+          WHERE o.vehicle_id = car.id AND o.status <> 'refunded'
+          GROUP BY b.id, b.name ORDER BY COUNT(*) DESC, MAX(o.created_at) DESC LIMIT 1)          AS favourite_branch,
+        (SELECT COUNT(DISTINCT o.branch_id)::int FROM orders o
+          WHERE o.vehicle_id = car.id AND o.status <> 'refunded')                                AS branches_visited,
+        (car.vip_tier IS NOT NULL OR EXISTS (
+          SELECT 1 FROM orders o WHERE o.vehicle_id = car.id AND o.legacy_source IS NOT NULL))   AS has_legacy,
+        EXISTS (SELECT 1 FROM orders o WHERE o.vehicle_id = car.id AND o.qr_provider = 'pocket_pay')        AS is_online,
+        car.license_plate                                                                        AS plates,
+        (SELECT ARRAY_AGG(DISTINCT o.branch_id) FROM orders o
+          WHERE o.vehicle_id = car.id AND o.branch_id IS NOT NULL)                               AS branch_ids
+      FROM cars car
+      WHERE car.customer_id IS NULL
+        AND (car.vip_tier IS NOT NULL
+          OR car.total_visits > 0
+          OR EXISTS (SELECT 1 FROM orders o WHERE o.vehicle_id = car.id))
+    )`;
   }
 
   // Shared filter parser for /api/admin/customers list + export.
@@ -1448,18 +1504,14 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
     const searchFilter = search.length >= 2
       ? sql`AND (
-              c.name  ILIKE ${'%' + search + '%'}
-           OR c.phone ILIKE ${'%' + search + '%'}
-           OR EXISTS (
-                SELECT 1 FROM cars car
-                 WHERE car.customer_id = c.id
-                   AND UPPER(REGEXP_REPLACE(car.license_plate, '\\s+', '', 'g'))
-                       LIKE ${'%' + search.toUpperCase().replace(/\s+/g, '') + '%'}
-              )
+              p.name  ILIKE ${'%' + search + '%'}
+           OR p.phone ILIKE ${'%' + search + '%'}
+           OR UPPER(REGEXP_REPLACE(COALESCE(p.plates, ''), '\\s+', '', 'g'))
+              LIKE ${'%' + search.toUpperCase().replace(/\s+/g, '') + '%'}
           )`
       : sql``;
     const branchFilter = branchId !== null
-      ? sql`AND EXISTS (SELECT 1 FROM orders o JOIN cars car2 ON car2.id = o.vehicle_id WHERE car2.customer_id = c.id AND o.branch_id = ${branchId})`
+      ? sql`AND ${branchId} = ANY(p.branch_ids)`
       : sql``;
     const segmentFilter = segmentFragment(segment);
 
@@ -1479,47 +1531,39 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
     try {
       const countRow = (await db.execute(sql`
-        SELECT COUNT(*)::int AS n FROM customers c
+        ${personCte()}
+        SELECT COUNT(*)::int AS n FROM person p
          WHERE 1=1 ${searchFilter} ${branchFilter} ${segmentFilter}
       `)).rows[0] as { n: number };
 
       const rows = (await db.execute(sql`
-        SELECT c.id, c.phone, c.name, c.notes, c.created_at,
-               (SELECT COUNT(*)::int FROM cars car WHERE car.customer_id = c.id)                                                AS vehicle_count,
-               (SELECT COUNT(*)::int FROM orders o JOIN cars car ON car.id = o.vehicle_id WHERE car.customer_id = c.id AND o.status <> 'refunded')                AS visits,
-               (SELECT COALESCE(SUM(o.total_cents),0)::bigint FROM orders o JOIN cars car ON car.id = o.vehicle_id WHERE car.customer_id = c.id AND o.status <> 'refunded') AS total_spent_cents,
-               (SELECT MAX(o.created_at)         FROM orders o JOIN cars car ON car.id = o.vehicle_id WHERE car.customer_id = c.id) AS last_visit_at,
-               -- best VIP tier across the customer's cars (gold > silver > bronze)
-               (SELECT car.vip_tier
-                  FROM cars car
-                 WHERE car.customer_id = c.id AND car.vip_tier IS NOT NULL
-                 ORDER BY CASE car.vip_tier WHEN 'gold' THEN 1 WHEN 'silver' THEN 2 WHEN 'bronze' THEN 3 ELSE 9 END
-                 LIMIT 1)                                                                                                          AS vip_tier,
-               -- favourite branch = the one with the most paid visits
-               (SELECT b.name
-                  FROM orders o
-                  JOIN cars car ON car.id = o.vehicle_id
-                  JOIN branches b ON b.id = o.branch_id
-                 WHERE car.customer_id = c.id AND o.status <> 'refunded'
-                 GROUP BY b.id, b.name
-                 ORDER BY COUNT(*) DESC, MAX(o.created_at) DESC
-                 LIMIT 1)                                                                                                          AS favourite_branch,
-               -- count of distinct branches visited (for the multi-branch chip)
-               (SELECT COUNT(DISTINCT o.branch_id)::int
-                  FROM orders o JOIN cars car ON car.id = o.vehicle_id
-                 WHERE car.customer_id = c.id AND o.status <> 'refunded')                                                          AS branches_visited,
-               -- whether any of their visits were imported from SharePoint
-               EXISTS (SELECT 1 FROM orders o JOIN cars car ON car.id = o.vehicle_id
-                        WHERE car.customer_id = c.id AND o.legacy_source IS NOT NULL)                                              AS has_legacy
-          FROM customers c
+        ${personCte()}
+        SELECT p.ref_id        AS id,
+               p.kind,
+               p.has_account,
+               p.phone,
+               p.name,
+               p.notes,
+               p.created_at,
+               p.vehicle_count,
+               p.visits,
+               p.total_spent_cents,
+               p.last_visit_at,
+               p.vip_tier,
+               p.favourite_branch,
+               p.branches_visited,
+               p.has_legacy,
+               p.is_online
+          FROM person p
          WHERE 1=1 ${searchFilter} ${branchFilter} ${segmentFilter}
-         ORDER BY (SELECT MAX(o.created_at) FROM orders o JOIN cars car ON car.id = o.vehicle_id WHERE car.customer_id = c.id) DESC NULLS LAST,
-                  c.created_at DESC
+         ORDER BY p.last_visit_at DESC NULLS LAST, p.created_at DESC
          LIMIT ${perPage} OFFSET ${offset}
       `)).rows.map((r: any) => ({
         ...r,
         total_spent_cents: Number(r.total_spent_cents ?? 0),
         has_legacy: Boolean(r.has_legacy),
+        has_account: Boolean(r.has_account),
+        is_online: Boolean(r.is_online),
       }));
 
       const branches = (await db.execute(sql`SELECT id, name FROM branches ORDER BY name`)).rows;
@@ -1545,41 +1589,23 @@ export async function registerRoutes(app: Express): Promise<Server> {
   app.get('/api/admin/customers/stats', requireStaff, requireStaffRole('owner', 'manager'), async (_req, res) => {
     try {
       const row = (await db.execute(sql`
-        WITH cust AS (
-          SELECT
-            c.id,
-            (SELECT car.vip_tier FROM cars car WHERE car.customer_id = c.id AND car.vip_tier IS NOT NULL
-              ORDER BY CASE car.vip_tier WHEN 'gold' THEN 1 WHEN 'silver' THEN 2 WHEN 'bronze' THEN 3 ELSE 9 END
-              LIMIT 1)                                                                                            AS vip_tier,
-            (SELECT COALESCE(SUM(o.total_cents),0)::bigint
-               FROM orders o JOIN cars car ON car.id = o.vehicle_id
-              WHERE car.customer_id = c.id AND o.status <> 'refunded')                                            AS spent_cents,
-            (SELECT COUNT(*)::int
-               FROM orders o JOIN cars car ON car.id = o.vehicle_id
-              WHERE car.customer_id = c.id AND o.status NOT IN ('refunded','pending_payment','voided'))           AS visits,
-            (SELECT MAX(o.created_at)
-               FROM orders o JOIN cars car ON car.id = o.vehicle_id
-              WHERE car.customer_id = c.id AND o.status NOT IN ('refunded','pending_payment','voided'))           AS last_visit_at,
-            EXISTS (SELECT 1 FROM orders o JOIN cars car ON car.id = o.vehicle_id
-                     WHERE car.customer_id = c.id AND o.legacy_source IS NOT NULL)                                AS has_legacy,
-            EXISTS (SELECT 1 FROM orders o JOIN cars car ON car.id = o.vehicle_id
-                     WHERE car.customer_id = c.id AND o.qr_provider = 'pocket_pay')                               AS is_online,
-            c.created_at
-          FROM customers c
-        )
+        ${personCte()}
         SELECT
           COUNT(*)::int                                                                                  AS total_customers,
-          COUNT(*) FILTER (WHERE vip_tier = 'gold')::int                                                 AS gold_count,
-          COUNT(*) FILTER (WHERE vip_tier = 'silver')::int                                               AS silver_count,
-          COUNT(*) FILTER (WHERE vip_tier = 'bronze')::int                                               AS bronze_count,
-          COUNT(*) FILTER (WHERE spent_cents >= 50000)::int                                              AS spend_vip_count,
-          COUNT(*) FILTER (WHERE visits >= 2 AND last_visit_at < NOW() - INTERVAL '30 days')::int       AS at_risk_count,
-          COUNT(*) FILTER (WHERE created_at > NOW() - INTERVAL '14 days')::int                          AS new_count,
-          COUNT(*) FILTER (WHERE has_legacy)::int                                                        AS legacy_count,
-          COUNT(*) FILTER (WHERE is_online)::int                                                         AS online_count,
-          COALESCE(SUM(spent_cents), 0)::bigint                                                          AS total_spent_cents,
-          COUNT(*) FILTER (WHERE visits > 0)::int                                                        AS active_count
-        FROM cust
+          COUNT(*) FILTER (WHERE p.kind = 'customer')::int                                               AS registered_count,
+          COUNT(*) FILTER (WHERE p.kind = 'ghost')::int                                                  AS ghost_count,
+          COUNT(*) FILTER (WHERE p.has_account)::int                                                     AS has_account_count,
+          COUNT(*) FILTER (WHERE p.vip_tier = 'gold')::int                                               AS gold_count,
+          COUNT(*) FILTER (WHERE p.vip_tier = 'silver')::int                                             AS silver_count,
+          COUNT(*) FILTER (WHERE p.vip_tier = 'bronze')::int                                             AS bronze_count,
+          COUNT(*) FILTER (WHERE p.total_spent_cents >= 50000)::int                                     AS spend_vip_count,
+          COUNT(*) FILTER (WHERE p.visits >= 2 AND p.last_visit_at < NOW() - INTERVAL '30 days')::int  AS at_risk_count,
+          COUNT(*) FILTER (WHERE p.created_at > NOW() - INTERVAL '14 days')::int                       AS new_count,
+          COUNT(*) FILTER (WHERE p.has_legacy)::int                                                     AS legacy_count,
+          COUNT(*) FILTER (WHERE p.is_online)::int                                                      AS online_count,
+          COALESCE(SUM(p.total_spent_cents), 0)::bigint                                                 AS total_spent_cents,
+          COUNT(*) FILTER (WHERE p.visits > 0)::int                                                     AS active_count
+        FROM person p
       `)).rows[0] as any;
 
       const total = Number(row.total_customers ?? 0);
@@ -1589,6 +1615,9 @@ export async function registerRoutes(app: Express): Promise<Server> {
       res.json({
         total_customers:   total,
         active_customers:  active,
+        registered_count:  Number(row.registered_count ?? 0),
+        ghost_count:       Number(row.ghost_count ?? 0),
+        has_account_count: Number(row.has_account_count ?? 0),
         gold_count:        Number(row.gold_count ?? 0),
         silver_count:      Number(row.silver_count ?? 0),
         bronze_count:      Number(row.bronze_count ?? 0),
@@ -1615,21 +1644,14 @@ export async function registerRoutes(app: Express): Promise<Server> {
     const { searchFilter, branchFilter, segmentFilter } = f;
     try {
       const rows = (await db.execute(sql`
-        SELECT c.id, c.name, c.phone, c.created_at,
-               (SELECT COUNT(*)::int FROM cars car WHERE car.customer_id = c.id)                                                AS vehicle_count,
-               (SELECT COUNT(*)::int FROM orders o JOIN cars car ON car.id = o.vehicle_id WHERE car.customer_id = c.id AND o.status <> 'refunded')                AS visits,
-               (SELECT COALESCE(SUM(o.total_cents),0)::bigint FROM orders o JOIN cars car ON car.id = o.vehicle_id WHERE car.customer_id = c.id AND o.status <> 'refunded') AS total_spent_cents,
-               (SELECT MAX(o.created_at)         FROM orders o JOIN cars car ON car.id = o.vehicle_id WHERE car.customer_id = c.id) AS last_visit_at,
-               (SELECT STRING_AGG(car.license_plate, '; ' ORDER BY car.id) FROM cars car WHERE car.customer_id = c.id) AS plates,
-               (SELECT car.vip_tier FROM cars car WHERE car.customer_id = c.id AND car.vip_tier IS NOT NULL
-                 ORDER BY CASE car.vip_tier WHEN 'gold' THEN 1 WHEN 'silver' THEN 2 WHEN 'bronze' THEN 3 ELSE 9 END LIMIT 1) AS vip_tier,
-               (SELECT b.name FROM orders o JOIN cars car ON car.id = o.vehicle_id JOIN branches b ON b.id = o.branch_id
-                 WHERE car.customer_id = c.id AND o.status <> 'refunded'
-                 GROUP BY b.id, b.name ORDER BY COUNT(*) DESC, MAX(o.created_at) DESC LIMIT 1) AS favourite_branch
-          FROM customers c
+        ${personCte()}
+        SELECT p.ref_id AS id, p.kind, p.has_account,
+               p.name, p.phone, p.created_at,
+               p.vehicle_count, p.visits, p.total_spent_cents,
+               p.last_visit_at, p.plates, p.vip_tier, p.favourite_branch
+          FROM person p
          WHERE 1=1 ${searchFilter} ${branchFilter} ${segmentFilter}
-         ORDER BY (SELECT MAX(o.created_at) FROM orders o JOIN cars car ON car.id = o.vehicle_id WHERE car.customer_id = c.id) DESC NULLS LAST,
-                  c.created_at DESC
+         ORDER BY p.last_visit_at DESC NULLS LAST, p.created_at DESC
          LIMIT 10000
       `)).rows;
 
@@ -1638,12 +1660,13 @@ export async function registerRoutes(app: Express): Promise<Server> {
         const s = String(v);
         return /[",\n\r]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s;
       };
-      const header = ['id','name','phone','plates','vip_tier','favourite_branch','vehicles','visits','lifetime_spend_bnd','last_visit_at','created_at'];
+      const header = ['id','kind','has_account','name','phone','plates','vip_tier','favourite_branch','vehicles','visits','lifetime_spend_bnd','last_visit_at','created_at'];
       const lines = [header.join(',')];
       for (const r of rows as any[]) {
         const spendBnd = (Number(r.total_spent_cents ?? 0) / 100).toFixed(2);
         lines.push([
-          r.id, r.name, r.phone, r.plates ?? '',
+          r.id, r.kind, r.has_account ? 'true' : 'false',
+          r.name, r.phone, r.plates ?? '',
           r.vip_tier ?? '', r.favourite_branch ?? '',
           r.vehicle_count ?? 0, r.visits ?? 0, spendBnd,
           r.last_visit_at ? new Date(r.last_visit_at).toISOString() : '',
@@ -1663,12 +1686,100 @@ export async function registerRoutes(app: Express): Promise<Server> {
   });
 
   // GET /api/admin/customers/:id — full profile (vehicles + recent orders + LTV).
+  // A negative `id` (e.g. `-7736`) addresses a "ghost" customer: a car that has
+  // VIP/legacy data but isn't linked to any customer record yet.
   app.get('/api/admin/customers/:id', requireStaff, requireStaffRole('owner', 'manager'), async (req, res) => {
     const id = Number(req.params.id);
-    if (!Number.isFinite(id) || id <= 0) return res.status(400).json({ error: 'invalid_id' });
+    if (!Number.isFinite(id) || id === 0) return res.status(400).json({ error: 'invalid_id' });
+
+    // -------- Ghost (unlinked car) profile -------------------------------------
+    if (id < 0) {
+      const carId = -id;
+      try {
+        const car = (await db.execute(sql`
+          SELECT id, license_plate, brand, model, color, "type", last_seen_at,
+                 vip_tier, vip_rank, total_visits AS cached_total_visits,
+                 customer_id
+            FROM cars WHERE id = ${carId} LIMIT 1
+        `)).rows[0] as any;
+        if (!car || car.customer_id) return res.status(404).json({ error: 'not_found' });
+
+        const orders = (await db.execute(sql`
+          SELECT o.id, o.ticket_code, o.plate, o.created_at, o.payment_method,
+                 o.package_name, o.total_cents, o.status, o.refunded_at,
+                 o.qr_provider, o.legacy_source,
+                 b.name AS branch_name, s.name AS staff_name
+            FROM orders o
+            LEFT JOIN branches b ON b.id = o.branch_id
+            LEFT JOIN staff    s ON s.id = o.staff_id
+           WHERE o.vehicle_id = ${carId}
+           ORDER BY o.created_at DESC
+           LIMIT 100
+        `)).rows;
+
+        const stats = (await db.execute(sql`
+          SELECT COUNT(*) FILTER (WHERE o.status <> 'refunded')::int AS visits,
+                 COUNT(*) FILTER (WHERE o.status =  'refunded')::int AS refund_count,
+                 COALESCE(SUM(CASE WHEN o.status <> 'refunded' THEN o.total_cents ELSE 0 END),0)::bigint AS spent_cents,
+                 MIN(o.created_at) AS first_visit_at,
+                 MAX(o.created_at) AS last_visit_at,
+                 COUNT(DISTINCT o.branch_id)::int AS branch_count,
+                 COUNT(*) FILTER (WHERE o.legacy_source IS NOT NULL)::int AS legacy_visits,
+                 COUNT(*) FILTER (WHERE o.legacy_source IS NULL AND o.status <> 'refunded')::int AS native_visits
+            FROM orders o WHERE o.vehicle_id = ${carId}
+        `)).rows[0] as any;
+
+        const branchSplit = (await db.execute(sql`
+          SELECT b.id AS branch_id, b.name AS branch_name,
+                 COUNT(*) FILTER (WHERE o.status <> 'refunded')::int AS visits,
+                 COALESCE(SUM(CASE WHEN o.status <> 'refunded' THEN o.total_cents ELSE 0 END),0)::bigint AS spent_cents
+            FROM orders o JOIN branches b ON b.id = o.branch_id
+           WHERE o.vehicle_id = ${carId}
+           GROUP BY b.id, b.name ORDER BY visits DESC, b.name
+        `)).rows.map((r: any) => ({ ...r, spent_cents: Number(r.spent_cents ?? 0) }));
+
+        const fav = branchSplit[0];
+
+        return res.json({
+          customer: {
+            id, phone: null, name: car.license_plate, notes: null,
+            user_id: null, created_at: car.last_seen_at,
+            kind: 'ghost', has_account: false,
+          },
+          vehicles: [{
+            id: car.id, license_plate: car.license_plate, brand: car.brand, model: car.model,
+            color: car.color, type: car.type, last_seen_at: car.last_seen_at,
+            vip_tier: car.vip_tier, vip_rank: car.vip_rank,
+            cached_total_visits: car.cached_total_visits,
+            visit_count: Number(stats.visits ?? 0),
+            spent_cents: Number(stats.spent_cents ?? 0),
+          }],
+          orders,
+          branch_split: branchSplit,
+          stats: {
+            visits: Number(stats.visits ?? 0),
+            refund_count: Number(stats.refund_count ?? 0),
+            spent_cents: Number(stats.spent_cents ?? 0),
+            first_visit_at: stats.first_visit_at,
+            last_visit_at: stats.last_visit_at,
+            branch_count: Number(stats.branch_count ?? 0),
+            legacy_visits: Number(stats.legacy_visits ?? 0),
+            native_visits: Number(stats.native_visits ?? 0),
+            favourite_branch_id: fav?.branch_id ?? null,
+            favourite_branch_name: fav?.branch_name ?? null,
+            vip_tier: car.vip_tier ?? null,
+          },
+        });
+      } catch (err) {
+        console.error('[admin.customers.detail.ghost] failed:', err);
+        return res.status(500).json({ error: 'detail_failed' });
+      }
+    }
+
     try {
       const cust = (await db.execute(sql`
-        SELECT id, phone, name, notes, user_id, created_at
+        SELECT id, phone, name, notes, user_id, created_at,
+               'customer'::text AS kind, (user_id IS NOT NULL) AS has_account
           FROM customers WHERE id = ${id} LIMIT 1
       `)).rows[0] as any;
       if (!cust) return res.status(404).json({ error: 'not_found' });
@@ -1772,7 +1883,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
   // PATCH /api/admin/customers/:id — edit name + notes.
   app.patch('/api/admin/customers/:id', requireStaff, requireStaffRole('owner', 'manager'), async (req, res) => {
     const id = Number(req.params.id);
-    if (!Number.isFinite(id) || id <= 0) return res.status(400).json({ error: 'invalid_id' });
+    if (!Number.isFinite(id) || id <= 0) return res.status(400).json({ error: 'invalid_id_or_ghost' });
     const schema = z.object({
       name: z.string().trim().min(1).max(120).optional(),
       notes: z.string().trim().max(2000).nullable().optional(),
