@@ -270,15 +270,23 @@ export default function ScanInTab({
             </CardTitle>
           </CardHeader>
           <CardContent className="space-y-3">
-            <div
-              id={SCANNER_ID}
-              className="w-full aspect-square bg-slate-100 rounded-md overflow-hidden flex items-center justify-center text-slate-400 text-sm"
-            >
-              {!cameraOn && !cameraError && "Camera off"}
-              {cameraError && (
-                <span className="px-4 text-center text-rose-600">
-                  {cameraError}
-                </span>
+            {/*
+              The scanner div MUST stay empty in JSX — html5-qrcode mutates
+              its inner DOM directly. If React also rendered children inside
+              it, unmounting later would crash with `removeChild ... not a
+              child of this node`. Placeholders/errors live in a sibling
+              overlay positioned over the scanner div instead.
+            */}
+            <div className="relative w-full aspect-square bg-slate-100 rounded-md overflow-hidden">
+              <div id={SCANNER_ID} className="w-full h-full" />
+              {(!cameraOn || cameraError) && (
+                <div className="absolute inset-0 flex items-center justify-center text-slate-400 text-sm pointer-events-none">
+                  {cameraError ? (
+                    <span className="px-4 text-center text-rose-600">{cameraError}</span>
+                  ) : (
+                    "Camera off"
+                  )}
+                </div>
               )}
             </div>
             <div className="flex gap-2">
