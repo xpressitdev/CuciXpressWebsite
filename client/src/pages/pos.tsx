@@ -775,8 +775,12 @@ export default function POS() {
   }
 
   // ---- Catalog still loading -----------------------------------------------
+  // Only show the spinner when the catalog query is actually in flight.
+  // If branchId is null (e.g. owner/manager in incognito with no picked
+  // branch), the query is disabled and we must fall through so the
+  // branch picker renders — otherwise the page is stuck forever.
 
-  if (catalogLoading || !catalog) {
+  if (branchId !== null && (catalogLoading || !catalog)) {
     return (
       <div className="cuci-page-bg flex items-center justify-center">
         <div className="text-center">
@@ -787,7 +791,7 @@ export default function POS() {
     );
   }
 
-  if (catalog.packages.length === 0) {
+  if (catalog && catalog.packages.length === 0) {
     return (
       <div className="cuci-page-bg flex items-center justify-center px-4">
         <Card className="max-w-md">
@@ -949,7 +953,7 @@ export default function POS() {
                 </CardHeader>
                 <CardContent className="space-y-3">
                   <div className="flex flex-wrap gap-2">
-                    {catalog.packages.map((p) => (
+                    {catalog?.packages.map((p) => (
                       <Button
                         key={p.id}
                         type="button"
@@ -1254,14 +1258,14 @@ export default function POS() {
               </Card>
 
               {/* Addons */}
-              {catalog.addons.length > 0 && (
+              {catalog && catalog.addons.length > 0 && (
                 <Card>
                   <CardHeader>
                     <CardTitle className="text-base">Addons</CardTitle>
                   </CardHeader>
                   <CardContent>
                     <div className="grid sm:grid-cols-2 gap-2">
-                      {catalog.addons.map((a) => {
+                      {catalog?.addons.map((a) => {
                         const isSelected = selectedAddons.has(a.id);
                         return (
                           <button
@@ -1302,7 +1306,7 @@ export default function POS() {
                         <SelectValue />
                       </SelectTrigger>
                       <SelectContent>
-                        {catalog.payment_methods.map((pm) => (
+                        {catalog?.payment_methods.map((pm) => (
                           <SelectItem key={pm} value={pm}>
                             {PAYMENT_LABELS[pm]}
                           </SelectItem>
@@ -1359,7 +1363,7 @@ export default function POS() {
                       </span>
                     </div>
                     {Array.from(selectedAddons).map((id) => {
-                      const a = catalog.addons.find((x) => x.id === id);
+                      const a = catalog?.addons.find((x) => x.id === id);
                       if (!a) return null;
                       return (
                         <div key={id} className="flex justify-between text-gray-600">
