@@ -27,13 +27,27 @@ let tokenCache: TokenCache = null;
 
 let cachedDriveItemPath: string | null = null;
 
+// Two drive types are supported:
+//   * 'site' — file lives in a SharePoint Team Site library
+//             (URL host like: cucixpress.sharepoint.com/sites/Foo/...)
+//   * 'user' — file lives in a user's OneDrive for Business
+//             (URL host like: cucixpress-my.sharepoint.com/personal/...)
+// We auto-detect: if SHAREPOINT_USER_EMAIL is set, mode='user'.
+// Otherwise we assume 'site'.
+export type DriveType = 'site' | 'user';
+
 export interface SharePointConfig {
   tenantId: string;
   clientId: string;
   clientSecret: string;
+  driveType: DriveType;
+  // Used when driveType='site'
   siteHost: string;
   sitePath: string;       // may be empty string for tenant root
-  filePath: string;       // includes leading "/"
+  // Used when driveType='user' (OneDrive)
+  userEmail: string;
+  // Path inside the drive's root, with leading '/'
+  filePath: string;
   tableName: string;
 }
 
@@ -41,17 +55,25 @@ export function loadSharePointConfig(): SharePointConfig | null {
   const tenantId     = process.env.SHAREPOINT_TENANT_ID;
   const clientId     = process.env.SHAREPOINT_CLIENT_ID;
   const clientSecret = process.env.SHAREPOINT_CLIENT_SECRET;
-  const siteHost     = process.env.SHAREPOINT_SITE_HOST;
   const filePath     = process.env.SHAREPOINT_FILE_PATH;
-  if (!tenantId || !clientId || !clientSecret || !siteHost || !filePath) {
-    return null;
-  }
+  const userEmail    = process.env.SHAREPOINT_USER_EMAIL ?? '';
+  const siteHost     = process.env.SHAREPOINT_SITE_HOST ?? '';
+
+  if (!tenantId || !clientId || !clientSecret || !filePath) return null;
+
+  const driveType: DriveType = userEmail ? 'user' : 'site';
+  // For 'site' mode we MUST have a host; for 'user' mode the host is
+  // implicit in the user's tenant.
+  if (driveType === 'site' && !siteHost) return null;
+
   return {
     tenantId,
     clientId,
     clientSecret,
+    driveType,
     siteHost,
     sitePath: process.env.SHAREPOINT_SITE_PATH ?? '',
+    userEmail,
     filePath: filePath.startsWith('/') ? filePath : `/${filePath}`,
     tableName: process.env.SHAREPOINT_TABLE_NAME ?? 'Table1',
   };
@@ -100,7 +122,21 @@ async function resolveDriveItemPath(cfg: SharePointConfig): Promise<string> {
   if (cachedDriveItemPath) return cachedDriveItemPath;
   const token = await getAccessToken(cfg);
 
-  // 1. Resolve site id from host + path
+  const encodedFilePath = cfg.filePath
+    .split('/')
+    .map(seg => encodeURIComponent(seg))
+    .join('/');
+
+  if (cfg.driveType === 'user') {
+    // OneDrive for Business. The user is identified by their UPN
+    // (email). Graph endpoint:
+    //   /users/{upn}/drive/root:/path/to/file.xlsx
+    cachedDriveItemPath =
+      `https://graph.microsoft.com/v1.0/users/${encodeURIComponent(cfg.userEmail)}/drive/root:${encodedFilePath}`;
+    return cachedDriveItemPath;
+  }
+
+  // SharePoint Team Site. Resolve site id first.
   const sitePath = cfg.sitePath.replace(/^\/+|\/+$/g, '');
   const siteUrl = sitePath
     ? `https://graph.microsoft.com/v1.0/sites/${cfg.siteHost}:/${sitePath}`
@@ -111,13 +147,6 @@ async function resolveDriveItemPath(cfg: SharePointConfig): Promise<string> {
     throw new Error(`site_lookup_failed_${siteRes.status}: ${t.slice(0, 300)}`);
   }
   const site = await siteRes.json() as { id: string };
-
-  // 2. Build the file path. Graph wants the path under the site's
-  //    default drive, e.g. /sites/{siteId}/drive/root:/Shared Documents/file.xlsx
-  const encodedFilePath = cfg.filePath
-    .split('/')
-    .map(seg => encodeURIComponent(seg))
-    .join('/');
   cachedDriveItemPath = `https://graph.microsoft.com/v1.0/sites/${site.id}/drive/root:${encodedFilePath}`;
   return cachedDriveItemPath;
 }

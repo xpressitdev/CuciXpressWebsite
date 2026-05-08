@@ -322,7 +322,10 @@ export function startSharePointOutboxWorker() {
     return;
   }
   const cfg = loadSharePointConfig()!;
-  console.log(`[sharepoint-outbox] worker started — site=${cfg.siteHost}${cfg.sitePath}, table=${cfg.tableName}, poll=${POLL_INTERVAL_MS}ms`);
+  const target = cfg.driveType === 'user'
+    ? `OneDrive(${cfg.userEmail})`
+    : `Site(${cfg.siteHost}${cfg.sitePath})`;
+  console.log(`[sharepoint-outbox] worker started — target=${target}, file=${cfg.filePath}, table=${cfg.tableName}, poll=${POLL_INTERVAL_MS}ms`);
   workerStarted = true;
   // First tick after a short delay so app boot isn't blocked.
   setTimeout(tick, 5_000);
