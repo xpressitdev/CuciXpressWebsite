@@ -14,7 +14,8 @@ import { Separator } from "@/components/ui/separator";
 import {
   Search, Phone, Car as CarIcon, Receipt, ChevronLeft, ChevronRight,
   Pencil, Save, X, MapPin, Globe, Clock, AlertTriangle, CheckCircle2,
-  Download, Crown, AlertCircle, Building2, Sparkles,
+  Download, Crown, AlertCircle, Building2, Sparkles, Users, History,
+  TrendingUp, Award, Medal,
 } from "lucide-react";
 import { apiRequest } from "@/lib/queryClient";
 import { useToast } from "@/hooks/use-toast";
@@ -42,6 +43,8 @@ const formatDateTime = (iso: string | null): string => {
   });
 };
 
+type VipTier = "gold" | "silver" | "bronze";
+
 interface CustomerRow {
   id: number;
   phone: string;
@@ -52,6 +55,46 @@ interface CustomerRow {
   visits: number;
   total_spent_cents: number;
   last_visit_at: string | null;
+  vip_tier: VipTier | null;
+  favourite_branch: string | null;
+  branches_visited: number;
+  has_legacy: boolean;
+}
+
+interface CustomerStats {
+  total_customers: number;
+  active_customers: number;
+  gold_count: number;
+  silver_count: number;
+  bronze_count: number;
+  spend_vip_count: number;
+  at_risk_count: number;
+  new_count: number;
+  legacy_count: number;
+  online_count: number;
+  total_spent_cents: number;
+  avg_spend_cents: number;
+}
+
+const VIP_STYLES: Record<VipTier, { label: string; bg: string; text: string; border: string; icon: typeof Crown }> = {
+  gold:   { label: "Gold",   bg: "bg-amber-100",   text: "text-amber-900",  border: "border-amber-500",  icon: Crown },
+  silver: { label: "Silver", bg: "bg-slate-100",   text: "text-slate-800",  border: "border-slate-400",  icon: Award },
+  bronze: { label: "Bronze", bg: "bg-orange-100",  text: "text-orange-900", border: "border-orange-500", icon: Medal },
+};
+
+function VipBadge({ tier, rank }: { tier: VipTier; rank?: number | null }) {
+  const s = VIP_STYLES[tier];
+  const Icon = s.icon;
+  return (
+    <span
+      className={`inline-flex items-center gap-1 rounded-full border-2 ${s.border} ${s.bg} ${s.text} px-2 py-0.5 text-[10px] font-bold uppercase tracking-wide`}
+      title={rank ? `Rank #${rank} customer` : `${s.label} VIP`}
+      data-testid={`badge-vip-${tier}`}
+    >
+      <Icon className="w-3 h-3" />
+      {s.label}{rank ? ` · #${rank}` : ""}
+    </span>
+  );
 }
 
 interface CustomerListResp {
@@ -65,11 +108,15 @@ interface CustomerListResp {
 
 const SEGMENT_OPTIONS = [
   { value: "all",          label: "All customers",     icon: null,         hint: "" },
-  { value: "vip",          label: "VIPs",              icon: Crown,        hint: "Lifetime spend ≥ B$500" },
+  { value: "vip",          label: "VIPs (spend)",      icon: Crown,        hint: "Lifetime spend ≥ B$500" },
+  { value: "gold",         label: "Gold tier",         icon: Crown,        hint: "Top-ranked loyal customers" },
+  { value: "silver",       label: "Silver tier",       icon: Award,        hint: "Strong repeat customers" },
+  { value: "bronze",       label: "Bronze tier",       icon: Medal,        hint: "Regular returning customers" },
   { value: "at_risk",      label: "At-risk",           icon: AlertCircle,  hint: "2+ visits, none in 30 days" },
   { value: "online",       label: "Online customers",  icon: Globe,        hint: "Has paid via web checkout" },
   { value: "multi_branch", label: "Multi-branch",      icon: Building2,    hint: "Visited 2+ branches" },
   { value: "new",          label: "New (14 days)",     icon: Sparkles,     hint: "Joined in last 14 days" },
+  { value: "legacy",       label: "Legacy customers",  icon: History,      hint: "Has imported historical visits" },
 ] as const;
 
 interface CustomerDetailResp {
@@ -78,6 +125,7 @@ interface CustomerDetailResp {
     id: number; license_plate: string; brand: string | null; model: string | null;
     color: string | null; type: string | null; last_seen_at: string | null;
     visit_count: number; spent_cents: number;
+    vip_tier: VipTier | null; vip_rank: number | null; cached_total_visits: number;
   }>;
   orders: Array<{
     id: string; ticket_code: string | null; plate: string; created_at: string;
@@ -86,9 +134,15 @@ interface CustomerDetailResp {
     qr_provider: string | null;
     branch_name: string | null; staff_name: string | null;
   }>;
+  branch_split: Array<{
+    branch_id: number; branch_name: string; visits: number; spent_cents: number;
+  }>;
   stats: {
     visits: number; refund_count: number; spent_cents: number;
     first_visit_at: string | null; last_visit_at: string | null; branch_count: number;
+    legacy_visits: number; native_visits: number;
+    favourite_branch_id: number | null; favourite_branch_name: string | null;
+    vip_tier: VipTier | null;
   };
 }
 
@@ -115,6 +169,17 @@ export default function CustomersTab() {
     },
   });
 
+  // Aggregate header stats (independent of filters — show overall CRM health).
+  const { data: stats } = useQuery<CustomerStats>({
+    queryKey: ["/api/admin/customers/stats"],
+    queryFn: async () => {
+      const res = await fetch(`/api/admin/customers/stats`, { credentials: "include" });
+      if (!res.ok) throw new Error("stats_failed");
+      return res.json();
+    },
+    refetchOnWindowFocus: false,
+  });
+
   const exportQs = new URLSearchParams();
   if (search.trim().length >= 2) exportQs.set("search", search.trim());
   if (branch !== "all") exportQs.set("branch_id", branch);
@@ -131,6 +196,7 @@ export default function CustomersTab() {
     <div className="space-y-6">
       <PendingPaymentsPanel />
       <LiabilitiesPanel />
+      {stats && <CustomerStatsHeader stats={stats} onSegment={(s) => { setSegment(s); setPage(1); }} /> }
       <div className="grid lg:grid-cols-3 gap-6">
       {/* Left: list */}
       <div className="lg:col-span-2 space-y-4">
@@ -220,7 +286,8 @@ export default function CustomersTab() {
                   <TableHeader>
                     <TableRow>
                       <TableHead>Customer</TableHead>
-                      <TableHead>Phone</TableHead>
+                      <TableHead>Tier</TableHead>
+                      <TableHead>Favourite branch</TableHead>
                       <TableHead className="text-center">Vehicles</TableHead>
                       <TableHead className="text-center">Visits</TableHead>
                       <TableHead className="text-right">Lifetime spend</TableHead>
@@ -235,8 +302,33 @@ export default function CustomersTab() {
                         onClick={() => setSelectedId(c.id)}
                         data-testid={`row-customer-${c.id}`}
                       >
-                        <TableCell className="font-semibold">{c.name}</TableCell>
-                        <TableCell className="text-xs text-gray-600">{c.phone}</TableCell>
+                        <TableCell>
+                          <div className="font-semibold leading-tight">{c.name}</div>
+                          <div className="text-[11px] text-gray-500 flex items-center gap-1 mt-0.5">
+                            <Phone className="w-3 h-3" /> {c.phone}
+                            {c.has_legacy && (
+                              <span title="Has imported historical visits" className="ml-1 inline-flex items-center gap-0.5 text-[10px] text-purple-700 font-semibold">
+                                <History className="w-3 h-3" /> legacy
+                              </span>
+                            )}
+                          </div>
+                        </TableCell>
+                        <TableCell>
+                          {c.vip_tier ? <VipBadge tier={c.vip_tier} /> : <span className="text-[11px] text-gray-400">—</span>}
+                        </TableCell>
+                        <TableCell className="text-xs">
+                          {c.favourite_branch ? (
+                            <span className="inline-flex items-center gap-1">
+                              <MapPin className="w-3 h-3 text-gray-400" />
+                              {c.favourite_branch}
+                              {c.branches_visited > 1 && (
+                                <span className="text-[10px] text-gray-500">+{c.branches_visited - 1}</span>
+                              )}
+                            </span>
+                          ) : (
+                            <span className="italic text-gray-400">—</span>
+                          )}
+                        </TableCell>
                         <TableCell className="text-center tabular-nums">{c.vehicle_count}</TableCell>
                         <TableCell className="text-center tabular-nums">{c.visits}</TableCell>
                         <TableCell className="text-right tabular-nums font-semibold">
@@ -847,8 +939,8 @@ function CustomerDetail({ id }: { id: number }) {
         ) : (
           <>
             <div className="flex items-start justify-between gap-2">
-              <div>
-                <div className="text-xl font-extrabold tracking-tight">{customer.name}</div>
+              <div className="min-w-0">
+                <div className="text-xl font-extrabold tracking-tight truncate">{customer.name}</div>
                 <div className="text-xs text-gray-500 flex items-center gap-1 mt-0.5">
                   <Phone className="w-3 h-3" /> {customer.phone}
                 </div>
@@ -857,9 +949,22 @@ function CustomerDetail({ id }: { id: number }) {
                 <Pencil className="w-3 h-3 mr-1" /> Edit
               </Button>
             </div>
-            {customer.user_id && (
-              <Badge className="bg-green-600 text-white text-[10px]">Has account</Badge>
-            )}
+            <div className="flex flex-wrap gap-1.5">
+              {stats.vip_tier && <VipBadge tier={stats.vip_tier} />}
+              {customer.user_id && (
+                <Badge className="bg-green-600 text-white text-[10px]">Has account</Badge>
+              )}
+              {stats.legacy_visits > 0 && (
+                <Badge variant="outline" className="border-2 border-purple-500 text-purple-800 text-[10px] gap-1">
+                  <History className="w-3 h-3" /> {stats.legacy_visits} legacy
+                </Badge>
+              )}
+              {stats.favourite_branch_name && (
+                <Badge variant="outline" className="border-2 border-black text-[10px] gap-1">
+                  <MapPin className="w-3 h-3" /> {stats.favourite_branch_name}
+                </Badge>
+              )}
+            </div>
             {customer.notes && (
               <div className="bg-yellow-50 border border-yellow-300 rounded p-2 text-xs whitespace-pre-wrap">
                 {customer.notes}
@@ -880,6 +985,11 @@ function CustomerDetail({ id }: { id: number }) {
         <div className="cuci-kpi p-2">
           <div className="cuci-eyebrow text-[10px]">Visits</div>
           <div className="text-lg font-extrabold tabular-nums">{stats.visits}</div>
+          {stats.legacy_visits > 0 && (
+            <div className="text-[10px] text-gray-500 mt-0.5">
+              {stats.native_visits} new · {stats.legacy_visits} legacy
+            </div>
+          )}
         </div>
         <div className="cuci-kpi p-2">
           <div className="cuci-eyebrow text-[10px]">First visit</div>
@@ -890,6 +1000,28 @@ function CustomerDetail({ id }: { id: number }) {
           <div className="text-lg font-extrabold tabular-nums">{stats.branch_count}</div>
         </div>
       </div>
+
+      {/* Per-branch breakdown */}
+      {data.branch_split.length > 1 && (
+        <>
+          <Separator />
+          <div>
+            <div className="cuci-eyebrow mb-2">By branch</div>
+            <div className="space-y-1">
+              {data.branch_split.map((b) => (
+                <div key={b.branch_id} className="flex items-center justify-between text-xs border-2 border-gray-200 rounded px-2 py-1">
+                  <span className="font-semibold flex items-center gap-1">
+                    <MapPin className="w-3 h-3 text-gray-400" /> {b.branch_name}
+                  </span>
+                  <span className="tabular-nums text-gray-600">
+                    {b.visits} visit{b.visits !== 1 ? "s" : ""} · <span className="font-semibold text-gray-900">{formatBND(b.spent_cents)}</span>
+                  </span>
+                </div>
+              ))}
+            </div>
+          </div>
+        </>
+      )}
 
       <Separator />
 
@@ -902,16 +1034,17 @@ function CustomerDetail({ id }: { id: number }) {
           <div className="space-y-2">
             {vehicles.map((v) => (
               <div key={v.id} className="border-2 border-black rounded p-2 text-xs" data-testid={`vehicle-${v.id}`}>
-                <div className="flex justify-between items-start">
-                  <div>
-                    <div className="font-bold tracking-wide flex items-center gap-1">
+                <div className="flex justify-between items-start gap-2">
+                  <div className="min-w-0">
+                    <div className="font-bold tracking-wide flex items-center gap-1 flex-wrap">
                       <CarIcon className="w-3 h-3" /> {v.license_plate}
+                      {v.vip_tier && <VipBadge tier={v.vip_tier} rank={v.vip_rank} />}
                     </div>
                     <div className="text-gray-600">
                       {[v.color, v.brand, v.model].filter(Boolean).join(" ") || <span className="italic">no details</span>}
                     </div>
                   </div>
-                  <div className="text-right tabular-nums">
+                  <div className="text-right tabular-nums shrink-0">
                     <div className="font-semibold">{formatBND(v.spent_cents)}</div>
                     <div className="text-gray-500">{v.visit_count} visit{v.visit_count !== 1 ? "s" : ""}</div>
                   </div>
@@ -994,6 +1127,130 @@ function CustomerDetail({ id }: { id: number }) {
           </div>
         )}
       </div>
+    </div>
+  );
+}
+
+// ----------------------------------------------------------------------------
+// CustomerStatsHeader — at-a-glance CRM tiles above the customer list.
+// Each tile is clickable and applies the matching segment filter.
+// ----------------------------------------------------------------------------
+function CustomerStatsHeader({
+  stats,
+  onSegment,
+}: {
+  stats: CustomerStats;
+  onSegment: (seg: string) => void;
+}) {
+  type Tile = {
+    label: string;
+    value: string;
+    sub?: string;
+    icon: typeof Users;
+    seg?: string;
+    accent: string;
+    testId: string;
+  };
+
+  const tiles: Tile[] = [
+    {
+      label: "Total customers",
+      value: stats.total_customers.toLocaleString(),
+      sub: `${stats.active_customers.toLocaleString()} active`,
+      icon: Users,
+      seg: "all",
+      accent: "border-black bg-white",
+      testId: "tile-cust-total",
+    },
+    {
+      label: "Gold tier",
+      value: stats.gold_count.toLocaleString(),
+      sub: "Top loyalty rank",
+      icon: Crown,
+      seg: "gold",
+      accent: "border-amber-500 bg-amber-50",
+      testId: "tile-cust-gold",
+    },
+    {
+      label: "Silver tier",
+      value: stats.silver_count.toLocaleString(),
+      sub: "Strong repeats",
+      icon: Award,
+      seg: "silver",
+      accent: "border-slate-400 bg-slate-50",
+      testId: "tile-cust-silver",
+    },
+    {
+      label: "Bronze tier",
+      value: stats.bronze_count.toLocaleString(),
+      sub: "Regular returns",
+      icon: Medal,
+      seg: "bronze",
+      accent: "border-orange-500 bg-orange-50",
+      testId: "tile-cust-bronze",
+    },
+    {
+      label: "At risk",
+      value: stats.at_risk_count.toLocaleString(),
+      sub: "Lapsed 30+ days",
+      icon: AlertCircle,
+      seg: "at_risk",
+      accent: "border-red-500 bg-red-50",
+      testId: "tile-cust-at-risk",
+    },
+    {
+      label: "New (14 days)",
+      value: stats.new_count.toLocaleString(),
+      sub: "Recent sign-ups",
+      icon: Sparkles,
+      seg: "new",
+      accent: "border-green-500 bg-green-50",
+      testId: "tile-cust-new",
+    },
+    {
+      label: "Legacy history",
+      value: stats.legacy_count.toLocaleString(),
+      sub: "Imported visits",
+      icon: History,
+      seg: "legacy",
+      accent: "border-purple-500 bg-purple-50",
+      testId: "tile-cust-legacy",
+    },
+    {
+      label: "Avg spend",
+      value: formatBND(stats.avg_spend_cents),
+      sub: `Lifetime ${formatBND(stats.total_spent_cents)}`,
+      icon: TrendingUp,
+      accent: "border-black bg-cuci-primary/5",
+      testId: "tile-cust-avg-spend",
+    },
+  ];
+
+  return (
+    <div className="grid grid-cols-2 md:grid-cols-4 gap-2">
+      {tiles.map((t) => {
+        const Icon = t.icon;
+        const clickable = Boolean(t.seg);
+        return (
+          <button
+            key={t.label}
+            type="button"
+            onClick={() => clickable && onSegment(t.seg!)}
+            disabled={!clickable}
+            className={`text-left border-2 ${t.accent} rounded-lg p-3 transition ${
+              clickable ? "hover:shadow-[3px_3px_0_0_rgba(0,0,0,1)] cursor-pointer" : "cursor-default"
+            }`}
+            data-testid={t.testId}
+          >
+            <div className="flex items-center justify-between">
+              <span className="cuci-eyebrow text-[10px]">{t.label}</span>
+              <Icon className="w-4 h-4 text-gray-700" />
+            </div>
+            <div className="text-2xl font-extrabold tabular-nums leading-tight mt-1">{t.value}</div>
+            {t.sub && <div className="text-[10px] text-gray-600 mt-0.5">{t.sub}</div>}
+          </button>
+        );
+      })}
     </div>
   );
 }

@@ -1372,7 +1372,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
   // ---- Phase 12b-3: customer segment filters --------------------------------
   // Composable AND-fragments evaluated against alias `c` (customers).
   // Returned as Drizzle SQL fragments so they slot into list + CSV queries.
-  const SEGMENTS = ['vip', 'at_risk', 'online', 'multi_branch', 'new'] as const;
+  const SEGMENTS = ['vip', 'gold', 'silver', 'bronze', 'at_risk', 'online', 'multi_branch', 'new', 'legacy'] as const;
   type Segment = (typeof SEGMENTS)[number];
   function segmentFragment(seg: Segment | null) {
     if (seg === null) return sql``;
@@ -1383,6 +1383,21 @@ export async function registerRoutes(app: Express): Promise<Server> {
           FROM orders o JOIN cars car ON car.id = o.vehicle_id
          WHERE car.customer_id = c.id AND o.status <> 'refunded'
       ) >= 50000`;
+    }
+    if (seg === 'gold' || seg === 'silver' || seg === 'bronze') {
+      // VIP tier is cached per-car by recompute_vip_tiers.ts. A customer
+      // is considered "tier T" if any of their cars holds tier T.
+      return sql`AND EXISTS (
+        SELECT 1 FROM cars car
+         WHERE car.customer_id = c.id AND car.vip_tier = ${seg}
+      )`;
+    }
+    if (seg === 'legacy') {
+      // Customer has historical (pre-system) sales imported from SharePoint.
+      return sql`AND EXISTS (
+        SELECT 1 FROM orders o JOIN cars car ON car.id = o.vehicle_id
+         WHERE car.customer_id = c.id AND o.legacy_source IS NOT NULL
+      )`;
     }
     if (seg === 'at_risk') {
       // 2+ paid visits AND last visit > 30 days ago.
@@ -1473,7 +1488,29 @@ export async function registerRoutes(app: Express): Promise<Server> {
                (SELECT COUNT(*)::int FROM cars car WHERE car.customer_id = c.id)                                                AS vehicle_count,
                (SELECT COUNT(*)::int FROM orders o JOIN cars car ON car.id = o.vehicle_id WHERE car.customer_id = c.id AND o.status <> 'refunded')                AS visits,
                (SELECT COALESCE(SUM(o.total_cents),0)::bigint FROM orders o JOIN cars car ON car.id = o.vehicle_id WHERE car.customer_id = c.id AND o.status <> 'refunded') AS total_spent_cents,
-               (SELECT MAX(o.created_at)         FROM orders o JOIN cars car ON car.id = o.vehicle_id WHERE car.customer_id = c.id) AS last_visit_at
+               (SELECT MAX(o.created_at)         FROM orders o JOIN cars car ON car.id = o.vehicle_id WHERE car.customer_id = c.id) AS last_visit_at,
+               -- best VIP tier across the customer's cars (gold > silver > bronze)
+               (SELECT car.vip_tier
+                  FROM cars car
+                 WHERE car.customer_id = c.id AND car.vip_tier IS NOT NULL
+                 ORDER BY CASE car.vip_tier WHEN 'gold' THEN 1 WHEN 'silver' THEN 2 WHEN 'bronze' THEN 3 ELSE 9 END
+                 LIMIT 1)                                                                                                          AS vip_tier,
+               -- favourite branch = the one with the most paid visits
+               (SELECT b.name
+                  FROM orders o
+                  JOIN cars car ON car.id = o.vehicle_id
+                  JOIN branches b ON b.id = o.branch_id
+                 WHERE car.customer_id = c.id AND o.status <> 'refunded'
+                 GROUP BY b.id, b.name
+                 ORDER BY COUNT(*) DESC, MAX(o.created_at) DESC
+                 LIMIT 1)                                                                                                          AS favourite_branch,
+               -- count of distinct branches visited (for the multi-branch chip)
+               (SELECT COUNT(DISTINCT o.branch_id)::int
+                  FROM orders o JOIN cars car ON car.id = o.vehicle_id
+                 WHERE car.customer_id = c.id AND o.status <> 'refunded')                                                          AS branches_visited,
+               -- whether any of their visits were imported from SharePoint
+               EXISTS (SELECT 1 FROM orders o JOIN cars car ON car.id = o.vehicle_id
+                        WHERE car.customer_id = c.id AND o.legacy_source IS NOT NULL)                                              AS has_legacy
           FROM customers c
          WHERE 1=1 ${searchFilter} ${branchFilter} ${segmentFilter}
          ORDER BY (SELECT MAX(o.created_at) FROM orders o JOIN cars car ON car.id = o.vehicle_id WHERE car.customer_id = c.id) DESC NULLS LAST,
@@ -1482,6 +1519,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
       `)).rows.map((r: any) => ({
         ...r,
         total_spent_cents: Number(r.total_spent_cents ?? 0),
+        has_legacy: Boolean(r.has_legacy),
       }));
 
       const branches = (await db.execute(sql`SELECT id, name FROM branches ORDER BY name`)).rows;
@@ -1500,6 +1538,74 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
+  // GET /api/admin/customers/stats
+  // Aggregate counts to power the header tiles on the Customers tab —
+  // total customers, VIP tier breakdown, at-risk count, new sign-ups,
+  // legacy-history coverage, lifetime spend & avg per customer.
+  app.get('/api/admin/customers/stats', requireStaff, requireStaffRole('owner', 'manager'), async (_req, res) => {
+    try {
+      const row = (await db.execute(sql`
+        WITH cust AS (
+          SELECT
+            c.id,
+            (SELECT car.vip_tier FROM cars car WHERE car.customer_id = c.id AND car.vip_tier IS NOT NULL
+              ORDER BY CASE car.vip_tier WHEN 'gold' THEN 1 WHEN 'silver' THEN 2 WHEN 'bronze' THEN 3 ELSE 9 END
+              LIMIT 1)                                                                                            AS vip_tier,
+            (SELECT COALESCE(SUM(o.total_cents),0)::bigint
+               FROM orders o JOIN cars car ON car.id = o.vehicle_id
+              WHERE car.customer_id = c.id AND o.status <> 'refunded')                                            AS spent_cents,
+            (SELECT COUNT(*)::int
+               FROM orders o JOIN cars car ON car.id = o.vehicle_id
+              WHERE car.customer_id = c.id AND o.status NOT IN ('refunded','pending_payment','voided'))           AS visits,
+            (SELECT MAX(o.created_at)
+               FROM orders o JOIN cars car ON car.id = o.vehicle_id
+              WHERE car.customer_id = c.id AND o.status NOT IN ('refunded','pending_payment','voided'))           AS last_visit_at,
+            EXISTS (SELECT 1 FROM orders o JOIN cars car ON car.id = o.vehicle_id
+                     WHERE car.customer_id = c.id AND o.legacy_source IS NOT NULL)                                AS has_legacy,
+            EXISTS (SELECT 1 FROM orders o JOIN cars car ON car.id = o.vehicle_id
+                     WHERE car.customer_id = c.id AND o.qr_provider = 'pocket_pay')                               AS is_online,
+            c.created_at
+          FROM customers c
+        )
+        SELECT
+          COUNT(*)::int                                                                                  AS total_customers,
+          COUNT(*) FILTER (WHERE vip_tier = 'gold')::int                                                 AS gold_count,
+          COUNT(*) FILTER (WHERE vip_tier = 'silver')::int                                               AS silver_count,
+          COUNT(*) FILTER (WHERE vip_tier = 'bronze')::int                                               AS bronze_count,
+          COUNT(*) FILTER (WHERE spent_cents >= 50000)::int                                              AS spend_vip_count,
+          COUNT(*) FILTER (WHERE visits >= 2 AND last_visit_at < NOW() - INTERVAL '30 days')::int       AS at_risk_count,
+          COUNT(*) FILTER (WHERE created_at > NOW() - INTERVAL '14 days')::int                          AS new_count,
+          COUNT(*) FILTER (WHERE has_legacy)::int                                                        AS legacy_count,
+          COUNT(*) FILTER (WHERE is_online)::int                                                         AS online_count,
+          COALESCE(SUM(spent_cents), 0)::bigint                                                          AS total_spent_cents,
+          COUNT(*) FILTER (WHERE visits > 0)::int                                                        AS active_count
+        FROM cust
+      `)).rows[0] as any;
+
+      const total = Number(row.total_customers ?? 0);
+      const totalSpent = Number(row.total_spent_cents ?? 0);
+      const active = Number(row.active_count ?? 0);
+
+      res.json({
+        total_customers:   total,
+        active_customers:  active,
+        gold_count:        Number(row.gold_count ?? 0),
+        silver_count:      Number(row.silver_count ?? 0),
+        bronze_count:      Number(row.bronze_count ?? 0),
+        spend_vip_count:   Number(row.spend_vip_count ?? 0),
+        at_risk_count:     Number(row.at_risk_count ?? 0),
+        new_count:         Number(row.new_count ?? 0),
+        legacy_count:      Number(row.legacy_count ?? 0),
+        online_count:      Number(row.online_count ?? 0),
+        total_spent_cents: totalSpent,
+        avg_spend_cents:   active > 0 ? Math.round(totalSpent / active) : 0,
+      });
+    } catch (err) {
+      console.error('[admin.customers.stats] failed:', err);
+      res.status(500).json({ error: 'stats_failed' });
+    }
+  });
+
   // GET /api/admin/customers/export.csv — Phase 12b-2.
   // Same filters as list (search/branch/segment) but no pagination.
   // Streams a CSV the user can open in Excel / Google Sheets.
@@ -1514,7 +1620,12 @@ export async function registerRoutes(app: Express): Promise<Server> {
                (SELECT COUNT(*)::int FROM orders o JOIN cars car ON car.id = o.vehicle_id WHERE car.customer_id = c.id AND o.status <> 'refunded')                AS visits,
                (SELECT COALESCE(SUM(o.total_cents),0)::bigint FROM orders o JOIN cars car ON car.id = o.vehicle_id WHERE car.customer_id = c.id AND o.status <> 'refunded') AS total_spent_cents,
                (SELECT MAX(o.created_at)         FROM orders o JOIN cars car ON car.id = o.vehicle_id WHERE car.customer_id = c.id) AS last_visit_at,
-               (SELECT STRING_AGG(car.license_plate, '; ' ORDER BY car.id) FROM cars car WHERE car.customer_id = c.id) AS plates
+               (SELECT STRING_AGG(car.license_plate, '; ' ORDER BY car.id) FROM cars car WHERE car.customer_id = c.id) AS plates,
+               (SELECT car.vip_tier FROM cars car WHERE car.customer_id = c.id AND car.vip_tier IS NOT NULL
+                 ORDER BY CASE car.vip_tier WHEN 'gold' THEN 1 WHEN 'silver' THEN 2 WHEN 'bronze' THEN 3 ELSE 9 END LIMIT 1) AS vip_tier,
+               (SELECT b.name FROM orders o JOIN cars car ON car.id = o.vehicle_id JOIN branches b ON b.id = o.branch_id
+                 WHERE car.customer_id = c.id AND o.status <> 'refunded'
+                 GROUP BY b.id, b.name ORDER BY COUNT(*) DESC, MAX(o.created_at) DESC LIMIT 1) AS favourite_branch
           FROM customers c
          WHERE 1=1 ${searchFilter} ${branchFilter} ${segmentFilter}
          ORDER BY (SELECT MAX(o.created_at) FROM orders o JOIN cars car ON car.id = o.vehicle_id WHERE car.customer_id = c.id) DESC NULLS LAST,
@@ -1527,12 +1638,13 @@ export async function registerRoutes(app: Express): Promise<Server> {
         const s = String(v);
         return /[",\n\r]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s;
       };
-      const header = ['id','name','phone','plates','vehicles','visits','lifetime_spend_bnd','last_visit_at','created_at'];
+      const header = ['id','name','phone','plates','vip_tier','favourite_branch','vehicles','visits','lifetime_spend_bnd','last_visit_at','created_at'];
       const lines = [header.join(',')];
       for (const r of rows as any[]) {
         const spendBnd = (Number(r.total_spent_cents ?? 0) / 100).toFixed(2);
         lines.push([
           r.id, r.name, r.phone, r.plates ?? '',
+          r.vip_tier ?? '', r.favourite_branch ?? '',
           r.vehicle_count ?? 0, r.visits ?? 0, spendBnd,
           r.last_visit_at ? new Date(r.last_visit_at).toISOString() : '',
           r.created_at ? new Date(r.created_at).toISOString() : '',
@@ -1563,11 +1675,14 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
       const vehicles = (await db.execute(sql`
         SELECT id, license_plate, brand, model, color, "type", last_seen_at,
+               vip_tier, vip_rank, total_visits AS cached_total_visits,
                (SELECT COUNT(*)::int FROM orders o WHERE o.vehicle_id = cars.id AND o.status <> 'refunded') AS visit_count,
                (SELECT COALESCE(SUM(o.total_cents),0)::bigint FROM orders o WHERE o.vehicle_id = cars.id AND o.status <> 'refunded') AS spent_cents
           FROM cars
          WHERE customer_id = ${id}
-         ORDER BY COALESCE(last_seen_at, 'epoch'::timestamptz) DESC, id DESC
+         ORDER BY
+            CASE vip_tier WHEN 'gold' THEN 1 WHEN 'silver' THEN 2 WHEN 'bronze' THEN 3 ELSE 9 END,
+            COALESCE(last_seen_at, 'epoch'::timestamptz) DESC, id DESC
       `)).rows.map((r: any) => ({ ...r, spent_cents: Number(r.spent_cents ?? 0) }));
 
       const orders = (await db.execute(sql`
@@ -1589,15 +1704,51 @@ export async function registerRoutes(app: Express): Promise<Server> {
                COALESCE(SUM(CASE WHEN o.status <> 'refunded' THEN o.total_cents ELSE 0 END),0)::bigint AS spent_cents,
                MIN(o.created_at) AS first_visit_at,
                MAX(o.created_at) AS last_visit_at,
-               COUNT(DISTINCT o.branch_id)::int AS branch_count
+               COUNT(DISTINCT o.branch_id)::int AS branch_count,
+               COUNT(*) FILTER (WHERE o.legacy_source IS NOT NULL)::int AS legacy_visits,
+               COUNT(*) FILTER (WHERE o.legacy_source IS NULL AND o.status <> 'refunded')::int AS native_visits
           FROM orders o
          WHERE o.vehicle_id IN (SELECT id FROM cars WHERE customer_id = ${id})
       `)).rows[0] as any;
+
+      // Favourite branch (most paid visits, ties broken by recency).
+      const favRow = (await db.execute(sql`
+        SELECT b.id, b.name
+          FROM orders o
+          JOIN branches b ON b.id = o.branch_id
+         WHERE o.vehicle_id IN (SELECT id FROM cars WHERE customer_id = ${id})
+           AND o.status <> 'refunded'
+         GROUP BY b.id, b.name
+         ORDER BY COUNT(*) DESC, MAX(o.created_at) DESC
+         LIMIT 1
+      `)).rows[0] as any | undefined;
+
+      // Per-branch visit + spend split (for the profile).
+      const branchSplit = (await db.execute(sql`
+        SELECT b.id AS branch_id, b.name AS branch_name,
+               COUNT(*) FILTER (WHERE o.status <> 'refunded')::int AS visits,
+               COALESCE(SUM(CASE WHEN o.status <> 'refunded' THEN o.total_cents ELSE 0 END),0)::bigint AS spent_cents
+          FROM orders o
+          JOIN branches b ON b.id = o.branch_id
+         WHERE o.vehicle_id IN (SELECT id FROM cars WHERE customer_id = ${id})
+         GROUP BY b.id, b.name
+         ORDER BY visits DESC, b.name
+      `)).rows.map((r: any) => ({ ...r, spent_cents: Number(r.spent_cents ?? 0) }));
+
+      // Best VIP tier across this customer's vehicles.
+      const bestTier = (vehicles
+        .map((v: any) => v.vip_tier as string | null)
+        .filter(Boolean) as string[])
+        .sort((a, b) => {
+          const order: Record<string, number> = { gold: 1, silver: 2, bronze: 3 };
+          return (order[a] ?? 9) - (order[b] ?? 9);
+        })[0] ?? null;
 
       res.json({
         customer: cust,
         vehicles,
         orders,
+        branch_split: branchSplit,
         stats: {
           visits: Number(stats.visits ?? 0),
           refund_count: Number(stats.refund_count ?? 0),
@@ -1605,6 +1756,11 @@ export async function registerRoutes(app: Express): Promise<Server> {
           first_visit_at: stats.first_visit_at,
           last_visit_at: stats.last_visit_at,
           branch_count: Number(stats.branch_count ?? 0),
+          legacy_visits: Number(stats.legacy_visits ?? 0),
+          native_visits: Number(stats.native_visits ?? 0),
+          favourite_branch_id: favRow?.id ?? null,
+          favourite_branch_name: favRow?.name ?? null,
+          vip_tier: bestTier,
         },
       });
     } catch (err) {
