@@ -318,7 +318,17 @@ async function main() {
       const brand = nullIfDash(row[C_BRAND]);
       const model = nullIfDash(row[C_MODEL]);
       const orderNotes = nullIfDash(row[C_NOTES]);
-      const packageName = orderNotes ?? 'Legacy';
+      // Owner-locked price→package mapping for SharePoint legacy rows
+      // (the legacy spreadsheet doesn't store a package id, only the
+      // amount paid). Anything outside the four standard prices keeps
+      // the original sales-note text or falls back to 'Legacy'.
+      const PRICE_TO_PKG: Record<number, string> = {
+        1200: 'Full Package',
+        1100: 'Basic + Spray Wax',
+         900: 'Basic + Tire Shine',
+         800: 'Basic Wash',
+      };
+      const packageName = PRICE_TO_PKG[totalCents] ?? orderNotes ?? 'Legacy';
 
       if (DRY_RUN) {
         if (processed <= 5) {
