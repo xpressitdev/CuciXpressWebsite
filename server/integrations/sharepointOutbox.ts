@@ -84,9 +84,9 @@ interface JoinedRow {
 //   B  ID
 //   C  Receipt Date            (Excel serial number, integer)
 //   D  Receipt Time            (fraction of a day, 0..1)
-//   E  Store Name              (constant: "Cuci Xpress")
-//   F  POS Name                (branch name — Tungku/Salar/etc.)
-//   G  Employee Name           (uppercase, matching existing rows)
+//   E  Store Name              (branch — "Tungku Branch", "Salar Branch", ...)
+//   F  POS Name                (POS terminal — "Default" until we track terminals)
+//   G  Employee Name           (matches historical "Kadai <BranchShort>" convention)
 //   H  Is Refund               ("Yes" / "No")
 //   I  Original Receipt No     (the original CX-N when refund, else "-")
 //   J  Order Number            ("CX-1", "CX-2", ...)
@@ -110,6 +110,14 @@ const DASH = '-';
 const cents2 = (c: number | null | undefined): number => Math.round((c ?? 0)) / 100;
 const dashOr = (v: string | null | undefined): string => (v && v.trim() !== '') ? v : DASH;
 
+// Strip the "Cuci Xpress " prefix from branch names so the output
+// matches the historical Power BI convention:
+//   "Cuci Xpress Tungku" -> "Tungku"
+function shortBranch(name: string | null | undefined): string | null {
+  if (!name) return null;
+  return name.replace(/^Cuci Xpress\s+/i, '').trim();
+}
+
 const PAYMENT_METHOD_LABEL: Record<string, string> = {
   cash: 'Cash',
   bank_transfer: 'Bank Transfer',
@@ -131,14 +139,15 @@ function buildExcelRow(r: JoinedRow): (string | number | null)[] {
   // see a real Date.
   const rawEventAt = isRefund && r.refunded_at ? r.refunded_at : r.created_at;
   const eventAt = rawEventAt instanceof Date ? rawEventAt : new Date(rawEventAt as any);
+  const branchShort = shortBranch(r.branch_name);
   return [
     'cucixpress_pos',                                                  // A Source.Name
     r.order_id,                                                        // B ID (our internal order id)
     dateToExcelSerial(eventAt),                                        // C Receipt Date
     timeToExcelFraction(eventAt),                                      // D Receipt Time
-    'Cuci Xpress',                                                     // E Store Name
-    dashOr(r.branch_name),                                             // F POS Name (branch)
-    dashOr(r.staff_name ? r.staff_name.toUpperCase() : null),          // G Employee Name
+    branchShort ? `${branchShort} Branch` : DASH,                      // E Store Name ("Tungku Branch")
+    'Default',                                                         // F POS Name (we don't track POS terminals yet)
+    branchShort ? `Kadai ${branchShort}` : DASH,                       // G Employee Name (matches historical "Kadai Xxx")
     isRefund ? 'Yes' : 'No',                                           // H Is Refund
     isRefund ? dashOr(r.original_cx_number) : DASH,                    // I Original Receipt No
     r.cx_number,                                                       // J Order Number
