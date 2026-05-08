@@ -100,8 +100,8 @@ interface JoinedRow {
 //   R  Order Total
 //   S  Paid Amount
 //   T  Change
-//   U  Order Notes
-//   V  Item Notes
+//   U  Order Notes             (what was sold — order_notes text, else package name)
+//   V  Item Notes              (vehicle summary — "BRAND MODEL PLATE")
 //   W  Extracted_Brand
 //   X  Extracted_Model
 //   Y  License_Plate
@@ -109,6 +109,21 @@ interface JoinedRow {
 const DASH = '-';
 const cents2 = (c: number | null | undefined): number => Math.round((c ?? 0)) / 100;
 const dashOr = (v: string | null | undefined): string => (v && v.trim() !== '') ? v : DASH;
+
+// Build the "Item Notes" string in the historical convention:
+// "BRAND MODEL PLATE" (uppercase). Any missing piece is dropped, e.g.
+// only-plate is fine; all-missing returns DASH.
+function buildItemNotes(
+  brand: string | null | undefined,
+  model: string | null | undefined,
+  plate: string | null | undefined,
+): string {
+  const parts = [brand, model, plate]
+    .map(p => (p ?? '').trim())
+    .filter(p => p.length > 0)
+    .map(p => p.toUpperCase());
+  return parts.length === 0 ? DASH : parts.join(' ');
+}
 
 // Strip the "Cuci Xpress " prefix from branch names so the output
 // matches the historical Power BI convention:
@@ -161,8 +176,8 @@ function buildExcelRow(r: JoinedRow): (string | number | null)[] {
     cents2(r.total_cents),                                             // R Order Total
     cents2(r.paid_amount_cents ?? r.total_cents),                      // S Paid Amount
     cents2(r.change_cents),                                            // T Change
-    dashOr(r.order_notes),                                             // U Order Notes
-    dashOr(r.item_notes ?? r.package_name),                            // V Item Notes (fall back to package name)
+    dashOr(r.order_notes ?? r.package_name),                           // U Order Notes (cashier note, else package name)
+    buildItemNotes(r.car_brand, r.car_model, r.plate),                 // V Item Notes ("BRAND MODEL PLATE")
     dashOr(r.car_brand),                                               // W Extracted_Brand
     dashOr(r.car_model),                                               // X Extracted_Model
     dashOr(r.plate),                                                   // Y License_Plate
