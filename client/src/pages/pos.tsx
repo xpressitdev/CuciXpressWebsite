@@ -29,7 +29,6 @@ import {
   Upload,
   User,
   X,
-  BarChart3,
   QrCode,
   Play,
   CheckCheck,
@@ -50,6 +49,7 @@ import {
 } from "@/components/ui/select";
 import AdminLogin from "@/components/AdminLogin";
 import ShiftBar from "@/components/ShiftBar";
+import DailyReport from "@/components/DailyReport";
 import ScanInTab from "@/components/admin/ScanInTab";
 import {
   Dialog,
@@ -865,18 +865,11 @@ export default function POS() {
                 <QrCode className="w-4 h-4" />
                 Scan QR
               </button>
-              {/* End-of-Day shortcut: deep-links to /admin where the cashier
-                  can pull the dashboard, payment-method breakdown, and Excel
-                  export. Same staff session, no second login. */}
-              <Link href="/admin">
-                <button
-                  className="cuci-cta bg-white text-gray-900 px-4 py-2 rounded-full inline-flex items-center gap-2 text-sm"
-                  data-testid="button-pos-eod-report"
-                >
-                  <BarChart3 className="w-4 h-4" />
-                  Reports
-                </button>
-              </Link>
+              {/* End-of-shift sales report. Self-contained modal that
+                  reads the cashier's open shift and renders totals in the
+                  same format as the paper report owner reviews — no
+                  /admin access needed. */}
+              <DailyReport branchName={branchId !== null ? BRANCH_NAME_BY_ID[branchId] ?? null : null} />
               <button
                 onClick={logout}
                 className="cuci-cta bg-white text-gray-900 px-4 py-2 rounded-full inline-flex items-center gap-2 text-sm"
@@ -1232,19 +1225,6 @@ export default function POS() {
                           Customer (optional)
                         </Label>
                         <div className="flex items-center gap-3">
-                          {vehicleHistory?.customer?.id &&
-                            (staff?.role === "owner" || staff?.role === "manager") && (
-                              <a
-                                href={`/admin?tab=customers&id=${vehicleHistory.customer.id}`}
-                                target="_blank"
-                                rel="noopener noreferrer"
-                                className="text-xs text-cuci-primary hover:underline inline-flex items-center gap-1"
-                                data-testid="link-view-customer-profile"
-                              >
-                                <User className="w-3 h-3" />
-                                View profile
-                              </a>
-                            )}
                           <button
                             type="button"
                             onClick={() => {
