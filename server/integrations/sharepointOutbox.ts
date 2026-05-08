@@ -126,7 +126,11 @@ function buildExcelRow(r: JoinedRow): (string | number | null)[] {
   // Receipt Date/Time: refunds use refunded_at (when the refund happened),
   // sales use created_at. Mirrors the KedaiPOS export convention of one
   // row per event timestamp.
-  const eventAt = isRefund && r.refunded_at ? r.refunded_at : r.created_at;
+  // Raw db.execute() returns timestamps as ISO strings, not Date objects.
+  // Coerce defensively so dateToExcelSerial / timeToExcelFraction always
+  // see a real Date.
+  const rawEventAt = isRefund && r.refunded_at ? r.refunded_at : r.created_at;
+  const eventAt = rawEventAt instanceof Date ? rawEventAt : new Date(rawEventAt as any);
   return [
     'cucixpress_pos',                                                  // A Source.Name
     r.order_id,                                                        // B ID (our internal order id)
