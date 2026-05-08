@@ -255,6 +255,22 @@ export async function registerRoutes(app: Express): Promise<Server> {
       const totals = totalsRes.rows as Array<{ branch_id: number; done_count: number }>;
       const todayMap = new Map(totals.map((t) => [t.branch_id, t.done_count]));
 
+      // 7-day average wash time per branch (cap to 1-60 min to drop outliers
+      // like end-of-shift batch closes that inflate the duration).
+      const avgRes = await db.execute(sql`
+        SELECT branch_id,
+               ROUND(AVG(EXTRACT(EPOCH FROM (completed_at - created_at)) / 60.0))::int AS avg_min
+        FROM orders
+        WHERE status = 'done'
+          AND completed_at IS NOT NULL
+          AND completed_at > created_at
+          AND completed_at >= now() - INTERVAL '7 days'
+          AND EXTRACT(EPOCH FROM (completed_at - created_at)) / 60.0 BETWEEN 1 AND 60
+        GROUP BY branch_id
+      `);
+      const avgRows = avgRes.rows as Array<{ branch_id: number; avg_min: number }>;
+      const avgMap = new Map(avgRows.map((a) => [a.branch_id, a.avg_min]));
+
       const result = branches.map((b) => {
         const mine = active.filter((o) => o.branch_id === b.id);
         const washing = mine
@@ -271,6 +287,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
           washing_count: washing.length,
           queued_count: queued.length,
           today_total: todayMap.get(b.id) ?? 0,
+          avg_wash_minutes: avgMap.get(b.id) ?? null,
           est_wait_minutes: queued.length * PER_CAR_MIN,
           washing,
           queued,

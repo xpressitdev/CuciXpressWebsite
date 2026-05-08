@@ -1,7 +1,7 @@
 import { useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { Link } from "wouter";
-import { Sparkles, ArrowLeft, Car, Clock, CheckCircle2, Activity } from "lucide-react";
+import { Sparkles, ArrowLeft, Car, Clock, Timer, Activity } from "lucide-react";
 import Navigation from "@/components/Navigation";
 import Footer from "@/components/Footer";
 
@@ -18,6 +18,7 @@ interface QueueBranch {
   washing_count: number;
   queued_count: number;
   today_total: number;
+  avg_wash_minutes: number | null;
   est_wait_minutes: number;
   washing: QueueCar[];
   queued: QueueCar[];
@@ -44,9 +45,15 @@ export default function QueuePage() {
     [],
     { hour: "2-digit", minute: "2-digit" },
   );
-  const totalToday = branches.reduce((s, b) => s + b.today_total, 0);
   const totalQueued = branches.reduce((s, b) => s + b.queued_count, 0);
   const totalWashing = branches.reduce((s, b) => s + b.washing_count, 0);
+  const avgWashValues = branches
+    .map((b) => b.avg_wash_minutes)
+    .filter((v): v is number => typeof v === "number" && v > 0);
+  const networkAvgWash =
+    avgWashValues.length > 0
+      ? Math.round(avgWashValues.reduce((s, v) => s + v, 0) / avgWashValues.length)
+      : null;
 
   return (
     <div className="cuci-page-bg">
@@ -93,9 +100,9 @@ export default function QueuePage() {
             value={totalWashing}
           />
           <NetworkKpi
-            icon={<CheckCircle2 className="w-5 h-5 text-emerald-600" />}
-            label="Washed today"
-            value={totalToday}
+            icon={<Timer className="w-5 h-5 text-emerald-600" />}
+            label="Avg wash time"
+            value={networkAvgWash !== null ? `${networkAvgWash}m` : "—"}
           />
         </div>
 
@@ -175,7 +182,7 @@ function NetworkKpi({
 }: {
   icon: React.ReactNode;
   label: string;
-  value: number;
+  value: number | string;
 }) {
   return (
     <div className="cuci-kpi" data-testid={`kpi-net-${label.toLowerCase().replace(/\s+/g, "-")}`}>
@@ -231,7 +238,10 @@ function BranchDetail({ branch }: { branch: QueueBranch }) {
       <div className="grid grid-cols-3 gap-2 md:gap-3">
         <BranchKpi label="In queue" value={String(branch.queued_count)} />
         <BranchKpi label="Washing" value={String(branch.washing_count)} accent />
-        <BranchKpi label="Today" value={String(branch.today_total)} />
+        <BranchKpi
+          label="Avg wash"
+          value={branch.avg_wash_minutes ? `${branch.avg_wash_minutes}m` : "—"}
+        />
       </div>
 
       <div>
