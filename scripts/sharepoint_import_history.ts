@@ -327,6 +327,7 @@ async function main() {
         1100: 'Basic + Spray Wax',
          900: 'Basic + Tire Shine',
          800: 'Basic Wash',
+           0: 'Free Wash (claimed 4 x $12)',
       };
       const packageName = PRICE_TO_PKG[totalCents] ?? orderNotes ?? 'Legacy';
 
