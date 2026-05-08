@@ -176,3 +176,12 @@ A: The Replit logs show `[sharepoint-outbox] drained N: sent=X, failed=Y` every 
 
 **Q: What if SharePoint is down for hours?**
 A: Nothing breaks. Outbox rows queue indefinitely as `pending` with exponential backoff (max 2-hour wait between retries). When SharePoint comes back, the next tick drains the backlog.
+
+**Q: I want to test the row formatting without touching any Excel file.**
+A: Set `SHAREPOINT_DRY_RUN=1` in Replit Secrets. The worker drains rows as normal, but instead of calling Graph it just logs the 25 values it *would* have sent and marks the row `sent` with `excel_row_id='dry-run'`. Remove the secret to go live.
+
+**Q: How do I switch from a dummy Excel file to the real one at go-live?**
+A: Two Replit secrets to update:
+1. `SHAREPOINT_FILE_PATH` → real file path
+2. `SHAREPOINT_TABLE_NAME` → real table name (if different)
+Then either restart the workflow OR hit `POST /api/admin/integrations/sharepoint/reset` to clear the cached file location. The next pending row lands in the new file. Zero code changes.

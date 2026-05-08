@@ -238,6 +238,23 @@ export async function drainOnce(): Promise<{ picked: number; sent: number; faile
 
     try {
       const values = buildExcelRow(r);
+      // SHAREPOINT_DRY_RUN=1 — skip the real Graph call, log what would
+      // have been sent. Useful to validate column mapping end-to-end
+      // against a real DB before pointing at a real Excel file.
+      if (process.env.SHAREPOINT_DRY_RUN === '1') {
+        console.log(`[sharepoint-outbox] DRY RUN row ${id} (${r.cx_number} ${r.op}) values:`, values);
+        await db.execute(sql`
+          UPDATE sharepoint_outbox
+             SET status = 'sent',
+                 sent_at = now(),
+                 attempts = attempts + 1,
+                 excel_row_id = 'dry-run',
+                 last_error = NULL
+           WHERE id = ${id}
+        `);
+        sent++;
+        continue;
+      }
       const result = await appendExcelRow(values);
       await db.execute(sql`
         UPDATE sharepoint_outbox
