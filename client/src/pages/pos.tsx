@@ -872,7 +872,10 @@ export default function POS() {
                   reads the cashier's open shift and renders totals in the
                   same format as the paper report owner reviews — no
                   /admin access needed. */}
-              <DailyReport branchName={branchId !== null ? BRANCH_NAME_BY_ID[branchId] ?? null : null} />
+              <DailyReport
+                branchName={branchId !== null ? BRANCH_NAME_BY_ID[branchId] ?? null : null}
+                staffName={staff?.name ?? null}
+              />
               <button
                 onClick={logout}
                 className="cuci-cta bg-white text-gray-900 px-4 py-2 rounded-full inline-flex items-center gap-2 text-sm"
