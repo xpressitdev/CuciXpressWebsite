@@ -283,7 +283,7 @@ export function VehiclesTab({ cars }: Props) {
             className="inline-flex items-center justify-center gap-1.5 px-4 py-2.5 bg-gradient-to-r from-purple-600 to-orange-500 text-white rounded-xl font-black border-2 border-black shadow hover:translate-y-[-1px] transition-transform whitespace-nowrap"
             data-testid="button-nudge-book-wash"
           >
-            <Droplet className="w-4 h-4" /> Book a wash
+            <Droplet className="w-4 h-4" /> Pay & Queue Now
           </Link>
         </motion.div>
       )}
@@ -409,16 +409,16 @@ export function VehiclesTab({ cars }: Props) {
                   </div>
                 </div>
 
-                {/* Per-card "Book a wash" CTA appears only when the car is
-                    overdue. Sits at the bottom so the gradient hero stays
-                    clean, full-width on mobile, easy thumb target. */}
+                {/* Per-card "Pay & Queue Now" CTA appears only when the
+                    car is overdue. Sits at the bottom so the gradient hero
+                    stays clean, full-width on mobile, easy thumb target. */}
                 {due && (
                   <Link
                     href="/checkout"
                     className="flex items-center justify-center gap-1.5 py-2.5 bg-gradient-to-r from-purple-600 to-orange-500 text-white text-sm font-black border-t-2 border-black hover:translate-y-[-1px] transition-transform"
                     data-testid={`button-card-book-${c.id}`}
                   >
-                    <Droplet className="w-4 h-4" /> Book a wash
+                    <Droplet className="w-4 h-4" /> Pay & Queue Now
                   </Link>
                 )}
 
