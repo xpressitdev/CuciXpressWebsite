@@ -22,6 +22,11 @@ import {
   packageBadgeClass,
   shortReceiptId,
 } from "./types";
+import {
+  DateRangeFilter,
+  DateRange,
+  resolveRange,
+} from "./DateRangeFilter";
 
 interface Props {
   orders: OrderRow[];
@@ -48,17 +53,23 @@ function packageGradient(name: string) {
 export function WashHistoryTab({ orders }: Props) {
   const [filter, setFilter] = useState("");
   const [filterOpen, setFilterOpen] = useState(false);
+  const [range, setRange] = useState<DateRange>({ preset: "all" });
 
   const filtered = useMemo(() => {
     const q = filter.trim().toLowerCase();
-    if (!q) return orders;
-    return orders.filter(
-      (o) =>
+    const { from, to } = resolveRange(range);
+    return orders.filter((o) => {
+      const t = +new Date(o.created_at);
+      if (from && t < +from) return false;
+      if (to && t > +to) return false;
+      if (!q) return true;
+      return (
         o.plate.toLowerCase().includes(q) ||
         o.package_name.toLowerCase().includes(q) ||
-        (o.branch_name ?? "").toLowerCase().includes(q),
-    );
-  }, [orders, filter]);
+        (o.branch_name ?? "").toLowerCase().includes(q)
+      );
+    });
+  }, [orders, filter, range]);
 
   const total = filtered.reduce((acc, o) => acc + o.total_cents, 0);
 
@@ -172,7 +183,8 @@ export function WashHistoryTab({ orders }: Props) {
             </span>
           </p>
         </div>
-        <div className="flex gap-2">
+        <div className="flex gap-2 flex-wrap">
+          <DateRangeFilter value={range} onChange={setRange} />
           <Button
             variant="outline"
             size="sm"

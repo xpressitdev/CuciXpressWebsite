@@ -26,6 +26,11 @@ import {
   formatDateTime,
   shortReceiptId,
 } from "./types";
+import {
+  DateRangeFilter,
+  DateRange,
+  resolveRange,
+} from "./DateRangeFilter";
 
 interface Props {
   orders: OrderRow[];
@@ -58,21 +63,27 @@ function packageGradient(name: string) {
 export function ReceiptsTab({ orders }: Props) {
   const [open, setOpen] = useState<OrderRow | null>(null);
   const [q, setQ] = useState("");
+  const [range, setRange] = useState<DateRange>({ preset: "all" });
 
   const filtered = useMemo(() => {
     const t = q.trim().toLowerCase();
+    const { from, to } = resolveRange(range);
     const sorted = [...orders].sort(
       (a, b) => +new Date(b.created_at) - +new Date(a.created_at),
     );
-    if (!t) return sorted;
-    return sorted.filter(
-      (o) =>
+    return sorted.filter((o) => {
+      const ts = +new Date(o.created_at);
+      if (from && ts < +from) return false;
+      if (to && ts > +to) return false;
+      if (!t) return true;
+      return (
         o.plate.toLowerCase().includes(t) ||
         o.package_name.toLowerCase().includes(t) ||
         (o.branch_name ?? "").toLowerCase().includes(t) ||
-        shortReceiptId(o.id).toLowerCase().includes(t),
-    );
-  }, [orders, q]);
+        shortReceiptId(o.id).toLowerCase().includes(t)
+      );
+    });
+  }, [orders, q, range]);
 
   return (
     <div className="space-y-6">
@@ -85,15 +96,18 @@ export function ReceiptsTab({ orders }: Props) {
             Tap any receipt to view, print, or share.
           </p>
         </div>
-        <div className="relative">
-          <Search className="w-4 h-4 text-gray-400 absolute left-3 top-1/2 -translate-y-1/2" />
-          <Input
-            placeholder="Search receipts…"
-            value={q}
-            onChange={(e) => setQ(e.target.value)}
-            className="pl-9 w-64"
-            data-testid="input-receipt-search"
-          />
+        <div className="flex items-center gap-2 flex-wrap">
+          <DateRangeFilter value={range} onChange={setRange} />
+          <div className="relative">
+            <Search className="w-4 h-4 text-gray-400 absolute left-3 top-1/2 -translate-y-1/2" />
+            <Input
+              placeholder="Search receipts…"
+              value={q}
+              onChange={(e) => setQ(e.target.value)}
+              className="pl-9 w-56"
+              data-testid="input-receipt-search"
+            />
+          </div>
         </div>
       </div>
 
