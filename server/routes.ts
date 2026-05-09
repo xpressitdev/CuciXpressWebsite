@@ -3613,7 +3613,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
   // customer and 302-redirects to /dashboard so you can browse the
   // app from the customer's point of view in one click. Returns 404
   // in production (same guard as /dev/last-otp).
-  app.get('/api/dev/login-as', async (req, res) => {
+  app.get(['/api/dev/login-as', '/login-as'], async (req, res) => {
     if (process.env.NODE_ENV === 'production') {
       return res.status(404).send('Not found');
     }
