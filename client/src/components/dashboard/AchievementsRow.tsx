@@ -33,7 +33,7 @@ export function AchievementsRow({ orders, memberships }: Props) {
             {unlockedCount} / {achievements.length} unlocked
           </span>
           <Link
-            href="/achievements"
+            href="/dashboard?tab=achievements"
             className="text-xs font-bold text-purple-600 hover:text-purple-800 inline-flex items-center gap-1"
             data-testid="link-achievements-all"
           >

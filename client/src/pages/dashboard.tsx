@@ -10,6 +10,7 @@ import { WashHistoryTab } from "@/components/dashboard/WashHistoryTab";
 import { VehiclesTab } from "@/components/dashboard/VehiclesTab";
 import { SubscriptionTab } from "@/components/dashboard/SubscriptionTab";
 import { ReceiptsTab } from "@/components/dashboard/ReceiptsTab";
+import { AchievementsTab } from "@/components/dashboard/AchievementsTab";
 import {
   Whoami,
   MeResp,
@@ -26,7 +27,7 @@ export default function DashboardPage() {
   // Read initial tab from ?tab= so other pages (e.g. /checkout sidebar
   // clicks) can deep-link into a specific dashboard section.
   const initialTab: DashTab = (() => {
-    const valid: DashTab[] = ["overview", "history", "vehicles", "subscription", "receipts"];
+    const valid: DashTab[] = ["overview", "history", "vehicles", "subscription", "receipts", "achievements"];
     const params = new URLSearchParams(window.location.search);
     const t = params.get("tab") as DashTab | null;
     return t && valid.includes(t) ? t : "overview";
@@ -150,6 +151,9 @@ export default function DashboardPage() {
             />
           )}
           {tab === "receipts" && <ReceiptsTab orders={orders} />}
+          {tab === "achievements" && (
+            <AchievementsTab orders={orders} memberships={memberships} />
+          )}
         </main>
       </div>
     </div>

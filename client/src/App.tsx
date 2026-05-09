@@ -8,7 +8,6 @@ import Home from "@/pages/home";
 import QueuePage from "@/pages/queue";
 import LoginPage from "@/pages/login";
 import DashboardPage from "@/pages/dashboard";
-import AchievementsPage from "@/pages/achievements";
 import Pricing from "@/pages/pricing";
 import Subscriptions from "@/pages/subscriptions";
 import Checkout from "@/pages/checkout";
@@ -35,7 +34,6 @@ function Router() {
       <Route path="/queue" component={QueuePage} />
       <Route path="/login" component={LoginPage} />
       <Route path="/dashboard" component={DashboardPage} />
-      <Route path="/achievements" component={AchievementsPage} />
       <Route path="/pricing" component={Pricing} />
       <Route path="/subscriptions" component={Subscriptions} />
       <Route path="/checkout" component={Checkout} />

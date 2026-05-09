@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { Home, Clock, Car, Crown, Receipt, LogOut, ChevronUp, Pencil, Loader2 } from "lucide-react";
+import { Home, Clock, Car, Crown, Receipt, LogOut, ChevronUp, Pencil, Loader2, Trophy } from "lucide-react";
 import { Link } from "wouter";
 import { useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
@@ -40,7 +40,8 @@ export type DashTab =
   | "history"
   | "vehicles"
   | "subscription"
-  | "receipts";
+  | "receipts"
+  | "achievements";
 
 interface Props {
   active: DashTab;
@@ -75,6 +76,7 @@ const items: { id: DashTab; label: string; icon: any }[] = [
   { id: "vehicles", label: "My vehicles", icon: Car },
   { id: "subscription", label: "Subscription", icon: Crown },
   { id: "receipts", label: "Receipts", icon: Receipt },
+  { id: "achievements", label: "Achievements", icon: Trophy },
 ];
 
 export function DashSidebar({
