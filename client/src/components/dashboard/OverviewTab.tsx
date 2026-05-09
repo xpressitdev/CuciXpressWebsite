@@ -11,7 +11,6 @@ import {
   formatBND,
 } from "./types";
 import { LoyaltyCard } from "./LoyaltyCard";
-import { HomeBranchCard } from "./HomeBranchCard";
 import { WashHeatmap } from "./WashHeatmap";
 
 interface Props {
@@ -109,13 +108,13 @@ export function OverviewTab({ me, orders, memberships, cars, fullName, onChangeT
         </div>
       )}
 
-      {/* Home branch live card — pinned to the customer's most-visited branch. */}
-      <HomeBranchCard orders={orders} branches={queueData?.branches ?? []} />
-
-      {/* Live queue strip — inline, reuses queueData already fetched above. */}
+      {/* Live queue strip — inline, reuses queueData already fetched above.
+          The customer's most-visited branch gets a "Your home" highlight so
+          they can spot it without us repeating the hero card. */}
       <LiveQueueStrip
         branches={queueData?.branches ?? []}
         serverTime={(queueData as any)?.server_time}
+        homeBranchName={pickHomeBranchName(orders)}
       />
 
       {/* Loyalty punch card (now with progress ring) */}
@@ -363,12 +362,32 @@ function ActiveSubscriptionHero({
 // tab. Same data source as the public /queue page (no extra fetch — we
 // reuse the snapshot the parent already pulled for the hero CTA).
 // ----------------------------------------------------------------------
+// Most-visited branch name from order history. Used to badge the matching
+// tile in LiveQueueStrip — keeps the "home branch" cue without a second hero.
+function pickHomeBranchName(orders: OrderRow[]): string | null {
+  const tally = new Map<string, number>();
+  for (const o of orders) {
+    if (o.branch_name) tally.set(o.branch_name, (tally.get(o.branch_name) ?? 0) + 1);
+  }
+  let best: string | null = null;
+  let bestN = 0;
+  for (const [name, n] of Array.from(tally.entries())) {
+    if (n > bestN) {
+      best = name;
+      bestN = n;
+    }
+  }
+  return best;
+}
+
 function LiveQueueStrip({
   branches,
   serverTime,
+  homeBranchName,
 }: {
   branches: QueueBranch[];
   serverTime: string | undefined;
+  homeBranchName: string | null;
 }) {
   const time = new Date(serverTime ?? Date.now()).toLocaleTimeString([], {
     hour: "2-digit",
@@ -419,6 +438,7 @@ function LiveQueueStrip({
             const closed = !b.is_open;
             const quiet = b.queued_count === 0;
             const busy = b.est_wait_minutes >= 20;
+            const isHome = homeBranchName != null && b.name === homeBranchName;
             const dot = closed
               ? "bg-gray-300"
               : quiet
@@ -441,12 +461,25 @@ function LiveQueueStrip({
             return (
               <div
                 key={b.id}
-                className="flex flex-col gap-1 p-3 rounded-lg border border-gray-100 bg-gray-50"
+                className={
+                  "relative flex flex-col gap-1 p-3 rounded-lg " +
+                  (isHome
+                    ? "border-2 border-cuci-secondary bg-gradient-to-br from-amber-50 to-orange-50 shadow-sm"
+                    : "border border-gray-100 bg-gray-50")
+                }
                 data-testid={`strip-branch-${b.id}`}
               >
+                {isHome && (
+                  <span
+                    className="absolute -top-2 right-2 inline-flex items-center gap-0.5 px-1.5 py-0.5 rounded-full bg-cuci-secondary text-white text-[9px] font-black uppercase tracking-wider shadow"
+                    data-testid={`strip-home-badge-${b.id}`}
+                  >
+                    ★ Your home
+                  </span>
+                )}
                 <div className="flex items-center gap-1.5">
                   <span className={`w-2 h-2 rounded-full ${dot}`} />
-                  <span className="text-xs font-semibold text-gray-800 truncate">
+                  <span className={`text-xs font-semibold truncate ${isHome ? "text-gray-900" : "text-gray-800"}`}>
                     {shortName(b.name)}
                   </span>
                 </div>
