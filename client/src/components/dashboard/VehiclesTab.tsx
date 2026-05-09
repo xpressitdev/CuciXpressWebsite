@@ -11,7 +11,10 @@ import {
   Sparkles,
   CalendarClock,
   Star,
+  Droplet,
+  AlertCircle,
 } from "lucide-react";
+import { Link } from "wouter";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -207,6 +210,22 @@ export function VehiclesTab({ cars }: Props) {
     ? [...cars].sort((a, b) => b.total_washes - a.total_washes)[0].id
     : null;
 
+  // Service-nudge logic: a car "needs a wash" when it's been seen at
+  // least once but not in the last 14 days. Brand-new cars (total_washes
+  // === 0) get a softer "ready for first wash" tone instead.
+  const NUDGE_DAYS = 14;
+  const daysSince = (iso: string | null): number => {
+    if (!iso) return Number.POSITIVE_INFINITY;
+    return Math.floor((Date.now() - new Date(iso).getTime()) / (24 * 60 * 60 * 1000));
+  };
+  const needsWash = (c: CarRow): boolean =>
+    c.total_washes > 0 && daysSince(c.last_seen_at) >= NUDGE_DAYS;
+  // Most-overdue car (used for the top alert banner).
+  const overdue = [...cars]
+    .filter(needsWash)
+    .sort((a, b) => daysSince(b.last_seen_at) - daysSince(a.last_seen_at))[0];
+  const overdueCount = cars.filter(needsWash).length;
+
   return (
     <div className="space-y-6">
       <div className="flex items-center justify-between gap-3">
@@ -226,6 +245,43 @@ export function VehiclesTab({ cars }: Props) {
           <Plus className="w-4 h-4 mr-1" /> Add a car
         </Button>
       </div>
+
+      {/* Service nudge — only shown when at least one car is overdue. */}
+      {overdue && (
+        <motion.div
+          initial={{ opacity: 0, y: -6 }}
+          animate={{ opacity: 1, y: 0 }}
+          className="relative overflow-hidden rounded-2xl border-2 border-amber-300 bg-gradient-to-r from-amber-50 via-orange-50 to-rose-50 p-4 md:p-5 flex flex-col md:flex-row md:items-center justify-between gap-3"
+          data-testid="banner-service-nudge"
+        >
+          <div className="flex items-start gap-3 min-w-0">
+            <div className="w-10 h-10 rounded-xl bg-amber-200 grid place-items-center shrink-0">
+              <AlertCircle className="w-5 h-5 text-amber-800" />
+            </div>
+            <div className="min-w-0">
+              <p className="text-[11px] uppercase tracking-widest font-bold text-amber-700">
+                Time for a wash
+              </p>
+              <p className="text-sm md:text-base font-extrabold text-gray-900 mt-0.5">
+                <span className="font-mono tracking-wider">{overdue.license_plate}</span>{" "}
+                hasn't been washed in {daysSince(overdue.last_seen_at)} days
+                {overdueCount > 1 && (
+                  <span className="text-gray-500 font-semibold">
+                    {" "}· +{overdueCount - 1} other{overdueCount - 1 === 1 ? "" : "s"} due
+                  </span>
+                )}
+              </p>
+            </div>
+          </div>
+          <Link
+            href="/checkout"
+            className="inline-flex items-center justify-center gap-1.5 px-4 py-2.5 bg-gradient-to-r from-purple-600 to-orange-500 text-white rounded-xl font-black border-2 border-black shadow hover:translate-y-[-1px] transition-transform whitespace-nowrap"
+            data-testid="button-nudge-book-wash"
+          >
+            <Droplet className="w-4 h-4" /> Book a wash
+          </Link>
+        </motion.div>
+      )}
 
       {cars.length === 0 ? (
         <div className="bg-white rounded-3xl border border-dashed border-gray-300 p-12 text-center">
@@ -250,6 +306,8 @@ export function VehiclesTab({ cars }: Props) {
           {cars.map((c, idx) => {
             const grad = carGradient(c.color, idx);
             const isFav = c.id === favoriteId && c.total_washes > 0;
+            const due = needsWash(c);
+            const ageDays = daysSince(c.last_seen_at);
             return (
               <motion.article
                 key={c.id}
@@ -286,6 +344,14 @@ export function VehiclesTab({ cars }: Props) {
                       {isFav && (
                         <span className="text-[10px] uppercase font-black px-2 py-0.5 rounded-full bg-amber-400 text-amber-900 inline-flex items-center gap-1">
                           <Star className="w-3 h-3 fill-current" /> Favourite
+                        </span>
+                      )}
+                      {due && (
+                        <span
+                          className="text-[10px] uppercase font-black px-2 py-0.5 rounded-full bg-rose-500 text-white inline-flex items-center gap-1 animate-pulse"
+                          data-testid={`badge-needs-wash-${c.id}`}
+                        >
+                          <AlertCircle className="w-3 h-3" /> {ageDays}d due
                         </span>
                       )}
                     </div>
@@ -327,11 +393,29 @@ export function VehiclesTab({ cars }: Props) {
                     <p className="text-[10px] uppercase font-bold text-gray-400 inline-flex items-center gap-1 justify-center">
                       <CalendarClock className="w-3 h-3" /> Last seen
                     </p>
-                    <p className="text-sm font-black text-gray-900 leading-none mt-1.5">
+                    <p
+                      className={
+                        "text-sm font-black leading-none mt-1.5 " +
+                        (due ? "text-rose-600" : "text-gray-900")
+                      }
+                    >
                       {relativeAgo(c.last_seen_at)}
                     </p>
                   </div>
                 </div>
+
+                {/* Per-card "Book a wash" CTA appears only when the car is
+                    overdue. Sits at the bottom so the gradient hero stays
+                    clean, full-width on mobile, easy thumb target. */}
+                {due && (
+                  <Link
+                    href="/checkout"
+                    className="flex items-center justify-center gap-1.5 py-2.5 bg-gradient-to-r from-purple-600 to-orange-500 text-white text-sm font-black border-t-2 border-black hover:translate-y-[-1px] transition-transform"
+                    data-testid={`button-card-book-${c.id}`}
+                  >
+                    <Droplet className="w-4 h-4" /> Book a wash
+                  </Link>
+                )}
 
                 {/* Edit button (always visible on touch devices) */}
                 <button

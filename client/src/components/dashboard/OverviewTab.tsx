@@ -12,6 +12,7 @@ import {
 } from "./types";
 import { LoyaltyCard } from "./LoyaltyCard";
 import { WashHeatmap } from "./WashHeatmap";
+import { MembershipRecommendation } from "./MembershipRecommendation";
 
 interface Props {
   me: MeResp;
@@ -107,6 +108,11 @@ export function OverviewTab({ me, orders, memberships, cars, fullName, onChangeT
           </div>
         </div>
       )}
+
+      {/* Smart subscription suggestion — only renders when there's no active
+          plan AND the customer's wash frequency makes Unlimited a good deal
+          (or they're close to break-even). Returns null otherwise. */}
+      <MembershipRecommendation me={me} orders={orders} memberships={memberships} />
 
       {/* Live queue strip — inline, reuses queueData already fetched above.
           The customer's most-visited branch gets a "Your home" highlight so
