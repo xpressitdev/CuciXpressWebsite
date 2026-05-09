@@ -74,10 +74,12 @@ export function computeAchievements(
   }
   const premiumCount = pkgTally.get("premium") ?? 0;
 
-  // early bird washes (before 08:00 local)
-  const earlyOrders = sortedByDate.filter(
-    (o) => new Date(o.created_at).getHours() < 8,
-  );
+  // early bird washes (before 08:30 local — branches open at 08:00, so
+  // the first 30 minutes of the day count as "early")
+  const earlyOrders = sortedByDate.filter((o) => {
+    const d = new Date(o.created_at);
+    return d.getHours() * 60 + d.getMinutes() < 8 * 60 + 30;
+  });
 
   // distinct calendar months washed in
   const months = new Set(
@@ -176,10 +178,10 @@ export function computeAchievements(
     {
       id: "early-bird",
       label: "Early Bird",
-      desc: "3+ washes before 8 AM",
+      desc: "3+ washes before 8:30 AM",
       longDesc:
-        "Rise and shine. Three washes clocked in before 8 AM proves you beat the queue and get back to your day.",
-      howTo: "Visit any branch before 8:00 AM on three separate days.",
+        "Rise and shine. Three washes clocked in before 8:30 AM proves you beat the queue and get back to your day.",
+      howTo: "Visit any branch before 8:30 AM on three separate days.",
       icon: Sunrise,
       unlocked: earlyOrders.length >= 3,
       unlockedAt: earlyOrders.length >= 3 ? earlyOrders[2]?.created_at : undefined,
