@@ -3608,6 +3608,56 @@ export async function registerRoutes(app: Express): Promise<Server> {
     });
   });
 
+  // GET /api/dev/login-as?plate=...|email=...|id=...  — DEV-ONLY click-
+  // through impersonation. Mints a Lucia session for the matched
+  // customer and 302-redirects to /dashboard so you can browse the
+  // app from the customer's point of view in one click. Returns 404
+  // in production (same guard as /dev/last-otp).
+  app.get('/api/dev/login-as', async (req, res) => {
+    if (process.env.NODE_ENV === 'production') {
+      return res.status(404).send('Not found');
+    }
+    try {
+      let userId: number | null = null;
+      const idQ = String(req.query.id ?? '').trim();
+      const emailQ = String(req.query.email ?? '').trim().toLowerCase();
+      const plateQ = String(req.query.plate ?? '').trim();
+
+      if (idQ && /^\d+$/.test(idQ)) {
+        userId = Number(idQ);
+      } else if (emailQ) {
+        const r = (await db.execute(sql`
+          SELECT id FROM users WHERE LOWER(email) = ${emailQ} LIMIT 1
+        `)).rows[0] as { id: number } | undefined;
+        userId = r?.id ?? null;
+      } else if (plateQ) {
+        const norm = plateQ.toUpperCase().replace(/\s+/g, '');
+        const r = (await db.execute(sql`
+          SELECT user_id FROM cars
+           WHERE UPPER(REGEXP_REPLACE(license_plate, '\\s+', '', 'g')) = ${norm}
+             AND user_id IS NOT NULL
+           LIMIT 1
+        `)).rows[0] as { user_id: number } | undefined;
+        userId = r?.user_id ?? null;
+      }
+
+      if (!userId) {
+        return res.status(404).type('text/html').send(
+          `<pre>No user matched. Try ?plate=BBG2629 or ?email=foo@bar.com or ?id=546</pre>`
+        );
+      }
+
+      const session = await lucia.createSession(String(userId), {});
+      const cookie = lucia.createSessionCookie(session.id);
+      res.appendHeader('Set-Cookie', cookie.serialize());
+      const next = String(req.query.next ?? '/dashboard');
+      res.redirect(next);
+    } catch (err) {
+      console.error('[dev/login-as] failed', err);
+      res.status(500).type('text/html').send('<pre>dev impersonation failed</pre>');
+    }
+  });
+
   // POST /api/auth/lucia/dev-login — DEV-ONLY helper that mints a Lucia
   // session for an existing customer (by email). Lets us smoke-test the
   // adapter without wiring a full login flow yet. Disabled outside dev.
