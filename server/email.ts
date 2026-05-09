@@ -216,6 +216,71 @@ export async function sendCollaborationEmail(data: any): Promise<boolean> {
   }
 }
 
+// ============================================================
+// OTP code email — sent when a customer is registering or signing in.
+// Branded, single-purpose, no marketing fluff.
+// ============================================================
+export async function sendOtpEmail(args: {
+  to: string;
+  code: string;
+  ttlMinutes: number;
+  purpose: 'register' | 'signin';
+}): Promise<boolean> {
+  if (!GMAIL_APP_PASSWORD) {
+    console.log(`[email] GMAIL_APP_PASSWORD not set — would have sent OTP ${args.code} to ${args.to}`);
+    return false;
+  }
+
+  const heading = args.purpose === 'register' ? 'Confirm your email' : 'Your sign-in code';
+  const blurb =
+    args.purpose === 'register'
+      ? 'Use the code below to finish creating your Cuci Xpress account.'
+      : 'Use the code below to sign in to your Cuci Xpress account.';
+
+  const html = `
+  <!DOCTYPE html>
+  <html><head><meta charset="utf-8"></head>
+  <body style="font-family:Arial,sans-serif;background:#f4f4f4;margin:0;padding:0;color:#333;">
+    <div style="max-width:480px;margin:30px auto;background:#fff;border-radius:12px;overflow:hidden;box-shadow:0 4px 20px rgba(0,0,0,0.08);">
+      <div style="background:linear-gradient(135deg,#6C5CE7,#FFA500);color:white;padding:28px 24px;text-align:center;">
+        <div style="font-size:24px;font-weight:bold;letter-spacing:0.3px;">🚗 Cuci Xpress</div>
+        <h1 style="margin:8px 0 0;font-size:18px;font-weight:500;">${heading}</h1>
+      </div>
+      <div style="padding:28px 24px;">
+        <p style="margin:0 0 16px;font-size:14px;color:#555;">${blurb}</p>
+        <div style="background:#f8f7ff;border:2px dashed #6C5CE7;border-radius:10px;padding:18px;text-align:center;margin:18px 0;">
+          <div style="font-family:'Courier New',monospace;font-size:36px;font-weight:bold;letter-spacing:0.5em;color:#6C5CE7;padding-left:0.5em;">${args.code}</div>
+        </div>
+        <p style="font-size:13px;color:#777;margin:12px 0 0;text-align:center;">
+          This code expires in <strong>${args.ttlMinutes} minutes</strong>.<br>
+          If you didn't request this, you can safely ignore this email.
+        </p>
+      </div>
+      <div style="background:#fafafa;text-align:center;padding:16px;color:#999;font-size:12px;border-top:1px solid #eee;">
+        Cuci Xpress · Brunei Darussalam · cucixpress.com
+      </div>
+    </div>
+  </body></html>`;
+
+  const text = `Cuci Xpress — ${heading}\n\n${blurb}\n\nYour code: ${args.code}\n\nExpires in ${args.ttlMinutes} minutes.\nIf you didn't request this, ignore this email.`;
+
+  try {
+    const transporter = createTransporter();
+    await transporter.sendMail({
+      from: `"Cuci Xpress" <${GMAIL_USER}>`,
+      to: args.to,
+      subject: `${args.code} is your Cuci Xpress code`,
+      text,
+      html,
+    });
+    console.log(`[email] OTP sent to ${args.to}`);
+    return true;
+  } catch (err) {
+    console.error('[email] OTP send failed:', err);
+    return false;
+  }
+}
+
 interface SubscriptionNotificationData {
   email: string;
   submittedAt: string;

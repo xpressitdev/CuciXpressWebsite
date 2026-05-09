@@ -178,11 +178,42 @@ async function deliverOtp(args: {
   purpose: OtpPurpose;
   code: string;
 }): Promise<void> {
-  if (process.env.NODE_ENV === "production") {
-    // Fail-loud: refuse to silently drop a "delivered" code in prod.
+  // Email delivery path — used by the customer register & signin flows
+  // (2026-05-09). The identifier is the customer's email address. We
+  // detect it by the '@' sign rather than by purpose because the OTP
+  // module is purpose-agnostic about the channel.
+  const looksLikeEmail = args.identifier.includes("@");
+  if (looksLikeEmail) {
+    try {
+      const { sendOtpEmail } = await import("../email");
+      const sent = await sendOtpEmail({
+        to: args.identifier,
+        code: args.code,
+        ttlMinutes: Math.round(TTL_SECONDS / 60),
+        purpose: args.purpose === "verify_email" ? "register" : "signin",
+      });
+      if (sent) {
+        // Real send succeeded — no need to fall through to dev mock.
+        return;
+      }
+      // Fall-through: GMAIL_APP_PASSWORD not configured. In prod that's
+      // fatal because the customer will never see the code.
+      if (process.env.NODE_ENV === "production") {
+        throw new Error(
+          "[otp] email delivery not configured in production. " +
+            "Set GMAIL_APP_PASSWORD secret."
+        );
+      }
+    } catch (err) {
+      if (process.env.NODE_ENV === "production") throw err;
+      // Dev: continue to console mock so local development still works.
+    }
+  } else if (process.env.NODE_ENV === "production") {
+    // Non-email identifier (phone) in prod — WhatsApp wrapper not wired
+    // yet. Fail loud rather than silently dropping.
     throw new Error(
-      "[otp] real OTP delivery is not yet wired (Week 4). " +
-        "Refusing to claim delivery in production."
+      "[otp] WhatsApp / SMS OTP delivery not wired yet. " +
+        "Use email as the OTP identifier."
     );
   }
   // Dev: log a single line (multiline console.log content gets clipped by

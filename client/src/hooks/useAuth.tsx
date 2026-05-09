@@ -18,6 +18,9 @@ export interface User {
   };
 }
 
+// Customer auth hook — Lucia (cx_session) only as of 2026-05-09 cutover.
+// Sign-in / register flows live in /pages/login.tsx and call the
+// /api/auth/customer/{signin,register}/* endpoints directly.
 export function useAuth() {
   const [user, setUser] = useState<User | null>(null);
   const [isAuthenticated, setIsAuthenticated] = useState<boolean>(false);
@@ -29,10 +32,7 @@ export function useAuth() {
 
   const checkAuthStatus = async () => {
     try {
-      const response = await fetch('/api/auth/me', {
-        credentials: 'include' // Important for cookies
-      });
-      
+      const response = await fetch('/api/auth/me', { credentials: 'include' });
       if (response.ok) {
         const data = await response.json();
         setUser(data.user);
@@ -50,61 +50,11 @@ export function useAuth() {
     }
   };
 
-  const login = async (username: string, password: string): Promise<{ success: boolean; error?: string }> => {
-    try {
-      const response = await fetch('/api/auth/login', {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json'
-        },
-        credentials: 'include',
-        body: JSON.stringify({ email: username, password })
-      });
-      
-      const data = await response.json();
-      
-      if (data.success) {
-        // Fetch full profile data with phone and car plate from /api/auth/me
-        await checkAuthStatus();
-        return { success: true };
-      } else {
-        return { success: false, error: data.error };
-      }
-    } catch (error) {
-      return { success: false, error: 'Network error' };
-    }
-  };
-
-  const register = async (username: string, password: string, email?: string, appPreference?: string): Promise<{ success: boolean; error?: string }> => {
-    try {
-      const response = await fetch('/api/auth/register', {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json'
-        },
-        credentials: 'include',
-        body: JSON.stringify({ username, password, email, app_preference: appPreference })
-      });
-      
-      const data = await response.json();
-      
-      if (data.success) {
-        setUser(data.user);
-        setIsAuthenticated(true);
-        return { success: true };
-      } else {
-        return { success: false, error: data.error };
-      }
-    } catch (error) {
-      return { success: false, error: 'Network error' };
-    }
-  };
-
   const logout = async () => {
     try {
       await fetch('/api/auth/logout', {
         method: 'POST',
-        credentials: 'include'
+        credentials: 'include',
       });
     } catch (error) {
       console.error('Logout error:', error);
@@ -114,19 +64,11 @@ export function useAuth() {
     }
   };
 
-  // NOTE: the legacy `legacyLogin(password)` helper that gated /admin
-  // behind a hardcoded password was removed in the Task-1.6 follow-up.
-  // Admin / staff auth now uses `useStaffAuth` against the real
-  // `/api/auth/staff/*` endpoints, with a per-account password,
-  // server-side enforcement on `/api/admin/*`, lockout, and audit log.
-
   return {
     user,
     isAuthenticated,
     isLoading,
-    login,
-    register,
     logout,
-    checkAuthStatus
+    checkAuthStatus,
   };
 }

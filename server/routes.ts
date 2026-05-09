@@ -3460,101 +3460,50 @@ export async function registerRoutes(app: Express): Promise<Server> {
     res.sendFile(process.cwd() + "/diagnostic.html");
   });
 
-  // === Unified Authentication Endpoints ===
-  
-  // Login endpoint (works for both domains)
-  app.post('/api/auth/login', async (req, res) => {
-    try {
-      const { username, email, password, remember_me } = req.body;
-      const loginIdentifier = username || email;
-      
-      if (!loginIdentifier || !password) {
-        return res.status(400).json({
-          success: false,
-          error: 'Email and password are required'
-        });
-      }
+  // === Customer Authentication Endpoints ===
+  //
+  // 2026-05-09 cutover: legacy email+password login/register endpoints
+  // were removed. The customer flow is now phone/email + email-OTP only,
+  // backed by Lucia v3 sessions (cx_session cookie, 365-day TTL). The
+  // new endpoints live below at /api/auth/customer/{register,signin}/*.
+  //
+  // The two stubs below preserve the URL paths so any old client cached
+  // in someone's browser gets a clear 410 instead of a confusing 404.
 
-      const result = await unifiedAuth.login(loginIdentifier, password);
-      
-      if (result.success && result.token) {
-        // Set cross-domain cookies
-        unifiedAuth.setAuthCookie(res, result.token);
-        
-        // Note: last_login tracking handled by queue app
-
-        res.json({
-          success: true,
-          message: 'Login successful',
-          user: result.user,
-          token: result.token
-        });
-      } else {
-        res.status(401).json({
-          success: false,
-          error: result.error || 'Login failed'
-        });
-      }
-    } catch (error) {
-      console.error('Login error:', error);
-      res.status(500).json({
-        success: false,
-        error: 'Internal server error'
-      });
-    }
-  });
-
-  // Register endpoint
-  app.post('/api/auth/register', async (req, res) => {
-    try {
-      const { username, password, email, app_preference } = req.body;
-      
-      if (!username || !password) {
-        return res.status(400).json({
-          success: false,
-          error: 'Username and password are required'
-        });
-      }
-
-      const result = await unifiedAuth.register({
-        username,
-        password,
-        email,
-        app_preference
-      });
-      
-      if (result.success && result.token) {
-        // Set cross-domain cookies
-        unifiedAuth.setAuthCookie(res, result.token);
-
-        res.json({
-          success: true,
-          message: 'Registration successful',
-          user: result.user,
-          token: result.token
-        });
-      } else {
-        res.status(400).json({
-          success: false,
-          error: result.error || 'Registration failed'
-        });
-      }
-    } catch (error) {
-      console.error('Registration error:', error);
-      res.status(500).json({
-        success: false,
-        error: 'Internal server error'
-      });
-    }
-  });
-
-  // Logout endpoint
-  app.post('/api/auth/logout', (req, res) => {
-    unifiedAuth.clearAuthCookies(res);
-    res.json({
-      success: true,
-      message: 'Logged out successfully'
+  app.post('/api/auth/login', (_req, res) => {
+    res.status(410).json({
+      success: false,
+      error: 'Password login is no longer supported. Sign in with your email — we\'ll send a one-time code.',
+      redirect: '/login',
     });
+  });
+
+  app.post('/api/auth/register', (_req, res) => {
+    res.status(410).json({
+      success: false,
+      error: 'Password registration is no longer supported. Create your account with email — we\'ll send a one-time code.',
+      redirect: '/login',
+    });
+  });
+
+  // Logout endpoint — invalidates the Lucia session (if any) and clears
+  // both the new cx_session cookie and the legacy cuci_auth_token JWT
+  // cookie so existing logged-in users are fully signed out on cutover.
+  app.post('/api/auth/logout', async (req, res) => {
+    try {
+      const sid = req.lucia?.session?.id;
+      if (sid) {
+        await lucia.invalidateSession(sid);
+      }
+    } catch (err) {
+      console.error('[logout] lucia invalidate failed', err);
+    }
+    // Clear new session cookie
+    const blank = lucia.createBlankSessionCookie();
+    res.appendHeader('Set-Cookie', blank.serialize());
+    // Clear legacy JWT cookies (both bare and cross-domain variants)
+    unifiedAuth.clearAuthCookies(res);
+    res.json({ success: true, message: 'Logged out successfully' });
   });
 
   // Get current user endpoint with car details from queue app database.
@@ -3572,31 +3521,13 @@ export async function registerRoutes(app: Express): Promise<Server> {
   // id and the rest of the handler is unchanged.
   app.get('/api/auth/me', async (req, res) => {
     try {
-      let userId: number | null = null;
-
-      // Path A — Lucia (cx_session cookie). Set by phone+OTP login and
-      // by Google OAuth callback. Already attached to req by the
-      // `attachLuciaSession` middleware in server/index.ts.
+      // 2026-05-09 cutover: Lucia is the only auth path now. Legacy JWT
+      // cookies are intentionally NOT honoured anymore — existing
+      // password users must re-verify with email-OTP on next visit.
       const luciaUserId = req.lucia?.user?.id;
-      if (luciaUserId) {
-        const parsed = Number(luciaUserId);
-        if (Number.isFinite(parsed)) userId = parsed;
-      }
+      const userId = luciaUserId ? Number(luciaUserId) : NaN;
 
-      // Path B — legacy JWT (auth_token cookie / Authorization header).
-      // Only consulted if Lucia didn't already authenticate the request.
-      if (userId == null) {
-        const token =
-          req.headers.authorization?.replace('Bearer ', '') ||
-          (req as any).cookies?.auth_token ||
-          null;
-        if (token) {
-          const decoded = unifiedAuth.verifyToken(token);
-          if (decoded?.id) userId = Number(decoded.id);
-        }
-      }
-
-      if (userId == null) {
+      if (!Number.isFinite(userId)) {
         return res.status(401).json({
           success: false,
           error: 'Not authenticated',
@@ -3645,38 +3576,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
-  // Check token validity across domains
-  app.post('/api/auth/verify-token', async (req, res) => {
-    try {
-      const { token } = req.body;
-      
-      if (!token) {
-        return res.status(400).json({
-          success: false,
-          error: 'Token required'
-        });
-      }
-
-      const user = await unifiedAuth.getUserFromToken(token);
-      if (!user) {
-        return res.status(401).json({
-          success: false,
-          error: 'Invalid or expired token'
-        });
-      }
-
-      res.json({
-        success: true,
-        user: { ...user, password: undefined },
-        valid: true
-      });
-    } catch (error) {
-      res.status(401).json({
-        success: false,
-        error: 'Token verification failed'
-      });
-    }
-  });
+  // /api/auth/verify-token removed in 2026-05-09 cutover (legacy JWT).
 
   // === Lucia v3 scaffold endpoints (Task 1.3) ===
   // These run side-by-side with the legacy JWT auth above. They are
@@ -3987,6 +3887,272 @@ export async function registerRoutes(app: Express): Promise<Server> {
       res.json({ ok: true, userId });
     } catch (err) {
       console.error('[customer-login] failed', err);
+      res.status(500).json({ ok: false, reason: 'server_error' });
+    }
+  });
+
+  // ===================================================================
+  // NEW (2026-05-09) — All-required register & email-or-phone signin.
+  //
+  // Spec:
+  //   - Register requires phone + name + email + plate (all 4).
+  //   - Phone, email, and plate are all uniqueness-checked. Plate
+  //     conflict = block (CEO decision: refuse to silently steal /
+  //     share another customer's vehicle).
+  //   - Sign-in identifier is phone OR email; OTP always goes to the
+  //     email on file so customers don't need WhatsApp wired yet.
+  //   - 365-day Lucia session — once verified, the customer effectively
+  //     never sees the OTP screen again on that device.
+  // ===================================================================
+
+  const isEmailLike = (s: string) => /@/.test(s);
+  const normaliseEmail = (s: string) => s.trim().toLowerCase();
+  const normalisePlate = (s: string) => s.trim().toUpperCase().replace(/\s+/g, '');
+  // Light email shape check; we don't try to be RFC-strict.
+  const looksLikeValidEmail = (s: string) => /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(s);
+
+  const registerSchema = z.object({
+    phone: z.string().min(7).max(20),
+    name: z.string().min(1).max(100),
+    email: z.string().min(3).max(200),
+    plate: z.string().min(2).max(20),
+  });
+  const registerVerifySchema = registerSchema.extend({
+    code: z.string().regex(/^\d{6}$/),
+  });
+  const signinStartSchema = z.object({ identifier: z.string().min(3).max(200) });
+  const signinVerifySchema = signinStartSchema.extend({
+    code: z.string().regex(/^\d{6}$/),
+  });
+
+  /**
+   * Run all three uniqueness checks and return a reason if any fails.
+   * Pure read — no side effects. Race window is closed by the verify-step
+   * inserts being inside a transaction with the same checks.
+   */
+  async function findRegistrationConflict(args: {
+    phone: string;
+    email: string;
+    plateNorm: string;
+  }): Promise<'phone_taken' | 'email_taken' | 'plate_taken' | null> {
+    const phoneHit = (await db.execute(sql`
+      SELECT 1 WHERE EXISTS (SELECT 1 FROM users     WHERE phone_number = ${args.phone})
+                 OR EXISTS (SELECT 1 FROM customers WHERE phone        = ${args.phone})
+    `)).rows;
+    if (phoneHit.length > 0) return 'phone_taken';
+
+    const emailHit = (await db.execute(sql`
+      SELECT 1 FROM users WHERE LOWER(email) = ${args.email} LIMIT 1
+    `)).rows;
+    if (emailHit.length > 0) return 'email_taken';
+
+    const plateHit = (await db.execute(sql`
+      SELECT user_id, customer_id FROM cars
+       WHERE UPPER(REGEXP_REPLACE(license_plate, '\\s+', '', 'g')) = ${args.plateNorm}
+       LIMIT 1
+    `)).rows[0] as { user_id: number | null; customer_id: number | null } | undefined;
+    if (plateHit && (plateHit.user_id !== null || plateHit.customer_id !== null)) {
+      return 'plate_taken';
+    }
+    return null;
+  }
+
+  // POST /api/auth/customer/register/start
+  app.post('/api/auth/customer/register/start', async (req, res) => {
+    const parsed = registerSchema.safeParse(req.body);
+    if (!parsed.success) {
+      return res.status(400).json({ ok: false, reason: 'invalid_request' });
+    }
+    const phone = normalisePhone(parsed.data.phone);
+    const email = normaliseEmail(parsed.data.email);
+    const plateNorm = normalisePlate(parsed.data.plate);
+    if (!phone || !looksLikeValidEmail(email) || plateNorm.length < 2) {
+      return res.status(400).json({ ok: false, reason: 'invalid_request' });
+    }
+
+    const conflict = await findRegistrationConflict({ phone, email, plateNorm });
+    if (conflict) return res.status(409).json({ ok: false, reason: conflict });
+
+    const result = await sendOtp({ identifier: email, purpose: 'verify_email', ip: req.ip ?? null });
+    if (!result.ok) return res.status(400).json(result);
+    res.json({ ok: true, expiresAt: result.expiresAt, ttlSeconds: OTP_CONSTANTS.TTL_SECONDS });
+  });
+
+  // POST /api/auth/customer/register/verify
+  app.post('/api/auth/customer/register/verify', async (req, res) => {
+    const parsed = registerVerifySchema.safeParse(req.body);
+    if (!parsed.success) {
+      return res.status(400).json({ ok: false, reason: 'invalid_request' });
+    }
+    const phone = normalisePhone(parsed.data.phone);
+    const email = normaliseEmail(parsed.data.email);
+    const plateNorm = normalisePlate(parsed.data.plate);
+    const rawPlate = parsed.data.plate.trim();
+    const name = parsed.data.name.trim();
+    if (!phone || !looksLikeValidEmail(email) || plateNorm.length < 2 || !name) {
+      return res.status(400).json({ ok: false, reason: 'invalid_request' });
+    }
+
+    // Re-check conflicts to close the race between /start and /verify.
+    const conflict = await findRegistrationConflict({ phone, email, plateNorm });
+    if (conflict) return res.status(409).json({ ok: false, reason: conflict });
+
+    const verify = await verifyOtp({
+      identifier: email,
+      purpose: 'verify_email',
+      code: parsed.data.code,
+      ip: req.ip ?? null,
+    });
+    if (!verify.ok) {
+      const status = verify.reason === 'too_many_attempts' ? 429 : 400;
+      return res.status(status).json(verify);
+    }
+
+    try {
+      const [first, ...rest] = name.split(/\s+/);
+      const last = rest.join(' ').trim() || ' ';
+      // No password is ever set / used; we synthesise a random one to
+      // satisfy the legacy NOT NULL column. The OTP path is the only
+      // way in.
+      const fakePass = crypto.randomUUID() + crypto.randomUUID();
+
+      const inserted = (await db.execute(sql`
+        INSERT INTO users (first_name, last_name, email, password, phone_number)
+        VALUES (${first || 'Customer'}, ${last}, ${email}, ${fakePass}, ${phone})
+        RETURNING id
+      `)).rows[0] as { id: number };
+      const userId = inserted.id;
+
+      await db.execute(sql`
+        INSERT INTO customers (phone, name, user_id)
+        VALUES (${phone}, ${name}, ${userId})
+        ON CONFLICT (phone) DO UPDATE SET user_id = EXCLUDED.user_id, name = EXCLUDED.name
+      `);
+      const cust = (await db.execute(sql`
+        SELECT id FROM customers WHERE user_id = ${userId} LIMIT 1
+      `)).rows[0] as { id: number };
+
+      // Plate handling: link an existing orphan row if there is one,
+      // otherwise insert a fresh car. Conflict-with-other-owner is
+      // already excluded by findRegistrationConflict() above.
+      const existingCar = (await db.execute(sql`
+        SELECT id FROM cars
+         WHERE UPPER(REGEXP_REPLACE(license_plate, '\\s+', '', 'g')) = ${plateNorm}
+         LIMIT 1
+      `)).rows[0] as { id: number } | undefined;
+      if (existingCar) {
+        await db.execute(sql`
+          UPDATE cars SET user_id = ${userId}, customer_id = ${cust.id}
+           WHERE id = ${existingCar.id}
+        `);
+      } else {
+        await db.execute(sql`
+          INSERT INTO cars (license_plate, user_id, customer_id)
+          VALUES (${rawPlate}, ${userId}, ${cust.id})
+        `);
+      }
+
+      const session = await lucia.createSession(String(userId), {});
+      const cookie = lucia.createSessionCookie(session.id);
+      res.appendHeader('Set-Cookie', cookie.serialize());
+      res.json({ ok: true, userId });
+    } catch (err) {
+      console.error('[customer-register] failed', err);
+      res.status(500).json({ ok: false, reason: 'server_error' });
+    }
+  });
+
+  /**
+   * Look up a customer by either phone or email. Returns the user row
+   * (with email always present) or null.
+   */
+  async function findCustomerByIdentifier(identifier: string): Promise<
+    { id: number; email: string } | null
+  > {
+    if (isEmailLike(identifier)) {
+      const email = normaliseEmail(identifier);
+      const row = (await db.execute(sql`
+        SELECT id, email FROM users WHERE LOWER(email) = ${email} LIMIT 1
+      `)).rows[0] as { id: number; email: string } | undefined;
+      return row ?? null;
+    }
+    const phone = normalisePhone(identifier);
+    if (!phone) return null;
+    // Prefer users.phone_number; fall back to customers.phone → users.id link.
+    const direct = (await db.execute(sql`
+      SELECT id, email FROM users WHERE phone_number = ${phone} LIMIT 1
+    `)).rows[0] as { id: number; email: string } | undefined;
+    if (direct) return direct;
+    const linked = (await db.execute(sql`
+      SELECT u.id, u.email
+        FROM customers c
+        JOIN users u ON u.id = c.user_id
+       WHERE c.phone = ${phone}
+       LIMIT 1
+    `)).rows[0] as { id: number; email: string } | undefined;
+    return linked ?? null;
+  }
+
+  /** "alex@example.com" → "a***@example.com" (cheap PII hint). */
+  function maskEmail(email: string): string {
+    const [local, domain] = email.split('@');
+    if (!local || !domain) return email;
+    const head = local.slice(0, 1);
+    return `${head}${'*'.repeat(Math.max(1, local.length - 1))}@${domain}`;
+  }
+
+  // POST /api/auth/customer/signin/start
+  app.post('/api/auth/customer/signin/start', async (req, res) => {
+    const parsed = signinStartSchema.safeParse(req.body);
+    if (!parsed.success) {
+      return res.status(400).json({ ok: false, reason: 'invalid_request' });
+    }
+    const user = await findCustomerByIdentifier(parsed.data.identifier);
+    if (!user) {
+      // Distinct reason so the UI can nudge them to the Register tab.
+      return res.status(404).json({ ok: false, reason: 'no_account' });
+    }
+    const result = await sendOtp({
+      identifier: user.email.toLowerCase(),
+      purpose: 'login',
+      ip: req.ip ?? null,
+    });
+    if (!result.ok) return res.status(400).json(result);
+    res.json({
+      ok: true,
+      emailHint: maskEmail(user.email),
+      expiresAt: result.expiresAt,
+      ttlSeconds: OTP_CONSTANTS.TTL_SECONDS,
+    });
+  });
+
+  // POST /api/auth/customer/signin/verify
+  app.post('/api/auth/customer/signin/verify', async (req, res) => {
+    const parsed = signinVerifySchema.safeParse(req.body);
+    if (!parsed.success) {
+      return res.status(400).json({ ok: false, reason: 'invalid_request' });
+    }
+    const user = await findCustomerByIdentifier(parsed.data.identifier);
+    if (!user) return res.status(404).json({ ok: false, reason: 'no_account' });
+
+    const verify = await verifyOtp({
+      identifier: user.email.toLowerCase(),
+      purpose: 'login',
+      code: parsed.data.code,
+      ip: req.ip ?? null,
+    });
+    if (!verify.ok) {
+      const status = verify.reason === 'too_many_attempts' ? 429 : 400;
+      return res.status(status).json(verify);
+    }
+
+    try {
+      const session = await lucia.createSession(String(user.id), {});
+      const cookie = lucia.createSessionCookie(session.id);
+      res.appendHeader('Set-Cookie', cookie.serialize());
+      res.json({ ok: true, userId: user.id });
+    } catch (err) {
+      console.error('[customer-signin] failed', err);
       res.status(500).json({ ok: false, reason: 'server_error' });
     }
   });

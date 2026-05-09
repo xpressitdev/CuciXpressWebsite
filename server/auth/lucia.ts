@@ -140,7 +140,13 @@ class CustomerSessionAdapter implements Adapter {
 // ---- Lucia instance -----------------------------------------
 
 export const lucia = new Lucia(new CustomerSessionAdapter(), {
-  sessionExpiresIn: new TimeSpan(30, "d"),
+  // Bumped from 30d → 365d on 2026-05-09. With the OTP-only flow, a
+  // typical customer logs in once and never thinks about it again
+  // until they switch device / clear cookies. Keeping the session
+  // 30-day was forcing repeat OTPs that aren't needed for our threat
+  // model (the cookie is httpOnly + sameSite=lax + secure-in-prod, and
+  // sensitive actions re-verify with a fresh code).
+  sessionExpiresIn: new TimeSpan(365, "d"),
   sessionCookie: {
     name: "cx_session",
     expires: false, // session-cookie semantics: refresh on every request
