@@ -218,8 +218,13 @@ export function VehiclesTab({ cars }: Props) {
     if (!iso) return Number.POSITIVE_INFINITY;
     return Math.floor((Date.now() - new Date(iso).getTime()) / (24 * 60 * 60 * 1000));
   };
+  // A car needs a wash when we've actually seen it before (last_seen_at
+  // set) and it's been ≥ NUDGE_DAYS since. We intentionally don't gate on
+  // total_washes here because last_seen_at is the truthful "was on a
+  // forecourt" signal — total_washes only counts paid orders for *this*
+  // customer, so a freshly-linked car would otherwise never trigger.
   const needsWash = (c: CarRow): boolean =>
-    c.total_washes > 0 && daysSince(c.last_seen_at) >= NUDGE_DAYS;
+    c.last_seen_at != null && daysSince(c.last_seen_at) >= NUDGE_DAYS;
   // Most-overdue car (used for the top alert banner).
   const overdue = [...cars]
     .filter(needsWash)
