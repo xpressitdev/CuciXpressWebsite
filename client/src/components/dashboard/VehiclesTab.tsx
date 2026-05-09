@@ -1,6 +1,17 @@
 import { useRef, useState } from "react";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
-import { Pencil, Plus, Car as CarIcon, Loader2, Camera, X } from "lucide-react";
+import { motion } from "framer-motion";
+import {
+  Pencil,
+  Plus,
+  Car as CarIcon,
+  Loader2,
+  Camera,
+  X,
+  Sparkles,
+  CalendarClock,
+  Star,
+} from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -50,6 +61,26 @@ const relativeAgo = (iso: string | null) => {
   if (days < 365) return `${Math.floor(days / 30)} month${Math.floor(days / 30) === 1 ? "" : "s"} ago`;
   return `${Math.floor(days / 365)} year${Math.floor(days / 365) === 1 ? "" : "s"} ago`;
 };
+
+// Map a colour name → tailwind gradient backdrop for the card.
+function carGradient(color: string | null, idx: number): string {
+  const c = (color ?? "").toLowerCase();
+  if (/black|dark|charcoal/.test(c)) return "from-slate-800 via-slate-700 to-slate-900";
+  if (/white|pearl|silver|grey|gray/.test(c)) return "from-slate-300 via-slate-200 to-slate-400";
+  if (/red|maroon|crimson/.test(c)) return "from-rose-500 via-red-500 to-rose-700";
+  if (/blue|navy|teal/.test(c)) return "from-sky-500 via-blue-500 to-indigo-700";
+  if (/green|emerald|lime/.test(c)) return "from-emerald-500 via-green-500 to-teal-700";
+  if (/yellow|gold|amber/.test(c)) return "from-amber-400 via-orange-400 to-yellow-600";
+  if (/orange/.test(c)) return "from-orange-400 via-orange-500 to-red-500";
+  if (/purple|violet|magenta/.test(c)) return "from-purple-500 via-violet-500 to-fuchsia-600";
+  // fallback rotates through the brand palette
+  const fallbacks = [
+    "from-purple-600 via-violet-500 to-orange-500",
+    "from-indigo-600 via-purple-500 to-pink-500",
+    "from-amber-500 via-orange-500 to-rose-500",
+  ];
+  return fallbacks[idx % fallbacks.length];
+}
 
 // Browser-side resize + JPEG compress so the photo arrives at the
 // server around ~100-200KB even from a 12MP phone camera. Keeps the
@@ -142,8 +173,6 @@ export function VehiclesTab({ cars }: Props) {
         model: form.model.trim() || null,
         color: form.color.trim() || null,
       };
-      // Only send photo_url if the user actually changed it — server
-      // uses key presence to distinguish "leave alone" from "clear".
       if (form.photo_touched) body.photo_url = form.photo_url;
       const r = editingId
         ? await apiRequest("PATCH", `/api/customer/cars/${editingId}`, body)
@@ -173,97 +202,148 @@ export function VehiclesTab({ cars }: Props) {
 
   const canSave = form.license_plate.trim().length > 0 && !save.isPending && !photoBusy;
 
+  // Find the most-washed car for the "favourite ride" badge
+  const favoriteId = cars.length
+    ? [...cars].sort((a, b) => b.total_washes - a.total_washes)[0].id
+    : null;
+
   return (
-    <div className="space-y-5">
+    <div className="space-y-6">
       <div className="flex items-center justify-between gap-3">
-        <h1 className="text-3xl md:text-4xl font-black text-gray-900">
-          My vehicles
-        </h1>
+        <div>
+          <h1 className="text-3xl md:text-4xl font-black text-gray-900">
+            My garage
+          </h1>
+          <p className="text-sm text-gray-500 mt-1">
+            {cars.length} vehicle{cars.length === 1 ? "" : "s"} linked to your account
+          </p>
+        </div>
         <Button
           onClick={startAdd}
-          className="cuci-cta bg-cuci-primary hover:bg-cuci-primary text-white"
+          className="bg-gradient-to-r from-purple-600 to-orange-500 hover:opacity-90 text-white shadow-lg"
           data-testid="button-add-vehicle"
         >
-          Add a car <Plus className="w-4 h-4 ml-1" />
+          <Plus className="w-4 h-4 mr-1" /> Add a car
         </Button>
       </div>
 
       {cars.length === 0 ? (
-        <div className="bg-white rounded-2xl border border-dashed border-gray-300 p-10 text-center">
-          <CarIcon className="w-10 h-10 text-gray-300 mx-auto mb-3" />
-          <p className="text-sm text-gray-500">
-            No vehicles linked yet — add one or it'll appear after your first wash.
+        <div className="bg-white rounded-3xl border border-dashed border-gray-300 p-12 text-center">
+          <div className="w-16 h-16 mx-auto rounded-2xl bg-gradient-to-br from-purple-100 to-orange-100 grid place-items-center mb-4">
+            <CarIcon className="w-8 h-8 text-purple-500" strokeWidth={1.5} />
+          </div>
+          <p className="text-base font-bold text-gray-700 mb-1">
+            Your garage is empty
           </p>
+          <p className="text-sm text-gray-500 mb-4">
+            Add a vehicle so we can recognise you on arrival.
+          </p>
+          <Button
+            onClick={startAdd}
+            className="bg-gradient-to-r from-purple-600 to-orange-500 text-white"
+          >
+            Add your first car
+          </Button>
         </div>
       ) : (
-        <div className="grid sm:grid-cols-2 lg:grid-cols-3 gap-4">
-          {cars.map((c, idx) => (
-            <article
-              key={c.id}
-              className="bg-white rounded-2xl border border-gray-200 p-4 relative"
-              data-testid={`card-vehicle-${c.id}`}
-            >
-              <span
-                className={
-                  "absolute top-3 left-3 z-10 text-[10px] uppercase font-bold px-2 py-0.5 rounded " +
-                  (idx === 0
-                    ? "bg-cuci-primary/10 text-cuci-primary"
-                    : "bg-gray-100 text-gray-600")
-                }
+        <div className="grid sm:grid-cols-2 xl:grid-cols-3 gap-5">
+          {cars.map((c, idx) => {
+            const grad = carGradient(c.color, idx);
+            const isFav = c.id === favoriteId && c.total_washes > 0;
+            return (
+              <motion.article
+                key={c.id}
+                initial={{ opacity: 0, y: 14 }}
+                animate={{ opacity: 1, y: 0 }}
+                transition={{ delay: idx * 0.05 }}
+                whileHover={{ y: -4 }}
+                className="group relative rounded-3xl overflow-hidden bg-white border border-gray-200 shadow-sm hover:shadow-xl transition"
+                data-testid={`card-vehicle-${c.id}`}
               >
-                {idx === 0 ? "Default" : "Family"}
-              </span>
-              <button
-                onClick={() => startEdit(c)}
-                className="absolute top-3 right-3 z-10 p-1.5 rounded bg-white/80 hover:bg-white shadow-sm"
-                data-testid={`button-edit-vehicle-${c.id}`}
-                aria-label="Edit vehicle"
-              >
-                <Pencil className="w-4 h-4 text-gray-500" />
-              </button>
+                {/* Photo / gradient hero */}
+                <div className={`relative h-44 bg-gradient-to-br ${grad}`}>
+                  {/* shimmer */}
+                  <div className="absolute inset-0 bg-[radial-gradient(circle_at_30%_20%,rgba(255,255,255,0.35),transparent_60%)]" />
+                  {c.photo_url && (
+                    <img
+                      src={c.photo_url}
+                      alt={c.license_plate}
+                      className="absolute inset-0 w-full h-full object-cover"
+                      data-testid={`img-vehicle-${c.id}`}
+                    />
+                  )}
+                  {/* gradient veil for legibility */}
+                  <div className="absolute inset-x-0 bottom-0 h-2/3 bg-gradient-to-t from-black/70 via-black/30 to-transparent" />
 
-              <div className="bg-gray-50 rounded-lg h-32 overflow-hidden mb-3 mt-6">
-                {c.photo_url ? (
-                  <img
-                    src={c.photo_url}
-                    alt={c.license_plate}
-                    className="w-full h-full object-cover"
-                    data-testid={`img-vehicle-${c.id}`}
-                  />
-                ) : (
-                  <div className="w-full h-full grid place-items-center">
-                    <CarIcon className="w-12 h-12 text-gray-300" strokeWidth={1.5} />
+                  {/* badges */}
+                  <div className="absolute top-3 left-3 right-3 flex items-start justify-between">
+                    <div className="flex flex-col gap-1.5 items-start">
+                      {idx === 0 && (
+                        <span className="text-[10px] uppercase font-black px-2 py-0.5 rounded-full bg-white/90 text-purple-700 backdrop-blur">
+                          Default
+                        </span>
+                      )}
+                      {isFav && (
+                        <span className="text-[10px] uppercase font-black px-2 py-0.5 rounded-full bg-amber-400 text-amber-900 inline-flex items-center gap-1">
+                          <Star className="w-3 h-3 fill-current" /> Favourite
+                        </span>
+                      )}
+                    </div>
+                    <button
+                      onClick={() => startEdit(c)}
+                      className="p-2 rounded-full bg-white/90 hover:bg-white text-gray-700 shadow-sm opacity-0 group-hover:opacity-100 transition"
+                      data-testid={`button-edit-vehicle-${c.id}`}
+                      aria-label="Edit vehicle"
+                    >
+                      <Pencil className="w-3.5 h-3.5" />
+                    </button>
                   </div>
-                )}
-              </div>
 
-              <p className="text-lg font-black tracking-wider text-gray-900">
-                {c.license_plate}
-              </p>
-              <p className="text-sm text-gray-500">
-                {[c.brand, c.model, c.color].filter(Boolean).join(" · ") || "—"}
-              </p>
+                  {/* plate + name overlay */}
+                  <div className="absolute inset-x-0 bottom-0 p-4 text-white">
+                    <p className="text-[10px] uppercase tracking-widest font-bold text-white/70">
+                      License plate
+                    </p>
+                    <p className="text-2xl font-black tracking-wider drop-shadow">
+                      {c.license_plate}
+                    </p>
+                    <p className="text-xs text-white/90 mt-0.5 truncate">
+                      {[c.brand, c.model, c.color].filter(Boolean).join(" · ") || "Untitled vehicle"}
+                    </p>
+                  </div>
+                </div>
 
-              <div className="grid grid-cols-2 gap-3 mt-4 pt-4 border-t border-gray-100">
-                <div>
-                  <p className="text-[10px] uppercase font-semibold text-gray-500">
-                    Total washes
-                  </p>
-                  <p className="text-xl font-black text-cuci-primary">
-                    {c.total_washes}
-                  </p>
+                {/* Stats row */}
+                <div className="grid grid-cols-2 divide-x divide-gray-100">
+                  <div className="px-4 py-3 text-center">
+                    <p className="text-[10px] uppercase font-bold text-gray-400 inline-flex items-center gap-1 justify-center">
+                      <Sparkles className="w-3 h-3" /> Washes
+                    </p>
+                    <p className="text-2xl font-black bg-gradient-to-r from-purple-600 to-orange-500 bg-clip-text text-transparent leading-none mt-1">
+                      {c.total_washes}
+                    </p>
+                  </div>
+                  <div className="px-4 py-3 text-center">
+                    <p className="text-[10px] uppercase font-bold text-gray-400 inline-flex items-center gap-1 justify-center">
+                      <CalendarClock className="w-3 h-3" /> Last seen
+                    </p>
+                    <p className="text-sm font-black text-gray-900 leading-none mt-1.5">
+                      {relativeAgo(c.last_seen_at)}
+                    </p>
+                  </div>
                 </div>
-                <div>
-                  <p className="text-[10px] uppercase font-semibold text-gray-500">
-                    Last washed
-                  </p>
-                  <p className="text-sm font-bold text-gray-900">
-                    {relativeAgo(c.last_seen_at)}
-                  </p>
-                </div>
-              </div>
-            </article>
-          ))}
+
+                {/* Edit button (always visible on touch devices) */}
+                <button
+                  onClick={() => startEdit(c)}
+                  className="md:hidden absolute top-3 right-3 p-2 rounded-full bg-white/90 text-gray-700 shadow-sm"
+                  aria-label="Edit vehicle"
+                >
+                  <Pencil className="w-3.5 h-3.5" />
+                </button>
+              </motion.article>
+            );
+          })}
         </div>
       )}
 
@@ -279,7 +359,6 @@ export function VehiclesTab({ cars }: Props) {
           </DialogHeader>
 
           <div className="space-y-3">
-            {/* Photo uploader */}
             <div>
               <Label>Photo</Label>
               <div className="mt-1 flex items-center gap-3">
