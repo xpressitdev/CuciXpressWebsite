@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { Home, Clock, Car, Crown, Receipt, LogOut, ChevronUp, Pencil, Loader2, Trophy } from "lucide-react";
+import { Home, Receipt, Car, Crown, LogOut, ChevronUp, Pencil, Loader2, Trophy } from "lucide-react";
 import { Link } from "wouter";
 import { useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
@@ -37,10 +37,9 @@ import { MeResp } from "./types";
 
 export type DashTab =
   | "overview"
-  | "history"
+  | "activity"
   | "vehicles"
   | "subscription"
-  | "receipts"
   | "achievements";
 
 interface Props {
@@ -72,10 +71,9 @@ type EditNameValues = z.infer<typeof editNameSchema>;
 
 const items: { id: DashTab; label: string; icon: any }[] = [
   { id: "overview", label: "Overview", icon: Home },
-  { id: "history", label: "Wash history", icon: Clock },
+  { id: "activity", label: "Activity", icon: Receipt },
   { id: "vehicles", label: "My vehicles", icon: Car },
   { id: "subscription", label: "Subscription", icon: Crown },
-  { id: "receipts", label: "Receipts", icon: Receipt },
   { id: "achievements", label: "Achievements", icon: Trophy },
 ];
 

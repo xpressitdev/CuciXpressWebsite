@@ -11,9 +11,20 @@ import {
   QrCode,
   CreditCard,
   Receipt as ReceiptIcon,
+  LayoutGrid,
+  List,
+  Printer,
+  Search,
 } from "lucide-react";
+import { SiWhatsapp } from "react-icons/si";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
+import {
+  Dialog,
+  DialogContent,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog";
 import {
   OrderRow,
   formatBND,
@@ -44,6 +55,12 @@ function payIcon(method: string) {
   return CreditCard;
 }
 
+function payLabel(method: string) {
+  if (method === "cash") return "Cash";
+  if (method === "qr_code") return "QR Pay";
+  return method;
+}
+
 function packageGradient(name: string) {
   const lower = name.toLowerCase();
   if (lower.includes("premium")) return "from-amber-400 to-orange-500";
@@ -51,30 +68,43 @@ function packageGradient(name: string) {
   return "from-violet-500 to-purple-600";
 }
 
-export function WashHistoryTab({ orders }: Props) {
+type ViewMode = "timeline" | "receipts";
+
+// Combined "Activity" tab — merges the old Wash History and Receipts
+// pages. The hero stats, 6-month chart, search/filters, package-mix
+// donut and CSV export come from the history side; the receipt dialog
+// (print / WhatsApp / save PDF) comes from the receipts side. A view
+// toggle lets the user flip between a chronological timeline and the
+// classic receipt-card grid without losing any feature.
+export function ActivityTab({ orders }: Props) {
+  const [view, setView] = useState<ViewMode>("timeline");
   const [filter, setFilter] = useState("");
   const [filterOpen, setFilterOpen] = useState(false);
   const [range, setRange] = useState<DateRange>({ preset: "all" });
+  const [openReceipt, setOpenReceipt] = useState<OrderRow | null>(null);
 
   const filtered = useMemo(() => {
     const q = filter.trim().toLowerCase();
     const { from, to } = resolveRange(range);
-    return orders.filter((o) => {
-      const t = +new Date(o.created_at);
-      if (from && t < +from) return false;
-      if (to && t > +to) return false;
-      if (!q) return true;
-      return (
-        o.plate.toLowerCase().includes(q) ||
-        o.package_name.toLowerCase().includes(q) ||
-        (o.branch_name ?? "").toLowerCase().includes(q)
-      );
-    });
+    return orders
+      .filter((o) => {
+        const t = +new Date(o.created_at);
+        if (from && t < +from) return false;
+        if (to && t > +to) return false;
+        if (!q) return true;
+        return (
+          o.plate.toLowerCase().includes(q) ||
+          o.package_name.toLowerCase().includes(q) ||
+          (o.branch_name ?? "").toLowerCase().includes(q) ||
+          shortReceiptId(o.id).toLowerCase().includes(q)
+        );
+      })
+      .sort((a, b) => +new Date(b.created_at) - +new Date(a.created_at));
   }, [orders, filter, range]);
 
   const total = filtered.reduce((acc, o) => acc + o.total_cents, 0);
 
-  // Build a 6-month bar chart of wash count + spend
+  // Six-month bar chart of wash count
   const monthly = useMemo(() => {
     const now = new Date();
     const buckets: { key: string; label: string; count: number; spend: number }[] = [];
@@ -123,9 +153,7 @@ export function WashHistoryTab({ orders }: Props) {
   // Group filtered orders by Month YYYY for the timeline
   const groups = useMemo(() => {
     const map = new Map<string, { label: string; orders: OrderRow[] }>();
-    for (const o of [...filtered].sort(
-      (a, b) => +new Date(b.created_at) - +new Date(a.created_at),
-    )) {
+    for (const o of filtered) {
       const d = new Date(o.created_at);
       const key = `${d.getFullYear()}-${d.getMonth()}`;
       const label = `${MONTH_LABELS[d.getMonth()]} ${d.getFullYear()}`;
@@ -160,14 +188,15 @@ export function WashHistoryTab({ orders }: Props) {
     const url = URL.createObjectURL(blob);
     const a = document.createElement("a");
     a.href = url;
-    a.download = `wash-history-${new Date().toISOString().slice(0, 10)}.csv`;
+    a.download = `cucixpress-activity-${new Date().toISOString().slice(0, 10)}.csv`;
     a.click();
     URL.revokeObjectURL(url);
   };
 
   const last30 = monthly[monthly.length - 1]?.count ?? 0;
   const prev30 = monthly[monthly.length - 2]?.count ?? 0;
-  const trendPct = prev30 === 0 ? (last30 > 0 ? 100 : 0) : Math.round(((last30 - prev30) / prev30) * 100);
+  const trendPct =
+    prev30 === 0 ? (last30 > 0 ? 100 : 0) : Math.round(((last30 - prev30) / prev30) * 100);
 
   return (
     <div className="space-y-6">
@@ -175,31 +204,63 @@ export function WashHistoryTab({ orders }: Props) {
       <div className="flex items-start justify-between flex-wrap gap-3">
         <div>
           <h1 className="text-3xl md:text-4xl font-black text-gray-900">
-            Wash history
+            Activity
           </h1>
           <p className="text-sm text-gray-500 mt-1">
             {filtered.length} wash{filtered.length === 1 ? "" : "es"} ·{" "}
             <span className="font-bold text-gray-700">
               {formatBND(total)} total
-            </span>
+            </span>{" "}
+            · tap any item for the receipt
           </p>
         </div>
         <div className="flex gap-2 flex-wrap">
+          {/* View toggle */}
+          <div
+            className="inline-flex bg-gray-100 rounded-lg p-1"
+            role="tablist"
+            aria-label="View mode"
+          >
+            <button
+              onClick={() => setView("timeline")}
+              className={
+                "px-3 py-1.5 rounded-md text-xs font-bold inline-flex items-center gap-1.5 transition " +
+                (view === "timeline"
+                  ? "bg-white text-purple-700 shadow-sm"
+                  : "text-gray-500 hover:text-gray-700")
+              }
+              data-testid="button-view-timeline"
+            >
+              <List className="w-3.5 h-3.5" /> Timeline
+            </button>
+            <button
+              onClick={() => setView("receipts")}
+              className={
+                "px-3 py-1.5 rounded-md text-xs font-bold inline-flex items-center gap-1.5 transition " +
+                (view === "receipts"
+                  ? "bg-white text-purple-700 shadow-sm"
+                  : "text-gray-500 hover:text-gray-700")
+              }
+              data-testid="button-view-receipts"
+            >
+              <LayoutGrid className="w-3.5 h-3.5" /> Receipts
+            </button>
+          </div>
           <DateRangeFilter value={range} onChange={setRange} />
           <Button
             variant="outline"
             size="sm"
             onClick={() => setFilterOpen((v) => !v)}
-            data-testid="button-history-filter"
+            data-testid="button-activity-filter"
           >
-            <FilterIcon className="w-4 h-4 mr-1.5" /> Filter
+            <FilterIcon className="w-4 h-4 mr-1.5" /> Search
           </Button>
           <Button
             variant="outline"
             size="sm"
             onClick={exportCsv}
             disabled={filtered.length === 0}
-            data-testid="button-history-export"
+            data-testid="button-activity-export"
           >
             <Download className="w-4 h-4 mr-1.5" /> CSV
           </Button>
@@ -212,7 +273,6 @@ export function WashHistoryTab({ orders }: Props) {
         animate={{ opacity: 1, y: 0 }}
         className="relative overflow-hidden rounded-3xl bg-gradient-to-br from-purple-600 via-violet-500 to-orange-500 text-white p-6 md:p-8 shadow-xl"
       >
-        {/* decorative blobs */}
         <div className="absolute -top-16 -right-16 w-56 h-56 bg-white/10 rounded-full blur-2xl" />
         <div className="absolute -bottom-20 -left-10 w-64 h-64 bg-amber-300/20 rounded-full blur-3xl" />
 
@@ -253,7 +313,6 @@ export function WashHistoryTab({ orders }: Props) {
           </div>
         </div>
 
-        {/* 6-month bar chart */}
         <div className="relative mt-6 pt-6 border-t border-white/20">
           <p className="text-[11px] uppercase tracking-widest font-bold text-white/70 mb-3">
             Last 6 months
@@ -270,9 +329,7 @@ export function WashHistoryTab({ orders }: Props) {
                       transition={{ delay: 0.1 + i * 0.06, type: "spring", stiffness: 110 }}
                       className={
                         "w-full rounded-t-md " +
-                        (i === monthly.length - 1
-                          ? "bg-white"
-                          : "bg-white/40")
+                        (i === monthly.length - 1 ? "bg-white" : "bg-white/40")
                       }
                       title={`${m.count} washes · ${formatBND(m.spend)}`}
                     />
@@ -289,31 +346,32 @@ export function WashHistoryTab({ orders }: Props) {
       </motion.div>
 
       {filterOpen && (
-        <div className="bg-white border border-gray-200 rounded-xl p-3">
+        <div className="bg-white border border-gray-200 rounded-xl p-3 relative">
+          <Search className="w-4 h-4 text-gray-400 absolute left-6 top-1/2 -translate-y-1/2 pointer-events-none" />
           <Input
-            placeholder="Filter by plate, package, or branch…"
+            placeholder="Search by plate, package, branch, or receipt #…"
             value={filter}
             onChange={(e) => setFilter(e.target.value)}
-            data-testid="input-history-filter"
+            className="pl-9"
+            data-testid="input-activity-filter"
           />
         </div>
       )}
 
-      {/* Package mix donut + per-package spend. Hidden if there are no
-          orders at all (PackageMixCard returns null in that case). */}
+      {/* Package mix donut + per-package spend */}
       <PackageMixCard orders={filtered} />
 
-      {/* Timeline */}
+      {/* Body */}
       {filtered.length === 0 ? (
         <div className="bg-white rounded-3xl border border-dashed border-gray-300 p-12 text-center">
           <ReceiptIcon className="w-10 h-10 mx-auto text-gray-300 mb-3" />
           <p className="text-sm text-gray-500">
             {orders.length === 0
               ? "No washes yet — your first ride through Cuci Xpress will show up here."
-              : "No washes match your filter."}
+              : "Nothing matches your filter."}
           </p>
         </div>
-      ) : (
+      ) : view === "timeline" ? (
         <div className="space-y-8">
           {groups.map((g) => (
             <section key={g.label}>
@@ -329,7 +387,6 @@ export function WashHistoryTab({ orders }: Props) {
               </div>
 
               <div className="relative pl-6">
-                {/* vertical line */}
                 <div className="absolute left-2 top-2 bottom-2 w-0.5 bg-gradient-to-b from-purple-200 via-violet-100 to-orange-100" />
 
                 <ul className="space-y-3">
@@ -344,19 +401,17 @@ export function WashHistoryTab({ orders }: Props) {
                         transition={{ delay: i * 0.03 }}
                         className="relative"
                       >
-                        {/* dot */}
                         <span
                           className={`absolute -left-[18px] top-5 w-3.5 h-3.5 rounded-full bg-gradient-to-br ${packageGradient(o.package_name)} ring-4 ring-white`}
                         />
-                        <div
-                          className="bg-white rounded-2xl border border-gray-200 hover:border-purple-300 hover:shadow-md transition overflow-hidden flex"
-                          data-testid={`row-history-${o.id}`}
+                        <button
+                          onClick={() => setOpenReceipt(o)}
+                          className="w-full text-left bg-white rounded-2xl border border-gray-200 hover:border-purple-300 hover:shadow-md transition overflow-hidden flex"
+                          data-testid={`row-activity-${o.id}`}
                         >
-                          {/* color stripe */}
                           <div
                             className={`w-1.5 bg-gradient-to-b ${packageGradient(o.package_name)}`}
                           />
-                          {/* date column */}
                           <div className="px-4 py-4 text-center w-20 border-r border-gray-100 shrink-0">
                             <p className="text-[10px] uppercase font-bold text-gray-400">
                               {MONTH_LABELS[d.getMonth()]}
@@ -368,7 +423,6 @@ export function WashHistoryTab({ orders }: Props) {
                               {d.toTimeString().slice(0, 5)}
                             </p>
                           </div>
-                          {/* main */}
                           <div className="flex-1 px-4 py-3 min-w-0">
                             <div className="flex items-center gap-2 flex-wrap">
                               <span
@@ -379,13 +433,15 @@ export function WashHistoryTab({ orders }: Props) {
                               <span className="text-[11px] font-mono text-gray-500 bg-gray-50 px-1.5 py-0.5 rounded border border-gray-200">
                                 {o.plate}
                               </span>
+                              <span className="text-[10px] font-mono text-gray-400">
+                                #{shortReceiptId(o.id)}
+                              </span>
                             </div>
                             <p className="mt-1.5 text-sm text-gray-700 truncate">
                               <MapPin className="w-3.5 h-3.5 inline mr-1 text-gray-400" />
                               {o.branch_name ?? "—"}
                             </p>
                           </div>
-                          {/* amount */}
                           <div className="px-4 py-3 text-right shrink-0 flex flex-col justify-center items-end">
                             <p className="font-black text-gray-900 whitespace-nowrap">
                               {formatBND(o.total_cents)}
@@ -395,7 +451,7 @@ export function WashHistoryTab({ orders }: Props) {
                               {o.payment_method === "qr_code" ? "QR" : o.payment_method}
                             </p>
                           </div>
-                        </div>
+                        </button>
                       </motion.li>
                     );
                   })}
@@ -404,7 +460,240 @@ export function WashHistoryTab({ orders }: Props) {
             </section>
           ))}
         </div>
+      ) : (
+        <div className="grid sm:grid-cols-2 xl:grid-cols-3 gap-5">
+          {filtered.map((o, i) => {
+            const PIcon = payIcon(o.payment_method);
+            const d = new Date(o.created_at);
+            const grad = packageGradient(o.package_name);
+            return (
+              <motion.button
+                key={o.id}
+                initial={{ opacity: 0, y: 12 }}
+                animate={{ opacity: 1, y: 0 }}
+                transition={{ delay: i * 0.03 }}
+                whileHover={{ y: -4 }}
+                onClick={() => setOpenReceipt(o)}
+                className="group relative text-left bg-white rounded-2xl shadow-sm hover:shadow-xl transition border border-gray-200 hover:border-purple-300 overflow-hidden"
+                data-testid={`row-activity-card-${o.id}`}
+              >
+                <div className={`h-2 bg-gradient-to-r ${grad}`} />
+                <div className="px-5 pt-4 pb-3 flex items-start justify-between gap-3">
+                  <div className="min-w-0">
+                    <p className="text-[10px] uppercase tracking-widest font-bold text-gray-400">
+                      Receipt
+                    </p>
+                    <p className="font-mono text-base font-black text-gray-900">
+                      {shortReceiptId(o.id)}
+                    </p>
+                  </div>
+                  <div className="text-right shrink-0">
+                    <p className="text-[10px] uppercase font-bold text-gray-400">
+                      {MONTH_LABELS[d.getMonth()]} {d.getFullYear()}
+                    </p>
+                    <p className="text-2xl font-black text-gray-900 leading-none">
+                      {d.getDate()}
+                    </p>
+                  </div>
+                </div>
+                <div className="relative px-5">
+                  <div className="border-t-2 border-dashed border-gray-200" />
+                  <span className="absolute -left-2 -top-2 w-4 h-4 rounded-full bg-gray-100" />
+                  <span className="absolute -right-2 -top-2 w-4 h-4 rounded-full bg-gray-100" />
+                </div>
+                <div className="px-5 py-4 space-y-2">
+                  <div className="flex items-center gap-2 text-sm">
+                    <span
+                      className={`px-2 py-0.5 rounded text-[11px] font-bold text-white bg-gradient-to-r ${grad}`}
+                    >
+                      {o.package_name}
+                    </span>
+                    <span className="text-[11px] font-mono text-gray-500 bg-gray-50 px-1.5 py-0.5 rounded border border-gray-200">
+                      {o.plate}
+                    </span>
+                  </div>
+                  <p className="text-xs text-gray-600 truncate inline-flex items-center gap-1">
+                    <MapPin className="w-3 h-3 text-gray-400" />
+                    {o.branch_name ?? "—"}
+                  </p>
+                  <p className="text-[11px] text-gray-400 inline-flex items-center gap-1">
+                    <PIcon className="w-3 h-3" /> {payLabel(o.payment_method)} ·{" "}
+                    {d.toTimeString().slice(0, 5)}
+                  </p>
+                </div>
+                <div className="px-5 pb-4 pt-2 flex items-center justify-between border-t border-dashed border-gray-200">
+                  <span className="text-[11px] uppercase tracking-widest font-bold text-gray-500">
+                    Total
+                  </span>
+                  <span className="font-black text-lg bg-gradient-to-r from-purple-600 to-orange-500 bg-clip-text text-transparent">
+                    {formatBNDFull(o.total_cents)}
+                  </span>
+                </div>
+              </motion.button>
+            );
+          })}
+        </div>
       )}
+
+      {/* Shared receipt dialog (used by both timeline and receipts view) */}
+      <Dialog open={!!openReceipt} onOpenChange={(v) => !v && setOpenReceipt(null)}>
+        <DialogContent className="max-w-sm p-0 overflow-hidden bg-transparent border-none shadow-none">
+          <DialogHeader>
+            <DialogTitle className="sr-only">Receipt</DialogTitle>
+          </DialogHeader>
+          {openReceipt && <ReceiptView order={openReceipt} />}
+        </DialogContent>
+      </Dialog>
+    </div>
+  );
+}
+
+function ReceiptView({ order }: { order: OrderRow }) {
+  const print = () => window.print();
+  const PIcon = payIcon(order.payment_method);
+  const grad = packageGradient(order.package_name);
+  return (
+    <div className="space-y-3">
+      <div
+        id="cuci-receipt-print"
+        className="bg-white shadow-2xl"
+        style={{
+          WebkitMaskImage:
+            "radial-gradient(circle at 0 100%, transparent 10px, #000 11px), radial-gradient(circle at 100% 100%, transparent 10px, #000 11px)",
+        }}
+      >
+        <div className={`h-3 bg-gradient-to-r ${grad}`} />
+
+        <div className="px-6 pt-5 pb-3 text-center">
+          <p className="text-2xl font-black bg-gradient-to-r from-purple-600 via-violet-500 to-orange-500 bg-clip-text text-transparent">
+            CuciXpress
+          </p>
+          <p className="text-[10px] uppercase tracking-widest font-bold text-gray-400">
+            Drive-thru car wash · Brunei
+          </p>
+        </div>
+
+        <div className="px-6">
+          <div className="border-t-2 border-dashed border-gray-200" />
+        </div>
+
+        <div className="px-6 py-4 text-center">
+          <p className="text-[10px] uppercase font-bold text-gray-400">Receipt no.</p>
+          <p className="font-mono text-lg font-black text-gray-900">
+            {shortReceiptId(order.id)}
+          </p>
+          <p className="text-xs text-gray-500 mt-1">
+            {formatDateTime(order.created_at)}
+          </p>
+        </div>
+
+        <div className="px-6">
+          <div className="border-t-2 border-dashed border-gray-200" />
+        </div>
+
+        <dl className="px-6 py-4 text-sm space-y-2">
+          <Row label="Branch" value={order.branch_name ?? "—"} />
+          <Row label="Vehicle" value={order.plate} mono />
+          <Row label="Package" value={order.package_name} />
+          <Row
+            label="Payment"
+            value={payLabel(order.payment_method)}
+            icon={<PIcon className="w-3.5 h-3.5 text-gray-400" />}
+          />
+          <Row label="Status" value={order.status} />
+        </dl>
+
+        <div className="px-6">
+          <div className="border-t-2 border-dashed border-gray-200" />
+        </div>
+
+        <div className="px-6 py-4 flex items-center justify-between">
+          <span className="text-[11px] uppercase tracking-widest font-black text-gray-500">
+            Total
+          </span>
+          <span className="text-2xl font-black bg-gradient-to-r from-purple-600 to-orange-500 bg-clip-text text-transparent">
+            {formatBNDFull(order.total_cents)}
+          </span>
+        </div>
+
+        <div className="px-6 pb-6 pt-1 text-center">
+          <p className="text-[11px] text-gray-400 inline-flex items-center gap-1">
+            <Sparkles className="w-3 h-3" />
+            Thank you for choosing CuciXpress · {formatBND(order.total_cents)} earned in loyalty
+          </p>
+        </div>
+      </div>
+
+      <div className="flex gap-2 print:hidden px-1">
+        <Button
+          variant="outline"
+          className="flex-1 bg-white"
+          onClick={print}
+          data-testid="button-receipt-print"
+        >
+          <Printer className="w-4 h-4 mr-1.5" /> Print
+        </Button>
+        <Button
+          variant="outline"
+          className="flex-1 bg-white border-emerald-500 text-emerald-700 hover:bg-emerald-50"
+          onClick={() => shareToWhatsApp(order)}
+          data-testid="button-receipt-share-wa"
+        >
+          <SiWhatsapp className="w-4 h-4 mr-1.5" /> WhatsApp
+        </Button>
+        <Button
+          className="flex-1 bg-gradient-to-r from-purple-600 to-orange-500 text-white"
+          onClick={print}
+          data-testid="button-receipt-download"
+        >
+          <Download className="w-4 h-4 mr-1.5" /> Save PDF
+        </Button>
+      </div>
+    </div>
+  );
+}
+
+function shareToWhatsApp(order: OrderRow) {
+  const lines = [
+    "*CuciXpress receipt*",
+    "",
+    `Receipt: *${shortReceiptId(order.id)}*`,
+    `Date: ${formatDateTime(order.created_at)}`,
+    `Branch: ${order.branch_name ?? "—"}`,
+    `Vehicle: ${order.plate}`,
+    `Package: ${order.package_name}`,
+    `Payment: ${payLabel(order.payment_method)}`,
+    `Total: *${formatBNDFull(order.total_cents)}*`,
+    "",
+    "— cucixpress.com",
+  ];
+  const text = encodeURIComponent(lines.join("\n"));
+  window.open(`https://wa.me/?text=${text}`, "_blank", "noopener,noreferrer");
+}
+
+function Row({
+  label,
+  value,
+  mono,
+  icon,
+}: {
+  label: string;
+  value: string;
+  mono?: boolean;
+  icon?: React.ReactNode;
+}) {
+  return (
+    <div className="flex justify-between gap-2 items-center">
+      <dt className="text-gray-500 text-xs uppercase font-bold tracking-wider inline-flex items-center gap-1">
+        {icon} {label}
+      </dt>
+      <dd
+        className={
+          "font-bold text-gray-900 text-right " + (mono ? "font-mono tracking-wider" : "")
+        }
+      >
+        {value}
+      </dd>
     </div>
   );
 }

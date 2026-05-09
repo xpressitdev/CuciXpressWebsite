@@ -21,7 +21,7 @@ interface Props {
   memberships: MembershipRow[];
   cars: CarRow[];
   fullName: string;
-  onChangeTab: (tab: "history" | "subscription") => void;
+  onChangeTab: (tab: "activity" | "subscription") => void;
 }
 
 export function OverviewTab({ me, orders, memberships, cars, fullName, onChangeTab }: Props) {
@@ -184,7 +184,7 @@ export function OverviewTab({ me, orders, memberships, cars, fullName, onChangeT
         <div className="flex items-center justify-between mb-4">
           <h2 className="text-lg font-bold text-gray-900">Recent washes</h2>
           <button
-            onClick={() => onChangeTab("history")}
+            onClick={() => onChangeTab("activity")}
             className="text-sm text-cuci-primary hover:underline inline-flex items-center gap-1"
             data-testid="link-view-all-history"
           >

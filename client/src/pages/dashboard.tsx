@@ -6,10 +6,9 @@ import { useToast } from "@/hooks/use-toast";
 
 import { DashSidebar, DashTopbar, type DashTab } from "@/components/dashboard/Sidebar";
 import { OverviewTab } from "@/components/dashboard/OverviewTab";
-import { WashHistoryTab } from "@/components/dashboard/WashHistoryTab";
+import { ActivityTab } from "@/components/dashboard/ActivityTab";
 import { VehiclesTab } from "@/components/dashboard/VehiclesTab";
 import { SubscriptionTab } from "@/components/dashboard/SubscriptionTab";
-import { ReceiptsTab } from "@/components/dashboard/ReceiptsTab";
 import { AchievementsTab } from "@/components/dashboard/AchievementsTab";
 import {
   Whoami,
@@ -27,9 +26,13 @@ export default function DashboardPage() {
   // Read initial tab from ?tab= so other pages (e.g. /checkout sidebar
   // clicks) can deep-link into a specific dashboard section.
   const initialTab: DashTab = (() => {
-    const valid: DashTab[] = ["overview", "history", "vehicles", "subscription", "receipts", "achievements"];
+    const valid: DashTab[] = ["overview", "activity", "vehicles", "subscription", "achievements"];
     const params = new URLSearchParams(window.location.search);
-    const t = params.get("tab") as DashTab | null;
+    const raw = params.get("tab");
+    // Backward-compat: the old "history" + "receipts" tabs were merged
+    // into a single "activity" tab. Bookmarks still open the right page.
+    if (raw === "history" || raw === "receipts") return "activity";
+    const t = raw as DashTab | null;
     return t && valid.includes(t) ? t : "overview";
   })();
   const [tab, setTab] = useState<DashTab>(initialTab);
@@ -139,7 +142,7 @@ export default function DashboardPage() {
               onChangeTab={(t) => setTab(t)}
             />
           )}
-          {tab === "history" && <WashHistoryTab orders={orders} />}
+          {tab === "activity" && <ActivityTab orders={orders} />}
           {tab === "vehicles" && <VehiclesTab cars={cars} />}
           {tab === "subscription" && (
             <SubscriptionTab
@@ -150,7 +153,6 @@ export default function DashboardPage() {
               savedThisCycleCents={me.stats.saved_this_cycle_cents}
             />
           )}
-          {tab === "receipts" && <ReceiptsTab orders={orders} />}
           {tab === "achievements" && (
             <AchievementsTab
               orders={orders}
