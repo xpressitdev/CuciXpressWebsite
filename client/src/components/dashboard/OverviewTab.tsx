@@ -11,6 +11,8 @@ import {
   formatBND,
 } from "./types";
 import { LoyaltyCard } from "./LoyaltyCard";
+import { HomeBranchCard } from "./HomeBranchCard";
+import { WashHeatmap } from "./WashHeatmap";
 
 interface Props {
   me: MeResp;
@@ -107,14 +109,20 @@ export function OverviewTab({ me, orders, memberships, cars, fullName, onChangeT
         </div>
       )}
 
+      {/* Home branch live card — pinned to the customer's most-visited branch. */}
+      <HomeBranchCard orders={orders} branches={queueData?.branches ?? []} />
+
       {/* Live queue strip — inline, reuses queueData already fetched above. */}
       <LiveQueueStrip
         branches={queueData?.branches ?? []}
         serverTime={(queueData as any)?.server_time}
       />
 
-      {/* Loyalty punch card */}
+      {/* Loyalty punch card (now with progress ring) */}
       <LoyaltyCard cars={cars} />
+
+      {/* 12-month wash heatmap */}
+      <WashHeatmap orders={orders} />
 
       {/* KPI tiles */}
       <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">

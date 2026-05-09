@@ -134,29 +134,34 @@ export function LoyaltyCard({ cars }: Props) {
           ) : null}
         </div>
 
-        {/* Stamps row */}
-        <div className="mt-4 grid grid-cols-4 gap-2 max-w-md">
-          {Array.from({ length: data.required }).map((_, i) => {
-            const filled = i < stamps;
-            return (
-              <div
-                key={i}
-                className={[
-                  "aspect-square rounded-lg border-2 flex items-center justify-center transition-colors",
-                  filled
-                    ? "bg-cuci-primary text-white border-cuci-primary"
-                    : "bg-white text-gray-300 border-dashed border-gray-300",
-                ].join(" ")}
-                data-testid={`loyalty-stamp-${i}`}
-              >
-                {filled ? <Check className="w-7 h-7" /> : <Lock className="w-5 h-5" />}
-              </div>
-            );
-          })}
+        {/* Progress ring + stamps */}
+        <div className="mt-5 flex items-center gap-5 flex-wrap">
+          <ProgressRing stamps={stamps} required={data.required} />
+          <div className="flex-1 min-w-[180px]">
+            <div className="grid grid-cols-4 gap-2 max-w-xs">
+              {Array.from({ length: data.required }).map((_, i) => {
+                const filled = i < stamps;
+                return (
+                  <div
+                    key={i}
+                    className={[
+                      "aspect-square rounded-lg border-2 flex items-center justify-center transition-colors",
+                      filled
+                        ? "bg-gradient-to-br from-purple-600 to-orange-500 text-white border-transparent shadow"
+                        : "bg-white text-gray-300 border-dashed border-gray-300",
+                    ].join(" ")}
+                    data-testid={`loyalty-stamp-${i}`}
+                  >
+                    {filled ? <Check className="w-6 h-6" /> : <Lock className="w-4 h-4" />}
+                  </div>
+                );
+              })}
+            </div>
+            <p className="text-xs text-gray-500 mt-2">
+              {stamps} / {data.required} stamps · receipts never expire
+            </p>
+          </div>
         </div>
-        <p className="text-xs text-gray-500 mt-2">
-          {stamps} / {data.required} stamps · receipts never expire
-        </p>
       </section>
 
       {/* Redeem modal */}
@@ -228,6 +233,63 @@ export function LoyaltyCard({ cars }: Props) {
         />
       )}
     </>
+  );
+}
+
+// Circular progress arc for the loyalty card. Pure SVG so we don't pull
+// any chart library — strokeDasharray trick on a <circle>.
+function ProgressRing({ stamps, required }: { stamps: number; required: number }) {
+  const pct = required === 0 ? 0 : Math.min(1, stamps / required);
+  const size = 110;
+  const stroke = 10;
+  const r = (size - stroke) / 2;
+  const c = 2 * Math.PI * r;
+  const offset = c * (1 - pct);
+  const remaining = Math.max(0, required - stamps);
+  const done = remaining === 0;
+
+  return (
+    <div className="relative shrink-0" style={{ width: size, height: size }}>
+      <svg width={size} height={size} className="-rotate-90">
+        <defs>
+          <linearGradient id="loyaltyRing" x1="0%" y1="0%" x2="100%" y2="100%">
+            <stop offset="0%" stopColor="#9333ea" />
+            <stop offset="100%" stopColor="#f97316" />
+          </linearGradient>
+        </defs>
+        <circle
+          cx={size / 2}
+          cy={size / 2}
+          r={r}
+          stroke="#f3f4f6"
+          strokeWidth={stroke}
+          fill="none"
+        />
+        <circle
+          cx={size / 2}
+          cy={size / 2}
+          r={r}
+          stroke="url(#loyaltyRing)"
+          strokeWidth={stroke}
+          strokeLinecap="round"
+          fill="none"
+          strokeDasharray={c}
+          strokeDashoffset={offset}
+          style={{ transition: "stroke-dashoffset 700ms ease-out" }}
+        />
+      </svg>
+      <div className="absolute inset-0 grid place-items-center text-center">
+        <div>
+          <p className="text-2xl font-black bg-gradient-to-r from-purple-600 to-orange-500 bg-clip-text text-transparent leading-none">
+            {stamps}
+            <span className="text-base text-gray-400">/{required}</span>
+          </p>
+          <p className="text-[10px] uppercase font-bold text-gray-500 mt-1 tracking-wider">
+            {done ? "Free wash!" : `${remaining} to go`}
+          </p>
+        </div>
+      </div>
+    </div>
   );
 }
 
