@@ -152,7 +152,11 @@ export default function DashboardPage() {
           )}
           {tab === "receipts" && <ReceiptsTab orders={orders} />}
           {tab === "achievements" && (
-            <AchievementsTab orders={orders} memberships={memberships} />
+            <AchievementsTab
+              orders={orders}
+              memberships={memberships}
+              customerName={fullName}
+            />
           )}
         </main>
       </div>

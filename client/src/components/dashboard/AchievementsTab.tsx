@@ -1,3 +1,4 @@
+import { useState } from "react";
 import { Link } from "wouter";
 import { motion } from "framer-motion";
 import {
@@ -6,14 +7,17 @@ import {
   CheckCircle2,
   Lightbulb,
   Sparkles,
+  Share2,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { OrderRow, MembershipRow } from "./types";
-import { computeAchievements, TONES } from "./achievementsData";
+import { Achievement, computeAchievements, TONES } from "./achievementsData";
+import { BadgeShareDialog } from "./BadgeShareDialog";
 
 interface Props {
   orders: OrderRow[];
   memberships: MembershipRow[];
+  customerName: string;
 }
 
 function formatDate(iso?: string) {
@@ -25,10 +29,12 @@ function formatDate(iso?: string) {
   });
 }
 
-export function AchievementsTab({ orders, memberships }: Props) {
+export function AchievementsTab({ orders, memberships, customerName }: Props) {
   const achievements = computeAchievements(orders, memberships);
   const unlockedCount = achievements.filter((a) => a.unlocked).length;
   const overallPct = (unlockedCount / achievements.length) * 100;
+  const [sharing, setSharing] = useState<Achievement | null>(null);
+  const grandTrophy = achievements.find((a) => a.id === "grand-trophy");
 
   return (
     <div className="space-y-6">
@@ -211,11 +217,62 @@ export function AchievementsTab({ orders, memberships }: Props) {
                     Unlocked {formatDate(a.unlockedAt)}
                   </p>
                 )}
+
+                {/* Share button only on unlocked badges. Pushes the
+                    badge into the share dialog which renders the PNG. */}
+                {a.unlocked && (
+                  <button
+                    onClick={() => setSharing(a)}
+                    className="mt-3 inline-flex items-center justify-center gap-1.5 w-full py-2 rounded-lg border-2 border-purple-200 text-purple-700 hover:bg-purple-50 text-xs font-black uppercase tracking-wider transition-colors"
+                    data-testid={`button-share-${a.id}`}
+                  >
+                    <Share2 className="w-3.5 h-3.5" /> Share badge
+                  </button>
+                )}
               </div>
             </motion.article>
           );
         })}
       </div>
+
+      {/* Celebratory call-out when the legendary trophy is unlocked */}
+      {grandTrophy?.unlocked && (
+        <motion.div
+          initial={{ opacity: 0, scale: 0.96 }}
+          animate={{ opacity: 1, scale: 1 }}
+          className="relative overflow-hidden rounded-3xl p-6 md:p-7 text-white shadow-xl bg-gradient-to-br from-fuchsia-600 via-amber-400 to-cyan-500"
+          data-testid="card-grand-trophy-callout"
+        >
+          <div className="absolute -top-12 -right-12 w-56 h-56 bg-white/20 rounded-full blur-3xl" />
+          <div className="relative flex items-center gap-4 flex-wrap">
+            <div className="text-5xl md:text-6xl">🏆</div>
+            <div className="flex-1 min-w-0">
+              <p className="text-[11px] uppercase tracking-[0.22em] font-bold text-white/80">
+                Legendary unlock
+              </p>
+              <h2 className="text-xl md:text-2xl font-black leading-tight">
+                You collected the Cuci Xpress Trophy!
+              </h2>
+              <p className="text-sm text-white/90 mt-1">
+                Only the most dedicated drivers ever see this. Time to brag.
+              </p>
+            </div>
+            <Button
+              onClick={() => setSharing(grandTrophy)}
+              className="bg-white text-fuchsia-700 hover:bg-white/90 font-black"
+              data-testid="button-share-grand-trophy"
+            >
+              <Share2 className="w-4 h-4 mr-2" /> Share trophy
+            </Button>
+          </div>
+        </motion.div>
+      )}
+
+      <BadgeShareDialog
+        achievement={sharing}
+        customerName={customerName}
+        onClose={() => setSharing(null)}
+      />
 
       {/* Footer CTA */}
       <div className="rounded-2xl bg-white border border-gray-200 p-5 md:p-6 flex items-center justify-between gap-4 flex-wrap">
