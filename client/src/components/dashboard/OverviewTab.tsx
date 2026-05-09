@@ -13,6 +13,7 @@ import {
 import { LoyaltyCard } from "./LoyaltyCard";
 import { WashHeatmap } from "./WashHeatmap";
 import { MembershipRecommendation } from "./MembershipRecommendation";
+import { AchievementsRow } from "./AchievementsRow";
 
 interface Props {
   me: MeResp;
@@ -125,6 +126,9 @@ export function OverviewTab({ me, orders, memberships, cars, fullName, onChangeT
 
       {/* Loyalty punch card (now with progress ring) */}
       <LoyaltyCard cars={cars} />
+
+      {/* Achievements — gamified badges row, computed from orders + plans. */}
+      <AchievementsRow orders={orders} memberships={memberships} />
 
       {/* 12-month wash heatmap */}
       <WashHeatmap orders={orders} />

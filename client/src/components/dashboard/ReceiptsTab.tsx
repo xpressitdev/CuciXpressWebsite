@@ -11,6 +11,7 @@ import {
   CreditCard,
   Sparkles,
 } from "lucide-react";
+import { SiWhatsapp } from "react-icons/si";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import {
@@ -312,6 +313,14 @@ function ReceiptView({ order }: { order: OrderRow }) {
           <Printer className="w-4 h-4 mr-1.5" /> Print
         </Button>
         <Button
+          variant="outline"
+          className="flex-1 bg-white border-emerald-500 text-emerald-700 hover:bg-emerald-50"
+          onClick={() => shareToWhatsApp(order)}
+          data-testid="button-receipt-share-wa"
+        >
+          <SiWhatsapp className="w-4 h-4 mr-1.5" /> WhatsApp
+        </Button>
+        <Button
           className="flex-1 bg-gradient-to-r from-purple-600 to-orange-500 text-white"
           onClick={print}
           data-testid="button-receipt-download"
@@ -321,6 +330,27 @@ function ReceiptView({ order }: { order: OrderRow }) {
       </div>
     </div>
   );
+}
+
+// Share a plain-text receipt summary via WhatsApp. Opens wa.me in a new
+// tab — works on mobile (deep-links to the app) and desktop (opens
+// WhatsApp Web). Useful for forwarding to a manager for reimbursement.
+function shareToWhatsApp(order: OrderRow) {
+  const lines = [
+    "*CuciXpress receipt*",
+    "",
+    `Receipt: *${shortReceiptId(order.id)}*`,
+    `Date: ${formatDateTime(order.created_at)}`,
+    `Branch: ${order.branch_name ?? "—"}`,
+    `Vehicle: ${order.plate}`,
+    `Package: ${order.package_name}`,
+    `Payment: ${payLabel(order.payment_method)}`,
+    `Total: *${formatBNDFull(order.total_cents)}*`,
+    "",
+    "— cucixpress.com",
+  ];
+  const text = encodeURIComponent(lines.join("\n"));
+  window.open(`https://wa.me/?text=${text}`, "_blank", "noopener,noreferrer");
 }
 
 function Row({

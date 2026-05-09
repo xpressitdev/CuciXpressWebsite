@@ -27,6 +27,7 @@ import {
   DateRange,
   resolveRange,
 } from "./DateRangeFilter";
+import { PackageMixCard } from "./PackageMixCard";
 
 interface Props {
   orders: OrderRow[];
@@ -297,6 +298,10 @@ export function WashHistoryTab({ orders }: Props) {
           />
         </div>
       )}
+
+      {/* Package mix donut + per-package spend. Hidden if there are no
+          orders at all (PackageMixCard returns null in that case). */}
+      <PackageMixCard orders={filtered} />
 
       {/* Timeline */}
       {filtered.length === 0 ? (
