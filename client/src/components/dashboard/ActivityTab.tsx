@@ -373,8 +373,8 @@ export function ActivityTab({ orders }: Props) {
       {/* Package mix donut + per-package spend */}
       <PackageMixCard orders={filtered} />
 
-      {/* Community leaderboard — 10 above & below the customer */}
-      <Leaderboard />
+      {/* Community leaderboard — unlocks once the customer hits 10 done washes */}
+      {orders.filter((o) => o.status === "done").length >= 10 && <Leaderboard />}
 
       {/* Body */}
       {filtered.length === 0 ? (
