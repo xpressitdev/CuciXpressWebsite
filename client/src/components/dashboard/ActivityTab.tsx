@@ -39,6 +39,7 @@ import {
   resolveRange,
 } from "./DateRangeFilter";
 import { PackageMixCard } from "./PackageMixCard";
+import { Leaderboard } from "./Leaderboard";
 
 interface Props {
   orders: OrderRow[];
@@ -371,6 +372,9 @@ export function ActivityTab({ orders }: Props) {
 
       {/* Package mix donut + per-package spend */}
       <PackageMixCard orders={filtered} />
+
+      {/* Community leaderboard — 10 above & below the customer */}
+      <Leaderboard />
 
       {/* Body */}
       {filtered.length === 0 ? (

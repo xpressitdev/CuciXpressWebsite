@@ -4405,6 +4405,127 @@ export async function registerRoutes(app: Express): Promise<Server> {
     res.json({ cars: rows });
   });
 
+  // GET /api/customer/leaderboard — lifetime-wash leaderboard windowed
+  // around the signed-in customer (10 above + me + 10 below). Ranking
+  // mirrors the same matching logic /api/customer/orders uses (orders
+  // can be linked by customer_id, vehicle_id, or normalized plate) so
+  // the rank a customer sees here lines up with the wash count on their
+  // own dashboard. Plates are intentionally NOT censored — the owner is
+  // happy to show them; only the surname is shortened to a single
+  // initial as a gentle privacy nod.
+  app.get('/api/customer/leaderboard', requireLuciaUser, async (req, res) => {
+    const userId = Number(req.lucia!.user!.id);
+    try {
+      const rows = (await db.execute(sql`
+        WITH user_plates AS (
+          SELECT u.id AS user_id,
+                 ca.id AS car_id,
+                 UPPER(REGEXP_REPLACE(ca.license_plate, '\\s+', '', 'g')) AS plate_norm
+            FROM users u
+            LEFT JOIN customers cu ON cu.user_id = u.id
+            LEFT JOIN cars ca
+                   ON ca.user_id = u.id
+                   OR ca.customer_id = cu.id
+        ),
+        user_orders AS (
+          SELECT DISTINCT up.user_id, o.id AS order_id
+            FROM user_plates up
+            JOIN orders o
+              ON o.status = 'done'
+             AND (
+                  o.customer_id = up.user_id
+               OR (up.car_id IS NOT NULL AND o.vehicle_id = up.car_id)
+               OR (up.plate_norm IS NOT NULL
+                   AND UPPER(REGEXP_REPLACE(o.plate, '\\s+', '', 'g')) = up.plate_norm)
+             )
+        ),
+        counts AS (
+          SELECT u.id AS user_id,
+                 u.first_name,
+                 u.last_name,
+                 COUNT(uo.order_id)::int AS total_washes
+            FROM users u
+            LEFT JOIN user_orders uo ON uo.user_id = u.id
+           GROUP BY u.id
+        ),
+        top_plate AS (
+          SELECT u.id AS user_id,
+                 (SELECT ca.license_plate
+                    FROM cars ca
+                    LEFT JOIN customers cu ON cu.id = ca.customer_id
+                   WHERE ca.user_id = u.id OR cu.user_id = u.id
+                   ORDER BY ca.last_seen_at DESC NULLS LAST, ca.id DESC
+                   LIMIT 1) AS plate
+            FROM users u
+        ),
+        ranked AS (
+          SELECT c.user_id,
+                 c.first_name,
+                 c.last_name,
+                 c.total_washes,
+                 tp.plate,
+                 RANK() OVER (ORDER BY c.total_washes DESC, c.user_id ASC) AS rank
+            FROM counts c
+            LEFT JOIN top_plate tp ON tp.user_id = c.user_id
+           WHERE c.total_washes > 0
+        ),
+        me AS (
+          SELECT rank FROM ranked WHERE user_id = ${userId}
+        ),
+        bounds AS (
+          SELECT
+            CASE WHEN (SELECT rank FROM me) IS NULL
+                 THEN 1
+                 ELSE GREATEST(1, (SELECT rank FROM me) - 10)
+            END AS lo,
+            CASE WHEN (SELECT rank FROM me) IS NULL
+                 THEN 21
+                 ELSE (SELECT rank FROM me) + 10
+            END AS hi
+        )
+        SELECT r.user_id,
+               r.first_name,
+               r.last_name,
+               r.total_washes,
+               r.plate,
+               r.rank::int AS rank,
+               (r.user_id = ${userId}) AS is_me,
+               (SELECT COUNT(*)::int FROM ranked) AS total_ranked
+          FROM ranked r, bounds b
+         WHERE r.rank BETWEEN b.lo AND b.hi
+         ORDER BY r.rank
+      `)).rows as Array<{
+        user_id: number;
+        first_name: string | null;
+        last_name: string | null;
+        total_washes: number;
+        plate: string | null;
+        rank: number;
+        is_me: boolean;
+        total_ranked: number;
+      }>;
+
+      const totalRanked = rows[0]?.total_ranked ?? 0;
+      const myRow = rows.find((r) => r.is_me);
+      res.json({
+        total_ranked: totalRanked,
+        my_rank: myRow?.rank ?? null,
+        my_washes: myRow?.total_washes ?? 0,
+        entries: rows.map((r) => ({
+          rank: r.rank,
+          first_name: r.first_name ?? '',
+          last_name: r.last_name ?? '',
+          plate: r.plate,
+          total_washes: r.total_washes,
+          is_me: r.is_me,
+        })),
+      });
+    } catch (err) {
+      console.error('[customer/leaderboard] failed', err);
+      res.status(500).json({ entries: [], total_ranked: 0, my_rank: null, my_washes: 0 });
+    }
+  });
+
   // GET /api/branches/active — public list of active branches for
   // customer-facing pickers (loyalty redeem modal, etc).
   app.get('/api/branches/active', async (_req, res) => {
