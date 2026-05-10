@@ -83,6 +83,19 @@ export function ActivityTab({ orders }: Props) {
   const [range, setRange] = useState<DateRange>({ preset: "all" });
   const [openReceipt, setOpenReceipt] = useState<OrderRow | null>(null);
 
+  // Status tier — derived from lifetime wash count. Replaces the old
+  // "Lifetime spend" tile so customers see a status they're proud of
+  // rather than a running bill total.
+  const tier = (() => {
+    const n = orders.length;
+    if (n >= 100) return { label: "Centurion", sub: "Hall of fame · 100+ washes", grad: "from-amber-300 to-orange-400" };
+    if (n >= 50)  return { label: "Gold regular", sub: "Top-tier driver · 50+ washes", grad: "from-yellow-200 to-amber-300" };
+    if (n >= 25)  return { label: "Silver regular", sub: "On a streak · 25+ washes", grad: "from-slate-200 to-slate-300" };
+    if (n >= 10)  return { label: "Regular", sub: "We know your plate · 10+ washes", grad: "from-violet-200 to-fuchsia-200" };
+    if (n >= 1)   return { label: "Splash starter", sub: "Welcome aboard", grad: "from-cyan-200 to-sky-300" };
+    return { label: "New driver", sub: "First wash awaits", grad: "from-white to-white/70" };
+  })();
+
   const filtered = useMemo(() => {
     const q = filter.trim().toLowerCase();
     const { from, to } = resolveRange(range);
@@ -101,8 +114,6 @@ export function ActivityTab({ orders }: Props) {
       })
       .sort((a, b) => +new Date(b.created_at) - +new Date(a.created_at));
   }, [orders, filter, range]);
-
-  const total = filtered.reduce((acc, o) => acc + o.total_cents, 0);
 
   // Six-month bar chart of wash count
   const monthly = useMemo(() => {
@@ -207,11 +218,8 @@ export function ActivityTab({ orders }: Props) {
             Activity
           </h1>
           <p className="text-sm text-gray-500 mt-1">
-            {filtered.length} wash{filtered.length === 1 ? "" : "es"} ·{" "}
-            <span className="font-bold text-gray-700">
-              {formatBND(total)} total
-            </span>{" "}
-            · tap any item for the receipt
+            {filtered.length} wash{filtered.length === 1 ? "" : "es"} · tap any
+            item for the receipt
           </p>
         </div>
         <div className="flex gap-2 flex-wrap">
@@ -289,14 +297,17 @@ export function ActivityTab({ orders }: Props) {
           </div>
           <div>
             <p className="text-xs uppercase tracking-widest font-bold text-white/70">
-              Lifetime spend
+              Member status
             </p>
-            <p className="text-5xl font-black leading-none mt-2">
-              {formatBND(orders.reduce((a, o) => a + o.total_cents, 0))}
+            <p
+              className={`text-3xl md:text-4xl font-black leading-tight mt-2 bg-gradient-to-r ${tier.grad} bg-clip-text text-transparent`}
+              data-testid="text-activity-tier"
+            >
+              {tier.label}
             </p>
             <p className="mt-2 text-sm text-white/80 inline-flex items-center gap-1">
               <Sparkles className="w-3.5 h-3.5" />
-              {favorites.pkg} fan ({favorites.pkgCount}×)
+              {tier.sub}
             </p>
           </div>
           <div>
