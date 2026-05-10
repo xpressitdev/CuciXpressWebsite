@@ -532,35 +532,35 @@ export default function LoginPage() {
               <li className="flex items-start gap-3">
                 <CheckCircle2 className="w-5 h-5 mt-0.5 shrink-0" />
                 <span className="text-sm">
-                  <strong>Digital QR receipts</strong> — every wash, instantly
-                  pullable on your phone.
-                </span>
-              </li>
-              <li className="flex items-start gap-3">
-                <Sparkles className="w-5 h-5 mt-0.5 shrink-0" />
-                <span className="text-sm">
-                  <strong>Loyalty & rewards</strong> — earn points and unlock
-                  perks the more you wash.
+                  <strong>Digital receipts</strong> — every wash, ready on
+                  your phone whenever you need it.
                 </span>
               </li>
               <li className="flex items-start gap-3">
                 <Car className="w-5 h-5 mt-0.5 shrink-0" />
                 <span className="text-sm">
-                  <strong>Your wash history</strong> — link your plate and see
-                  every visit since day one.
+                  <strong>Your wash history</strong> — link your plate and
+                  see every visit since day one.
+                </span>
+              </li>
+              <li className="flex items-start gap-3">
+                <Sparkles className="w-5 h-5 mt-0.5 shrink-0" />
+                <span className="text-sm">
+                  <strong>Membership & perks</strong> — track your wash-pack
+                  balance and member benefits.
                 </span>
               </li>
               <li className="flex items-start gap-3">
                 <ShieldCheck className="w-5 h-5 mt-0.5 shrink-0" />
                 <span className="text-sm">
-                  <strong>Stay signed in for a year</strong> — no passwords to
-                  remember, ever.
+                  <strong>One-tap sign-in</strong> — no passwords to
+                  remember, just your email.
                 </span>
               </li>
             </ul>
 
             <div className="text-xs text-white/70 border-t border-white/20 pt-4">
-              120,000+ cars cleaned · BND 1M+ revenue · 5 branches across Brunei
+              5 branches across Brunei · trusted by thousands of drivers
             </div>
           </div>
         </div>
