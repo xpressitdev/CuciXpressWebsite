@@ -4417,6 +4417,10 @@ export async function registerRoutes(app: Express): Promise<Server> {
     const userId = Number(req.lucia!.user!.id);
     try {
       const rows = (await db.execute(sql`
+        -- Exclude staff/admin users (is_admin = true). Each branch has a
+        -- placeholder admin account (e.g. "Tutong Branch Admin") that the
+        -- POS attaches walk-in cars to, which would otherwise sweep up
+        -- every walk-in wash at that branch into one fake leaderboard row.
         WITH user_plates AS (
           SELECT u.id AS user_id,
                  ca.id AS car_id,
@@ -4426,6 +4430,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
             LEFT JOIN cars ca
                    ON ca.user_id = u.id
                    OR ca.customer_id = cu.id
+           WHERE COALESCE(u.is_admin, false) = false
         ),
         user_orders AS (
           SELECT DISTINCT up.user_id, o.id AS order_id
@@ -4446,6 +4451,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
                  COUNT(uo.order_id)::int AS total_washes
             FROM users u
             LEFT JOIN user_orders uo ON uo.user_id = u.id
+           WHERE COALESCE(u.is_admin, false) = false
            GROUP BY u.id
         ),
         top_plate AS (
@@ -4457,6 +4463,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
                    ORDER BY ca.last_seen_at DESC NULLS LAST, ca.id DESC
                    LIMIT 1) AS plate
             FROM users u
+           WHERE COALESCE(u.is_admin, false) = false
         ),
         ranked AS (
           SELECT c.user_id,
