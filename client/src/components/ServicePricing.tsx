@@ -251,13 +251,13 @@ export default function ServicePricing() {
         >
           <h3 className="text-2xl font-bold text-gray-900 mb-4">Ready to Get Started?</h3>
           <p className="text-gray-600 mb-6">
-            Visit any of our 4 locations or book online through our live queue system.
+            Visit any of our 5 locations or check our live queue before you drive over.
           </p>
           
           <div className="flex flex-col sm:flex-row gap-4 justify-center items-center">
             <Button 
               className="bg-cuci-primary hover:bg-cuci-primary/90 text-white px-8"
-              onClick={() => window.open('https://cuci-xpress.com', '_blank')}
+              onClick={() => { window.location.href = '/queue'; }}
             >
               <Clock className="w-4 h-4 mr-2" />
               Live Queue System
