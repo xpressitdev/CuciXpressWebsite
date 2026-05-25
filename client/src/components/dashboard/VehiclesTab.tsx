@@ -27,6 +27,16 @@ import {
   DialogDescription,
   DialogFooter,
 } from "@/components/ui/dialog";
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from "@/components/ui/alert-dialog";
 import { apiRequest } from "@/lib/queryClient";
 import { useToast } from "@/hooks/use-toast";
 import { CarRow } from "./types";
@@ -123,6 +133,7 @@ export function VehiclesTab({ cars }: Props) {
   const [editingId, setEditingId] = useState<number | null>(null);
   const [form, setForm] = useState<FormState>(blank);
   const [photoBusy, setPhotoBusy] = useState(false);
+  const [confirmingCar, setConfirmingCar] = useState<CarRow | null>(null);
   const fileRef = useRef<HTMLInputElement>(null);
 
   const reset = () => {
@@ -229,13 +240,7 @@ export function VehiclesTab({ cars }: Props) {
   });
 
   const confirmRemove = (c: CarRow) => {
-    if (
-      window.confirm(
-        `Remove ${c.license_plate}${c.brand ? ` (${c.brand}${c.model ? " " + c.model : ""})` : ""} from your garage?\n\nPast washes stay in your history.`,
-      )
-    ) {
-      remove.mutate(c.id);
-    }
+    setConfirmingCar(c);
   };
 
   // Find the most-washed car for the "favourite ride" badge
@@ -627,6 +632,60 @@ export function VehiclesTab({ cars }: Props) {
           </DialogFooter>
         </DialogContent>
       </Dialog>
+
+      <AlertDialog
+        open={!!confirmingCar}
+        onOpenChange={(v) => {
+          if (!v) setConfirmingCar(null);
+        }}
+      >
+        <AlertDialogContent data-testid="dialog-confirm-delete-vehicle">
+          <AlertDialogHeader>
+            <AlertDialogTitle>
+              Remove {confirmingCar?.license_plate} from your garage?
+            </AlertDialogTitle>
+            <AlertDialogDescription asChild>
+              <div className="space-y-2 text-sm">
+                <p>
+                  Your account is currently linked to{" "}
+                  <span className="font-mono font-bold tracking-wider">
+                    {confirmingCar?.license_plate}
+                  </span>
+                  {confirmingCar?.brand
+                    ? ` (${confirmingCar.brand}${confirmingCar.model ? " " + confirmingCar.model : ""})`
+                    : ""}
+                  .
+                </p>
+                <p className="font-semibold text-rose-700">
+                  If you remove it, your account will no longer be linked to this
+                  vehicle and you won't be able to see its wash history on your
+                  dashboard.
+                </p>
+                <p className="text-gray-500">
+                  You can always add it back later by entering the plate again.
+                </p>
+              </div>
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel data-testid="button-cancel-delete-vehicle">
+              Keep vehicle
+            </AlertDialogCancel>
+            <AlertDialogAction
+              className="bg-rose-600 hover:bg-rose-700 text-white"
+              data-testid="button-confirm-delete-vehicle"
+              onClick={() => {
+                if (confirmingCar) {
+                  remove.mutate(confirmingCar.id);
+                  setConfirmingCar(null);
+                }
+              }}
+            >
+              Yes, remove it
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </div>
   );
 }
