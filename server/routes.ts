@@ -6075,8 +6075,11 @@ export async function registerRoutes(app: Express): Promise<Server> {
           FROM cars c
           LEFT JOIN customers cu ON cu.id = c.customer_id
          WHERE UPPER(REGEXP_REPLACE(c.license_plate, '\s+', '', 'g')) LIKE ${norm + '%'}
-         ORDER BY COALESCE(c.last_seen_at, 'epoch'::timestamptz) DESC, c.id DESC
-         LIMIT 10
+         ORDER BY
+           (UPPER(REGEXP_REPLACE(c.license_plate, '\s+', '', 'g')) = ${norm}) DESC,
+           COALESCE(c.last_seen_at, 'epoch'::timestamptz) DESC,
+           c.id DESC
+         LIMIT 20
       `)).rows.map((r: any) => ({
         id: r.id,
         license_plate: r.license_plate,
