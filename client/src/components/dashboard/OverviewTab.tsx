@@ -26,7 +26,13 @@ interface Props {
 
 export function OverviewTab({ me, orders, memberships, cars, fullName, onChangeTab }: Props) {
   const firstName = fullName.split(" ")[0];
-  const activeMembership = memberships.find((m) => m.status === "active");
+  // Hero priority: when a customer has both an Unlimited subscription
+  // and a wash Pack active, Unlimited wins. Otherwise pick whichever
+  // active membership exists. This avoids a gifted/legacy pack hijacking
+  // the hero away from the customer's "real" subscription.
+  const activeMembership =
+    memberships.find((m) => m.status === "active" && m.kind === "unlimited") ??
+    memberships.find((m) => m.status === "active");
 
   // One-tap wash banner: pick the OPEN branch with the shortest queue.
   const { data: queueData } = useQuery<{ branches: QueueBranch[]; server_time?: string }>({
