@@ -102,7 +102,11 @@ export default function DashboardPage() {
   const orders = ordersData?.orders ?? [];
   const memberships = memData?.memberships ?? [];
   const cars = carsData?.cars ?? [];
-  const activeMembership = memberships.find((m) => m.status === "active");
+  // Unlimited beats Pack for the "what plan are you on" label, so the
+  // sidebar matches the Overview hero.
+  const activeMembership =
+    memberships.find((m) => m.status === "active" && m.kind === "unlimited") ??
+    memberships.find((m) => m.status === "active");
 
   const fullName =
     `${me.profile.first_name} ${me.profile.last_name}`.trim() ||

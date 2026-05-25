@@ -17,7 +17,9 @@ export function SubscriptionTab({
   washesLastMonth,
   savedThisCycleCents,
 }: Props) {
-  const active = memberships.find((m) => m.status === "active");
+  const active =
+    memberships.find((m) => m.status === "active" && m.kind === "unlimited") ??
+    memberships.find((m) => m.status === "active");
   const past = memberships.filter((m) => m.status !== "active");
 
   const avgPerWeek = (() => {
