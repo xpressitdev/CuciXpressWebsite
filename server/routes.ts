@@ -4785,13 +4785,30 @@ export async function registerRoutes(app: Express): Promise<Server> {
       const cust = (await db.execute(sql`
         SELECT id FROM customers WHERE user_id = ${userId} LIMIT 1
       `)).rows[0] as { id: number } | undefined;
+      // Plate-normalisation: case + whitespace insensitive so "BC 8" and
+      // "bc8" collide. Used to detect both self-duplicates and cross-user
+      // claims.
+      const plateNorm = plate.toUpperCase().replace(/\s+/g, '');
       const dupe = (await db.execute(sql`
         SELECT id FROM cars
-        WHERE license_plate = ${plate}
+        WHERE UPPER(REGEXP_REPLACE(license_plate, '\\s+', '', 'g')) = ${plateNorm}
           AND (user_id = ${userId} OR customer_id = ${cust?.id ?? null})
         LIMIT 1
       `)).rows[0];
       if (dupe) return res.status(409).json({ ok: false, reason: 'duplicate_plate' });
+
+      // Cross-user claim guard: refuse if any *other* customer has already
+      // linked this plate. Customer can dispute via WhatsApp (handled in
+      // the UI) if it's genuinely theirs.
+      const claimed = (await db.execute(sql`
+        SELECT id FROM cars
+        WHERE UPPER(REGEXP_REPLACE(license_plate, '\\s+', '', 'g')) = ${plateNorm}
+          AND (user_id IS NOT NULL OR customer_id IS NOT NULL)
+        LIMIT 1
+      `)).rows[0];
+      if (claimed) {
+        return res.status(409).json({ ok: false, reason: 'plate_claimed', plate });
+      }
       const inserted = (await db.execute(sql`
         INSERT INTO cars (user_id, customer_id, license_plate, brand, model, color, photo_url)
         VALUES (${userId}, ${cust?.id ?? null}, ${plate},
