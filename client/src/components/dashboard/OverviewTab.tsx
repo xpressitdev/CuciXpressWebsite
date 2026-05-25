@@ -326,6 +326,31 @@ function ActiveSubscriptionHero({
           >
             {planName}
           </h2>
+          {membership.vehicle_plate ? (
+            <p
+              className="text-xs md:text-sm mt-1 inline-flex items-center gap-1.5 font-bold"
+              style={{ color: "#FFE89E" }}
+              data-testid="hero-plan-plate"
+            >
+              <span className="opacity-80 uppercase tracking-widest text-[10px]">
+                For plate
+              </span>
+              <span
+                className="font-mono tracking-wider px-1.5 py-0.5 rounded"
+                style={{ background: "rgba(0,0,0,0.25)" }}
+              >
+                {membership.vehicle_plate}
+              </span>
+            </p>
+          ) : (
+            <p
+              className="text-xs md:text-sm mt-1 font-semibold"
+              style={{ color: "rgba(255,255,255,0.7)" }}
+              data-testid="hero-plan-no-plate"
+            >
+              Not linked to a specific vehicle
+            </p>
+          )}
           <p
             className="text-sm mt-1"
             style={{ color: "rgba(255,255,255,0.85)" }}

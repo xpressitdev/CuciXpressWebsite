@@ -47,6 +47,8 @@ export interface MembershipRow {
   created_at: string;
   price_cents: number;
   sold_at_branch_name: string | null;
+  vehicle_id: number | null;
+  vehicle_plate: string | null;
 }
 
 export interface CarRow {

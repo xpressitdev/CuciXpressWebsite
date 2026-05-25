@@ -4374,10 +4374,12 @@ export async function registerRoutes(app: Express): Promise<Server> {
     const userId = Number(req.lucia!.user!.id);
     const rows = (await db.execute(sql`
       SELECT m.id, m.kind, m.total_washes, m.remaining_washes, m.status, m.expires_at,
-             m.created_at, m.price_cents, b.name AS sold_at_branch_name
+             m.created_at, m.price_cents, b.name AS sold_at_branch_name,
+             m.vehicle_id, ca.license_plate AS vehicle_plate
       FROM memberships m
       JOIN customers c ON c.id = m.customer_id
       LEFT JOIN branches b ON b.id = m.sold_at_branch_id
+      LEFT JOIN cars ca ON ca.id = m.vehicle_id
       WHERE c.user_id = ${userId}
       ORDER BY m.created_at DESC
     `)).rows;
@@ -4836,6 +4838,59 @@ export async function registerRoutes(app: Express): Promise<Server> {
       res.json({ ok: true, car: updated });
     } catch (err) {
       console.error('[customer/cars PATCH] failed', err);
+      res.status(500).json({ ok: false, reason: 'server_error' });
+    }
+  });
+
+  // DELETE /api/customer/cars/:id — remove a vehicle from the signed-in
+  // customer's garage. We don't hard-delete: past orders may still link
+  // to this car via orders.vehicle_id, and any active membership tied
+  // to the plate should keep its audit trail. Instead we *unlink* by
+  // clearing user_id + customer_id, which makes the car disappear from
+  // /api/customer/cars while preserving all historical references.
+  // Blocked if there's an active membership tied to this specific car.
+  app.delete('/api/customer/cars/:id', requireLuciaUser, async (req, res) => {
+    const id = Number(req.params.id);
+    if (!Number.isFinite(id)) return res.status(400).json({ ok: false, reason: 'bad_id' });
+    const userId = Number(req.lucia!.user!.id);
+    try {
+      // 1. Assert ownership first — avoids leaking info about cars the
+      //    requester doesn't own.
+      const owned = (await db.execute(sql`
+        SELECT 1 FROM cars
+         WHERE id = ${id}
+           AND (user_id = ${userId}
+                OR customer_id = (SELECT id FROM customers WHERE user_id = ${userId} LIMIT 1))
+        LIMIT 1
+      `)).rows[0];
+      if (!owned) return res.status(404).json({ ok: false, reason: 'not_found' });
+
+      // 2. Block delete only if THIS user has an active membership tied
+      //    to this specific car. A stray membership owned by a different
+      //    customer (e.g. legacy data on a shared plate) shouldn't block.
+      const active = (await db.execute(sql`
+        SELECT 1
+          FROM memberships m
+          JOIN customers c ON c.id = m.customer_id
+         WHERE m.vehicle_id = ${id}
+           AND m.status = 'active'
+           AND c.user_id = ${userId}
+        LIMIT 1
+      `)).rows[0];
+      if (active) {
+        return res.status(409).json({ ok: false, reason: 'membership_attached' });
+      }
+
+      // 3. Unlink — preserves orders.vehicle_id history.
+      await db.execute(sql`
+        UPDATE cars
+           SET user_id = NULL,
+               customer_id = NULL
+         WHERE id = ${id}
+      `);
+      res.json({ ok: true });
+    } catch (err) {
+      console.error('[customer/cars DELETE] failed', err);
       res.status(500).json({ ok: false, reason: 'server_error' });
     }
   });

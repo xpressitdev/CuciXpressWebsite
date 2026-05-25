@@ -13,6 +13,7 @@ import {
   Star,
   Droplet,
   AlertCircle,
+  Trash2,
 } from "lucide-react";
 import { Link } from "wouter";
 import { Button } from "@/components/ui/button";
@@ -205,6 +206,38 @@ export function VehiclesTab({ cars }: Props) {
 
   const canSave = form.license_plate.trim().length > 0 && !save.isPending && !photoBusy;
 
+  const remove = useMutation({
+    mutationFn: async (id: number) => {
+      const r = await apiRequest("DELETE", `/api/customer/cars/${id}`, undefined);
+      const data = await r.json();
+      if (!data.ok) throw new Error(data.reason ?? "delete_failed");
+      return data;
+    },
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ["/api/customer/cars"] });
+      toast({ title: "Vehicle removed" });
+    },
+    onError: (err: any) => {
+      // apiRequest throws non-2xx as `Error("STATUS: body")`, so match on
+      // substring rather than equality.
+      const text = String(err?.message ?? "");
+      const msg = text.includes("membership_attached")
+        ? "This car has an active subscription. Cancel it first."
+        : "Could not remove vehicle.";
+      toast({ title: msg, variant: "destructive" });
+    },
+  });
+
+  const confirmRemove = (c: CarRow) => {
+    if (
+      window.confirm(
+        `Remove ${c.license_plate}${c.brand ? ` (${c.brand}${c.model ? " " + c.model : ""})` : ""} from your garage?\n\nPast washes stay in your history.`,
+      )
+    ) {
+      remove.mutate(c.id);
+    }
+  };
+
   // Find the most-washed car for the "favourite ride" badge
   const favoriteId = cars.length
     ? [...cars].sort((a, b) => b.total_washes - a.total_washes)[0].id
@@ -360,14 +393,25 @@ export function VehiclesTab({ cars }: Props) {
                         </span>
                       )}
                     </div>
-                    <button
-                      onClick={() => startEdit(c)}
-                      className="p-2 rounded-full bg-white/90 hover:bg-white text-gray-700 shadow-sm opacity-0 group-hover:opacity-100 transition"
-                      data-testid={`button-edit-vehicle-${c.id}`}
-                      aria-label="Edit vehicle"
-                    >
-                      <Pencil className="w-3.5 h-3.5" />
-                    </button>
+                    <div className="flex items-center gap-1.5">
+                      <button
+                        onClick={() => startEdit(c)}
+                        className="p-2 rounded-full bg-white/90 hover:bg-white text-gray-700 shadow-sm opacity-0 group-hover:opacity-100 transition"
+                        data-testid={`button-edit-vehicle-${c.id}`}
+                        aria-label="Edit vehicle"
+                      >
+                        <Pencil className="w-3.5 h-3.5" />
+                      </button>
+                      <button
+                        onClick={() => confirmRemove(c)}
+                        disabled={remove.isPending}
+                        className="p-2 rounded-full bg-white/90 hover:bg-rose-50 text-rose-600 shadow-sm opacity-0 group-hover:opacity-100 transition disabled:opacity-50"
+                        data-testid={`button-delete-vehicle-${c.id}`}
+                        aria-label="Remove vehicle"
+                      >
+                        <Trash2 className="w-3.5 h-3.5" />
+                      </button>
+                    </div>
                   </div>
 
                   {/* plate + name overlay */}
@@ -422,14 +466,25 @@ export function VehiclesTab({ cars }: Props) {
                   </Link>
                 )}
 
-                {/* Edit button (always visible on touch devices) */}
-                <button
-                  onClick={() => startEdit(c)}
-                  className="md:hidden absolute top-3 right-3 p-2 rounded-full bg-white/90 text-gray-700 shadow-sm"
-                  aria-label="Edit vehicle"
-                >
-                  <Pencil className="w-3.5 h-3.5" />
-                </button>
+                {/* Edit + Delete buttons (always visible on touch devices) */}
+                <div className="md:hidden absolute top-3 right-3 flex items-center gap-1.5">
+                  <button
+                    onClick={() => startEdit(c)}
+                    className="p-2 rounded-full bg-white/90 text-gray-700 shadow-sm"
+                    aria-label="Edit vehicle"
+                  >
+                    <Pencil className="w-3.5 h-3.5" />
+                  </button>
+                  <button
+                    onClick={() => confirmRemove(c)}
+                    disabled={remove.isPending}
+                    className="p-2 rounded-full bg-white/90 text-rose-600 shadow-sm disabled:opacity-50"
+                    data-testid={`button-delete-vehicle-mobile-${c.id}`}
+                    aria-label="Remove vehicle"
+                  >
+                    <Trash2 className="w-3.5 h-3.5" />
+                  </button>
+                </div>
               </motion.article>
             );
           })}
