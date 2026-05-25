@@ -1,6 +1,6 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useState } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
-import { Sparkles, Gift, Check, Lock } from "lucide-react";
+import { Sparkles, Gift, Check, Lock, Car } from "lucide-react";
 import QRCodeLib from "qrcode";
 import { apiRequest } from "@/lib/queryClient";
 import { useToast } from "@/hooks/use-toast";
@@ -8,41 +8,43 @@ import { Button } from "@/components/ui/button";
 import {
   Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter,
 } from "@/components/ui/dialog";
-import {
-  Select, SelectContent, SelectItem, SelectTrigger, SelectValue,
-} from "@/components/ui/select";
 import { CarRow } from "./types";
+
+interface PendingVoucher {
+  order_id: string;
+  payment_ref: string;
+  created_at: string;
+  plate: string;
+  branch_name: string | null;
+  qr_payload: string;
+}
+
+interface LoyaltyPlateCard {
+  vehicle_id: number;
+  plate: string;
+  brand: string | null;
+  model: string | null;
+  stamps: number;
+  raw_stamps: number;
+  can_redeem: boolean;
+  pending_voucher: PendingVoucher | null;
+}
 
 interface LoyaltyResp {
   package_id: string;
   package_name: string;
   required: number;
-  stamps: number;
-  can_redeem: boolean;
-  eligible_orders: Array<{
-    id: string; created_at: string; plate: string;
-    total_cents: number; branch_name: string | null;
-  }>;
-  pending_voucher: null | {
-    order_id: string;
-    payment_ref: string;
-    created_at: string;
-    plate: string;
-    branch_name: string | null;
-    qr_payload: string;
-  };
+  cards: LoyaltyPlateCard[];
 }
 
 interface Props {
   cars: CarRow[];
 }
 
-export function LoyaltyCard({ cars }: Props) {
+export function LoyaltyCard({ cars: _cars }: Props) {
   const qc = useQueryClient();
   const { toast } = useToast();
-  const [open, setOpen] = useState(false);
-  const [showVoucher, setShowVoucher] = useState(false);
-  const [plate, setPlate] = useState<string>("");
+  const [voucherPlate, setVoucherPlate] = useState<string | null>(null);
 
   const { data, isLoading } = useQuery<LoyaltyResp>({
     queryKey: ["/api/customer/loyalty"],
@@ -56,15 +58,14 @@ export function LoyaltyCard({ cars }: Props) {
       if (!r.ok) throw new Error(j.error ?? "redeem_failed");
       return j;
     },
-    onSuccess: () => {
+    onSuccess: (_data, variables) => {
       qc.invalidateQueries({ queryKey: ["/api/customer/loyalty"] });
       qc.invalidateQueries({ queryKey: ["/api/customer/orders"] });
       toast({
         title: "Free wash unlocked!",
         description: "Show the QR code at the lane to redeem.",
       });
-      setOpen(false);
-      setShowVoucher(true);
+      setVoucherPlate(variables.plate);
     },
     onError: (e: any) => {
       toast({
@@ -77,9 +78,36 @@ export function LoyaltyCard({ cars }: Props) {
 
   if (isLoading || !data) return null;
 
-  const stamps  = Math.min(data.stamps, data.required);
-  const remain  = Math.max(0, data.required - data.stamps);
-  const hasVoucher = data.pending_voucher != null;
+  const required = data.required;
+  const cards = data.cards;
+  const activeVoucher =
+    voucherPlate != null
+      ? cards.find((c) => c.plate === voucherPlate)?.pending_voucher ?? null
+      : null;
+
+  // Empty state — no cars claimed yet
+  if (cards.length === 0) {
+    return (
+      <section
+        className="cuci-card-soft p-5 border-2 border-black"
+        data-testid="card-loyalty"
+      >
+        <div className="flex items-center gap-2 text-cuci-secondary">
+          <Sparkles className="w-4 h-4" />
+          <p className="text-[11px] uppercase tracking-wider font-bold">
+            Loyalty reward
+          </p>
+        </div>
+        <h2 className="text-lg md:text-xl font-extrabold text-gray-900 mt-1">
+          Collect 4 × B$12 receipts → 1 free wash (per car)
+        </h2>
+        <p className="text-sm text-gray-600 mt-2">
+          Add a vehicle to your garage to start collecting stamps. Every paid{" "}
+          <strong>{data.package_name}</strong> on that plate counts.
+        </p>
+      </section>
+    );
+  }
 
   return (
     <>
@@ -87,148 +115,45 @@ export function LoyaltyCard({ cars }: Props) {
         className="cuci-card-soft p-5 border-2 border-black"
         data-testid="card-loyalty"
       >
-        <div className="flex items-start justify-between gap-4 flex-wrap">
-          <div className="min-w-0">
-            <div className="flex items-center gap-2 text-cuci-secondary">
-              <Sparkles className="w-4 h-4" />
-              <p className="text-[11px] uppercase tracking-wider font-bold">
-                Loyalty reward
-              </p>
-            </div>
-            <h2 className="text-lg md:text-xl font-extrabold text-gray-900 mt-1">
-              Collect 4 × B$12 receipts → 1 free wash
-            </h2>
-            <p className="text-sm text-gray-600 mt-1">
-              Every paid <strong>{data.package_name}</strong> counts as a stamp.
-              {remain > 0 && (
-                <> {remain} more to unlock your free wash.</>
-              )}
-              {remain === 0 && !hasVoucher && (
-                <> You've earned a free wash — claim it now!</>
-              )}
-              {hasVoucher && (
-                <> Your free-wash QR is ready to scan at any Cuci Xpress branch.</>
-              )}
-            </p>
-          </div>
+        <div className="flex items-center gap-2 text-cuci-secondary">
+          <Sparkles className="w-4 h-4" />
+          <p className="text-[11px] uppercase tracking-wider font-bold">
+            Loyalty reward
+          </p>
+        </div>
+        <h2 className="text-lg md:text-xl font-extrabold text-gray-900 mt-1">
+          Collect 4 × B$12 receipts → 1 free wash (per car)
+        </h2>
+        <p className="text-sm text-gray-600 mt-1">
+          Every paid <strong>{data.package_name}</strong> earns a stamp for
+          that plate. Stamps and free washes belong to the car, not the
+          account.
+        </p>
 
-          {hasVoucher ? (
-            <Button
-              onClick={() => setShowVoucher(true)}
-              className="bg-cuci-secondary hover:bg-cuci-secondary/90 text-white border-2 border-black font-bold"
-              data-testid="button-show-voucher"
-            >
-              <Gift className="w-4 h-4 mr-2" /> Show free-wash QR
-            </Button>
-          ) : data.can_redeem ? (
-            <Button
-              onClick={() => {
-                setPlate(cars[0]?.license_plate ?? "");
-                setOpen(true);
-              }}
-              className="bg-cuci-primary hover:bg-cuci-primary/90 text-white border-2 border-black font-bold"
-              data-testid="button-redeem-loyalty"
-            >
-              <Gift className="w-4 h-4 mr-2" /> Redeem free wash
-            </Button>
-          ) : null}
+        <div className="mt-5 space-y-4">
+          {cards.map((card) => (
+            <PlateRow
+              key={card.vehicle_id}
+              card={card}
+              required={required}
+              redeeming={redeem.isPending}
+              onRedeem={() => redeem.mutate({ plate: card.plate })}
+              onShowVoucher={() => setVoucherPlate(card.plate)}
+            />
+          ))}
         </div>
 
-        {/* Progress ring + stamps */}
-        <div className="mt-5 flex items-center gap-5 flex-wrap">
-          <ProgressRing stamps={stamps} required={data.required} />
-          <div className="flex-1 min-w-[180px]">
-            <div className="grid grid-cols-4 gap-2 max-w-xs">
-              {Array.from({ length: data.required }).map((_, i) => {
-                const filled = i < stamps;
-                return (
-                  <div
-                    key={i}
-                    className={[
-                      "aspect-square rounded-lg border-2 flex items-center justify-center transition-colors",
-                      filled
-                        ? "bg-gradient-to-br from-purple-600 to-orange-500 text-white border-transparent shadow"
-                        : "bg-white text-gray-300 border-dashed border-gray-300",
-                    ].join(" ")}
-                    data-testid={`loyalty-stamp-${i}`}
-                  >
-                    {filled ? <Check className="w-6 h-6" /> : <Lock className="w-4 h-4" />}
-                  </div>
-                );
-              })}
-            </div>
-            <p className="text-xs text-gray-500 mt-2">
-              {stamps} / {data.required} stamps · receipts never expire
-            </p>
-          </div>
-        </div>
+        <p className="text-[11px] text-gray-500 mt-4">
+          Receipts never expire. Drive into any Cuci Xpress branch — the
+          branch that scans your QR adds the free wash to its queue.
+        </p>
       </section>
 
-      {/* Redeem modal */}
-      <Dialog open={open} onOpenChange={setOpen}>
-        <DialogContent className="border-2 border-black">
-          <DialogHeader>
-            <DialogTitle>Redeem your free wash</DialogTitle>
-            <DialogDescription>
-              We'll consume 4 of your B$12 receipts and issue a QR voucher.
-              Show the QR at any Cuci Xpress branch on your next visit.
-            </DialogDescription>
-          </DialogHeader>
-
-          <div className="space-y-3">
-            <div>
-              <label className="text-xs font-bold uppercase tracking-wider text-gray-600">
-                Vehicle
-              </label>
-              <Select value={plate} onValueChange={setPlate}>
-                <SelectTrigger
-                  className="border-2 border-black"
-                  data-testid="select-redeem-plate"
-                >
-                  <SelectValue placeholder="Pick a vehicle" />
-                </SelectTrigger>
-                <SelectContent>
-                  {cars.map((c) => (
-                    <SelectItem key={c.id} value={c.license_plate}>
-                      {c.license_plate}
-                      {c.brand ? ` · ${c.brand}${c.model ? ` ${c.model}` : ""}` : ""}
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
-              <p className="text-[11px] text-gray-500 mt-2">
-                Drive into any Cuci Xpress branch and show the QR — the
-                branch that scans you adds your free wash to its queue.
-              </p>
-            </div>
-          </div>
-
-          <DialogFooter>
-            <Button
-              variant="outline"
-              className="border-2 border-black"
-              onClick={() => setOpen(false)}
-            >
-              Cancel
-            </Button>
-            <Button
-              disabled={!plate || redeem.isPending}
-              onClick={() => redeem.mutate({ plate })}
-              className="bg-cuci-primary text-white border-2 border-black font-bold"
-              data-testid="button-confirm-redeem"
-            >
-              {redeem.isPending ? "Issuing…" : "Confirm & get QR"}
-            </Button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
-
-      {/* Voucher viewer */}
-      {data.pending_voucher && (
+      {activeVoucher && (
         <VoucherDialog
-          open={showVoucher}
-          onClose={() => setShowVoucher(false)}
-          voucher={data.pending_voucher}
+          open={voucherPlate != null}
+          onClose={() => setVoucherPlate(null)}
+          voucher={activeVoucher}
           packageName={data.package_name}
         />
       )}
@@ -236,12 +161,105 @@ export function LoyaltyCard({ cars }: Props) {
   );
 }
 
-// Circular progress arc for the loyalty card. Pure SVG so we don't pull
-// any chart library — strokeDasharray trick on a <circle>.
+function PlateRow({
+  card, required, redeeming, onRedeem, onShowVoucher,
+}: {
+  card: LoyaltyPlateCard;
+  required: number;
+  redeeming: boolean;
+  onRedeem: () => void;
+  onShowVoucher: () => void;
+}) {
+  const stamps = card.stamps;
+  const remain = Math.max(0, required - stamps);
+  const hasVoucher = card.pending_voucher != null;
+  const carLabel = [card.brand, card.model].filter(Boolean).join(" ");
+
+  return (
+    <div
+      className="rounded-xl border-2 border-gray-200 p-4 bg-white"
+      data-testid={`loyalty-plate-${card.plate}`}
+    >
+      <div className="flex items-start justify-between gap-3 flex-wrap">
+        <div className="min-w-0">
+          <div className="flex items-center gap-2">
+            <Car className="w-4 h-4 text-gray-500 shrink-0" />
+            <span className="font-mono font-extrabold text-base tracking-wider">
+              {card.plate}
+            </span>
+            {carLabel && (
+              <span className="text-xs text-gray-500 truncate">
+                · {carLabel}
+              </span>
+            )}
+          </div>
+          <p className="text-[12px] text-gray-600 mt-1">
+            {hasVoucher
+              ? "Free-wash QR ready — scan at any branch."
+              : remain === 0
+              ? "You've earned a free wash on this plate!"
+              : `${remain} more paid B$12 wash${remain === 1 ? "" : "es"} to unlock.`}
+          </p>
+        </div>
+
+        {hasVoucher ? (
+          <Button
+            onClick={onShowVoucher}
+            size="sm"
+            className="bg-cuci-secondary hover:bg-cuci-secondary/90 text-white border-2 border-black font-bold"
+            data-testid={`button-show-voucher-${card.plate}`}
+          >
+            <Gift className="w-4 h-4 mr-2" /> Show QR
+          </Button>
+        ) : card.can_redeem ? (
+          <Button
+            onClick={onRedeem}
+            disabled={redeeming}
+            size="sm"
+            className="bg-cuci-primary hover:bg-cuci-primary/90 text-white border-2 border-black font-bold"
+            data-testid={`button-redeem-${card.plate}`}
+          >
+            <Gift className="w-4 h-4 mr-2" />
+            {redeeming ? "Issuing…" : "Redeem free wash"}
+          </Button>
+        ) : null}
+      </div>
+
+      <div className="mt-3 flex items-center gap-4 flex-wrap">
+        <ProgressRing stamps={stamps} required={required} />
+        <div className="flex-1 min-w-[160px]">
+          <div className="grid grid-cols-4 gap-2 max-w-[220px]">
+            {Array.from({ length: required }).map((_, i) => {
+              const filled = i < stamps;
+              return (
+                <div
+                  key={i}
+                  className={[
+                    "aspect-square rounded-lg border-2 flex items-center justify-center transition-colors",
+                    filled
+                      ? "bg-gradient-to-br from-purple-600 to-orange-500 text-white border-transparent shadow"
+                      : "bg-white text-gray-300 border-dashed border-gray-300",
+                  ].join(" ")}
+                  data-testid={`loyalty-stamp-${card.plate}-${i}`}
+                >
+                  {filled ? <Check className="w-5 h-5" /> : <Lock className="w-3 h-3" />}
+                </div>
+              );
+            })}
+          </div>
+          <p className="text-[11px] text-gray-500 mt-2">
+            {stamps} / {required} stamps on this plate
+          </p>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 function ProgressRing({ stamps, required }: { stamps: number; required: number }) {
   const pct = required === 0 ? 0 : Math.min(1, stamps / required);
-  const size = 110;
-  const stroke = 10;
+  const size = 90;
+  const stroke = 9;
   const r = (size - stroke) / 2;
   const c = 2 * Math.PI * r;
   const offset = c * (1 - pct);
@@ -280,12 +298,12 @@ function ProgressRing({ stamps, required }: { stamps: number; required: number }
       </svg>
       <div className="absolute inset-0 grid place-items-center text-center">
         <div>
-          <p className="text-2xl font-black bg-gradient-to-r from-purple-600 to-orange-500 bg-clip-text text-transparent leading-none">
+          <p className="text-xl font-black bg-gradient-to-r from-purple-600 to-orange-500 bg-clip-text text-transparent leading-none">
             {stamps}
-            <span className="text-base text-gray-400">/{required}</span>
+            <span className="text-sm text-gray-400">/{required}</span>
           </p>
-          <p className="text-[10px] uppercase font-bold text-gray-500 mt-1 tracking-wider">
-            {done ? "Free wash!" : `${remaining} to go`}
+          <p className="text-[9px] uppercase font-bold text-gray-500 mt-1 tracking-wider">
+            {done ? "Free!" : `${remaining} to go`}
           </p>
         </div>
       </div>
@@ -298,13 +316,9 @@ function VoucherDialog({
 }: {
   open: boolean;
   onClose: () => void;
-  voucher: NonNullable<LoyaltyResp["pending_voucher"]>;
+  voucher: PendingVoucher;
   packageName: string;
 }) {
-  // Render QR as a data-URL <img> instead of drawing into a canvas ref.
-  // Radix Dialog mounts its content through a portal after a tick, so the
-  // canvasRef-based approach silently no-op'd on first open (the effect
-  // fired before the canvas was in the DOM, and never re-ran).
   const [qrDataUrl, setQrDataUrl] = useState<string | null>(null);
 
   useEffect(() => {
@@ -332,7 +346,8 @@ function VoucherDialog({
           </DialogTitle>
           <DialogDescription>
             Show this code to staff at any Cuci Xpress branch. They'll
-            scan it and queue your <strong>{packageName}</strong>.
+            scan it and queue your <strong>{packageName}</strong> for{" "}
+            <strong className="font-mono">{voucher.plate}</strong>.
           </DialogDescription>
         </DialogHeader>
         <div className="flex justify-center py-4 min-h-[280px] items-center">

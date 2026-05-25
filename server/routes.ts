@@ -4566,61 +4566,102 @@ export async function registerRoutes(app: Express): Promise<Server> {
   const LOYALTY_PKG_ID         = 'pkg_basic_tyre_wax';
   const LOYALTY_REQUIRED_COUNT = 4;
 
+  // Per-plate loyalty (2026-05-25): stamps + voucher belong to a CAR,
+  // not to the customer account, because the POS only captures the plate
+  // (not phone/email). When a customer claims a plate in their garage we
+  // surface that plate's historical stamps. Match is by vehicle_id OR
+  // normalised plate so older orders that have a plate string but no
+  // vehicle_id FK still count.
   app.get('/api/customer/loyalty', requireLuciaUser, async (req, res) => {
     const userId = Number(req.lucia!.user!.id);
     try {
-      const eligible = (await db.execute(sql`
-        SELECT o.id, o.created_at, o.plate, o.total_cents, b.name AS branch_name
-          FROM orders o
-          LEFT JOIN branches b ON b.id = o.branch_id
-         WHERE o.customer_id          = ${userId}
-           AND o.package_id           = ${LOYALTY_PKG_ID}
-           AND o.loyalty_consumed_in IS NULL
-           AND o.status               IN ('paid','queued','washing','done')
-           AND NOT (o.payment_method  = 'voucher' AND o.qr_provider = 'loyalty')
-           AND o.id NOT IN (SELECT order_id FROM membership_redemptions)
-         ORDER BY o.created_at ASC
-      `)).rows.map((r: any) => ({
-        ...r,
-        total_cents: Number(r.total_cents ?? 0),
-      }));
+      const rows = (await db.execute(sql`
+        WITH owned_cars AS (
+          SELECT c.id, c.license_plate, c.brand, c.model,
+                 REGEXP_REPLACE(UPPER(c.license_plate), '\s+', '', 'g') AS plate_norm
+            FROM cars c
+           WHERE c.user_id = ${userId}
+              OR c.customer_id = (SELECT id FROM customers WHERE user_id = ${userId} LIMIT 1)
+        ),
+        -- Attribution: each order maps to AT MOST ONE car. Prefer the
+        -- vehicle_id FK when set; only fall back to plate-normalised
+        -- match when vehicle_id IS NULL. cars_plate_normalized_unique
+        -- guarantees the plate fallback resolves to a single car too.
+        -- Without this rule a plate reassignment would let one order
+        -- double-count across two cards.
+        eligible AS (
+          SELECT c.id AS vehicle_id, COUNT(*)::int AS stamps
+            FROM owned_cars c
+            JOIN orders o
+              ON (o.vehicle_id = c.id
+                  OR (o.vehicle_id IS NULL
+                      AND REGEXP_REPLACE(UPPER(o.plate), '\s+', '', 'g') = c.plate_norm))
+           WHERE o.package_id           = ${LOYALTY_PKG_ID}
+             AND o.loyalty_consumed_in IS NULL
+             AND o.status               IN ('paid','queued','washing','done')
+             AND NOT (o.payment_method  = 'voucher' AND o.qr_provider = 'loyalty')
+             AND o.id NOT IN (SELECT order_id FROM membership_redemptions)
+           GROUP BY c.id
+        ),
+        pending AS (
+          SELECT DISTINCT ON (c.id)
+                 c.id AS vehicle_id,
+                 o.id AS order_id, o.payment_ref, o.created_at, o.plate,
+                 b.name AS branch_name
+            FROM owned_cars c
+            JOIN orders o
+              ON (o.vehicle_id = c.id
+                  OR (o.vehicle_id IS NULL
+                      AND REGEXP_REPLACE(UPPER(o.plate), '\s+', '', 'g') = c.plate_norm))
+            LEFT JOIN branches b ON b.id = o.branch_id
+           WHERE o.qr_provider  = 'loyalty'
+             AND o.status       = 'paid'
+             AND o.ticket_code IS NULL
+           ORDER BY c.id, o.created_at DESC
+        )
+        SELECT c.id            AS vehicle_id,
+               c.license_plate AS plate,
+               c.brand, c.model,
+               COALESCE(e.stamps, 0) AS stamps,
+               p.order_id, p.payment_ref, p.created_at AS pending_created_at,
+               p.plate AS pending_plate, p.branch_name AS pending_branch
+          FROM owned_cars c
+          LEFT JOIN eligible e ON e.vehicle_id = c.id
+          LEFT JOIN pending  p ON p.vehicle_id = c.id
+         ORDER BY COALESCE(e.stamps, 0) DESC, c.id ASC
+      `)).rows as Array<any>;
 
-      const stamps = eligible.length;
-      const canRedeem = stamps >= LOYALTY_REQUIRED_COUNT;
-
-      // Pending (unscanned) loyalty voucher, if any.
-      const pendingVoucher = (await db.execute(sql`
-        SELECT o.id, o.payment_ref, o.created_at, o.plate, b.name AS branch_name
-          FROM orders o
-          LEFT JOIN branches b ON b.id = o.branch_id
-         WHERE o.customer_id  = ${userId}
-           AND o.qr_provider  = 'loyalty'
-           AND o.status       = 'paid'
-           AND o.ticket_code IS NULL
-         ORDER BY o.created_at DESC
-         LIMIT 1
-      `)).rows[0] as any;
+      const cards = rows.map((r) => {
+        const stamps = Number(r.stamps ?? 0);
+        return {
+          vehicle_id: Number(r.vehicle_id),
+          plate: r.plate as string,
+          brand: r.brand as string | null,
+          model: r.model as string | null,
+          stamps: Math.min(stamps, LOYALTY_REQUIRED_COUNT),
+          raw_stamps: stamps, // for "X over the line" display if ever needed
+          can_redeem: stamps >= LOYALTY_REQUIRED_COUNT,
+          pending_voucher: r.order_id
+            ? {
+                order_id: r.order_id as string,
+                payment_ref: r.payment_ref as string,
+                created_at: r.pending_created_at as string,
+                plate: r.pending_plate as string,
+                branch_name: r.pending_branch as string | null,
+                qr_payload: JSON.stringify({
+                  type: 'CUCI_XPRESS_PAYMENT',
+                  order_id: r.payment_ref,
+                }),
+              }
+            : null,
+        };
+      });
 
       res.json({
         package_id: LOYALTY_PKG_ID,
         package_name: 'Basic Wash + Tyre Shine + Spray Wax',
         required: LOYALTY_REQUIRED_COUNT,
-        stamps,
-        can_redeem: canRedeem,
-        eligible_orders: eligible,
-        pending_voucher: pendingVoucher
-          ? {
-              order_id: pendingVoucher.id,
-              payment_ref: pendingVoucher.payment_ref,
-              created_at: pendingVoucher.created_at,
-              plate: pendingVoucher.plate,
-              branch_name: pendingVoucher.branch_name,
-              qr_payload: JSON.stringify({
-                type: 'CUCI_XPRESS_PAYMENT',
-                order_id: pendingVoucher.payment_ref,
-              }),
-            }
-          : null,
+        cards,
       });
     } catch (err) {
       console.error('[customer.loyalty] failed:', err);
@@ -4650,10 +4691,30 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
     try {
       const out = await db.transaction(async (tx) => {
-        // Reject if there's already an unredeemed voucher waiting.
+        // 1. Resolve the plate to a car THIS user owns + LOCK that car
+        //    row for the duration of the tx. Two parallel redeems against
+        //    the same plate will serialize here, so only the first can
+        //    pass the "no pending voucher" check below.
+        const car = (await tx.execute(sql`
+          SELECT id, license_plate FROM cars
+           WHERE REGEXP_REPLACE(UPPER(license_plate), '\s+', '', 'g')
+               = REGEXP_REPLACE(UPPER(${plate}), '\s+', '', 'g')
+             AND (user_id = ${userId}
+                  OR customer_id = (SELECT id FROM customers WHERE user_id = ${userId} LIMIT 1))
+           LIMIT 1
+           FOR UPDATE
+        `)).rows[0] as { id: number; license_plate: string } | undefined;
+        if (!car) {
+          return { http: 404, body: { error: 'plate_not_in_garage' } };
+        }
+        const vehicleId = car.id;
+        const carPlate  = car.license_plate;
+
+        // 2. One pending voucher per CAR (was per customer). A multi-plate
+        //    customer can have one voucher pending per plate concurrently.
         const existing = (await tx.execute(sql`
           SELECT id FROM orders
-           WHERE customer_id = ${userId}
+           WHERE vehicle_id  = ${vehicleId}
              AND qr_provider = 'loyalty'
              AND status      = 'paid'
              AND ticket_code IS NULL
@@ -4668,10 +4729,17 @@ export async function registerRoutes(app: Express): Promise<Server> {
         `)).rows[0] as any;
         if (!pkg) return { http: 500, body: { error: 'package_missing' } };
 
-        // Lock + recount eligible orders. Take the oldest N.
+        // 3. Lock + recount eligible orders FOR THIS CAR. Same
+        //    attribution rule as the GET: vehicle_id FK wins; plate
+        //    fallback only when vehicle_id IS NULL. Keeps stamps
+        //    deterministic when the same plate string appears across
+        //    historical and current vehicle_id rows.
         const eligibleRows = (await tx.execute(sql`
           SELECT id FROM orders
-           WHERE customer_id          = ${userId}
+           WHERE (vehicle_id = ${vehicleId}
+                  OR (vehicle_id IS NULL
+                      AND REGEXP_REPLACE(UPPER(plate), '\s+', '', 'g')
+                        = REGEXP_REPLACE(UPPER(${carPlate}), '\s+', '', 'g')))
              AND package_id           = ${LOYALTY_PKG_ID}
              AND loyalty_consumed_in IS NULL
              AND status               IN ('paid','queued','washing','done')
@@ -4697,13 +4765,13 @@ export async function registerRoutes(app: Express): Promise<Server> {
         // cashier scans the QR at a lane.
         await tx.execute(sql`
           INSERT INTO orders (
-            id, branch_id, customer_id, plate,
+            id, branch_id, customer_id, vehicle_id, plate,
             package_id, package_name, package_price_cents,
             addons, subtotal_cents, total_cents,
             payment_method, payment_ref, qr_provider,
             ticket_code, status, customer_name_walkin
           ) VALUES (
-            ${voucherId}, NULL, ${userId}, ${plate},
+            ${voucherId}, NULL, ${userId}, ${vehicleId}, ${carPlate},
             ${pkg.id}, ${pkg.name}, 0,
             '[]'::jsonb, 0, 0,
             'voucher', ${redemptionId}, 'loyalty',
