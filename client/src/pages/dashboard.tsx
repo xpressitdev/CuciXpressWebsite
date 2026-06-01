@@ -4,7 +4,7 @@ import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { apiRequest } from "@/lib/queryClient";
 import { useToast } from "@/hooks/use-toast";
 
-import { DashSidebar, DashTopbar, type DashTab } from "@/components/dashboard/Sidebar";
+import { DashSidebar, DashMobileHeader, DashMobileNav, type DashTab } from "@/components/dashboard/Sidebar";
 import { OverviewTab } from "@/components/dashboard/OverviewTab";
 import { ActivityTab } from "@/components/dashboard/ActivityTab";
 import { VehiclesTab } from "@/components/dashboard/VehiclesTab";
@@ -134,8 +134,16 @@ export default function DashboardPage() {
         }}
       />
       <div className="flex-1 min-w-0">
-        <DashTopbar active={tab} onChange={setTab} />
-        <main className="px-4 sm:px-6 lg:px-10 py-6 lg:py-10 max-w-7xl">
+        <DashMobileHeader
+          fullName={fullName}
+          onLogout={() => logout.mutate()}
+          loggingOut={logout.isPending}
+          profile={{
+            first_name: me.profile.first_name ?? "",
+            last_name: me.profile.last_name ?? "",
+          }}
+        />
+        <main className="px-4 sm:px-6 lg:px-10 py-6 lg:py-10 pb-24 md:pb-10 max-w-7xl">
           {tab === "overview" && (
             <OverviewTab
               me={me}
@@ -165,6 +173,7 @@ export default function DashboardPage() {
             />
           )}
         </main>
+        <DashMobileNav active={tab} onChange={setTab} />
       </div>
     </div>
   );

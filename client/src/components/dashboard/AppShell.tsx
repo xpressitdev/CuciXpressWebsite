@@ -3,7 +3,7 @@ import { useLocation } from "wouter";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { apiRequest } from "@/lib/queryClient";
 import { useToast } from "@/hooks/use-toast";
-import { DashSidebar, DashTopbar, type DashTab } from "./Sidebar";
+import { DashSidebar, DashMobileHeader, DashMobileNav, type DashTab } from "./Sidebar";
 import { Whoami, MeResp } from "./types";
 
 interface Props {
@@ -91,13 +91,22 @@ export function AppShell({ children, activeTab }: Props) {
         }}
       />
       <div className="flex-1 min-w-0">
-        <DashTopbar
+        <DashMobileHeader
+          fullName={fullName}
+          onLogout={() => logout.mutate()}
+          loggingOut={logout.isPending}
+          profile={{
+            first_name: me.profile.first_name ?? "",
+            last_name: me.profile.last_name ?? "",
+          }}
+        />
+        <main className="px-4 sm:px-6 lg:px-10 py-6 lg:py-10 pb-24 md:pb-10 max-w-7xl">
+          {children}
+        </main>
+        <DashMobileNav
           active={activeTab ?? ("overview" as DashTab)}
           onChange={handleTabChange}
         />
-        <main className="px-4 sm:px-6 lg:px-10 py-6 lg:py-10 max-w-7xl">
-          {children}
-        </main>
       </div>
     </div>
   );

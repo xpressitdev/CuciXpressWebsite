@@ -69,13 +69,84 @@ const editNameSchema = z.object({
 });
 type EditNameValues = z.infer<typeof editNameSchema>;
 
-const items: { id: DashTab; label: string; icon: any }[] = [
-  { id: "overview", label: "Overview", icon: Home },
-  { id: "activity", label: "Activity", icon: Receipt },
-  { id: "vehicles", label: "My vehicles", icon: Car },
-  { id: "subscription", label: "Subscription", icon: Crown },
-  { id: "achievements", label: "Achievements", icon: Trophy },
+const items: { id: DashTab; label: string; short: string; icon: any }[] = [
+  { id: "overview", label: "Overview", short: "Home", icon: Home },
+  { id: "activity", label: "Activity", short: "Activity", icon: Receipt },
+  { id: "vehicles", label: "My vehicles", short: "Vehicles", icon: Car },
+  { id: "subscription", label: "Subscription", short: "Plan", icon: Crown },
+  { id: "achievements", label: "Achievements", short: "Awards", icon: Trophy },
 ];
+
+function initialsOf(fullName: string) {
+  return fullName
+    .split(" ")
+    .filter(Boolean)
+    .slice(0, 2)
+    .map((s) => s[0])
+    .join("")
+    .toUpperCase();
+}
+
+// Shared account dropdown (edit name + sign out). Both the desktop
+// sidebar and the mobile top bar render their own trigger and hand it in
+// so they can look different while sharing the menu + edit dialog.
+function AccountMenu({
+  fullName,
+  onLogout,
+  loggingOut,
+  profile,
+  trigger,
+  side = "bottom",
+  align = "end",
+}: {
+  fullName: string;
+  onLogout: () => void;
+  loggingOut: boolean;
+  profile?: { first_name: string; last_name: string };
+  trigger: React.ReactNode;
+  side?: "top" | "bottom";
+  align?: "start" | "center" | "end";
+}) {
+  const [editOpen, setEditOpen] = useState(false);
+  return (
+    <>
+      <DropdownMenu>
+        <DropdownMenuTrigger asChild>{trigger}</DropdownMenuTrigger>
+        <DropdownMenuContent align={align} side={side} className="w-56">
+          <DropdownMenuLabel className="truncate">{fullName}</DropdownMenuLabel>
+          <DropdownMenuSeparator />
+          {profile && (
+            <DropdownMenuItem
+              onClick={() => setEditOpen(true)}
+              data-testid="button-dash-edit-name"
+            >
+              <Pencil className="w-3.5 h-3.5 mr-2" />
+              Edit name
+            </DropdownMenuItem>
+          )}
+          <DropdownMenuItem
+            onClick={onLogout}
+            disabled={loggingOut}
+            className="text-red-600 focus:text-red-600"
+            data-testid="button-dash-logout"
+          >
+            <LogOut className="w-3.5 h-3.5 mr-2" />
+            Sign out
+          </DropdownMenuItem>
+        </DropdownMenuContent>
+      </DropdownMenu>
+
+      {profile && (
+        <EditNameDialog
+          open={editOpen}
+          onOpenChange={setEditOpen}
+          firstName={profile.first_name}
+          lastName={profile.last_name}
+        />
+      )}
+    </>
+  );
+}
 
 export function DashSidebar({
   active,
@@ -86,14 +157,7 @@ export function DashSidebar({
   loggingOut,
   profile,
 }: Props) {
-  const [editOpen, setEditOpen] = useState(false);
-  const initials = fullName
-    .split(" ")
-    .filter(Boolean)
-    .slice(0, 2)
-    .map((s) => s[0])
-    .join("")
-    .toUpperCase();
+  const initials = initialsOf(fullName);
 
   return (
     <aside className="hidden md:flex w-60 shrink-0 bg-white border-r border-gray-200 flex-col h-screen sticky top-0">
@@ -132,8 +196,14 @@ export function DashSidebar({
       </nav>
 
       <div className="p-3 border-t border-gray-200">
-        <DropdownMenu>
-          <DropdownMenuTrigger asChild>
+        <AccountMenu
+          fullName={fullName}
+          onLogout={onLogout}
+          loggingOut={loggingOut}
+          profile={profile}
+          side="top"
+          align="end"
+          trigger={
             <button
               className="w-full flex items-center gap-3 p-2 rounded-lg hover:bg-gray-50 text-left"
               data-testid="button-dash-account"
@@ -152,40 +222,9 @@ export function DashSidebar({
               </div>
               <ChevronUp className="w-4 h-4 text-gray-400 shrink-0" />
             </button>
-          </DropdownMenuTrigger>
-          <DropdownMenuContent align="end" side="top" className="w-56">
-            <DropdownMenuLabel>My account</DropdownMenuLabel>
-            <DropdownMenuSeparator />
-            {profile && (
-              <DropdownMenuItem
-                onClick={() => setEditOpen(true)}
-                data-testid="button-dash-edit-name"
-              >
-                <Pencil className="w-3.5 h-3.5 mr-2" />
-                Edit name
-              </DropdownMenuItem>
-            )}
-            <DropdownMenuItem
-              onClick={onLogout}
-              disabled={loggingOut}
-              className="text-red-600 focus:text-red-600"
-              data-testid="button-dash-logout"
-            >
-              <LogOut className="w-3.5 h-3.5 mr-2" />
-              Sign out
-            </DropdownMenuItem>
-          </DropdownMenuContent>
-        </DropdownMenu>
-      </div>
-
-      {profile && (
-        <EditNameDialog
-          open={editOpen}
-          onOpenChange={setEditOpen}
-          firstName={profile.first_name}
-          lastName={profile.last_name}
+          }
         />
-      )}
+      </div>
     </aside>
   );
 }
@@ -315,7 +354,60 @@ function EditNameDialog({
   );
 }
 
-export function DashTopbar({
+// Mobile top bar: home/brand on the left, profile avatar on the right —
+// mirrors the native-app pattern. The actual page navigation lives in the
+// bottom bar (DashMobileNav).
+export function DashMobileHeader({
+  fullName,
+  onLogout,
+  loggingOut,
+  profile,
+}: {
+  fullName: string;
+  onLogout: () => void;
+  loggingOut: boolean;
+  profile?: { first_name: string; last_name: string };
+}) {
+  const initials = initialsOf(fullName);
+  return (
+    <header className="md:hidden sticky top-0 z-30 bg-white border-b border-gray-200 h-14 px-4 flex items-center justify-between">
+      <Link
+        href="/"
+        className="flex items-center gap-2"
+        data-testid="link-dash-home-mobile"
+      >
+        <span className="w-8 h-8 rounded-lg bg-gradient-to-br from-cuci-primary to-cuci-secondary grid place-items-center shrink-0">
+          <Home className="w-4 h-4 text-white" />
+        </span>
+        <span className="text-lg font-black bg-gradient-to-r from-cuci-primary to-cuci-secondary bg-clip-text text-transparent">
+          CuciXpress
+        </span>
+      </Link>
+
+      <AccountMenu
+        fullName={fullName}
+        onLogout={onLogout}
+        loggingOut={loggingOut}
+        profile={profile}
+        side="bottom"
+        align="end"
+        trigger={
+          <button
+            className="flex items-center gap-2 rounded-full pl-1 pr-1 py-1 hover:bg-gray-50"
+            data-testid="button-dash-account-mobile"
+          >
+            <div className="w-9 h-9 rounded-full bg-gradient-to-br from-cuci-primary to-cuci-secondary text-white grid place-items-center font-bold text-xs shrink-0">
+              {initials || "?"}
+            </div>
+          </button>
+        }
+      />
+    </header>
+  );
+}
+
+// Mobile bottom navigation bar — fixed, app-style. Five equal columns.
+export function DashMobileNav({
   active,
   onChange,
 }: {
@@ -323,29 +415,28 @@ export function DashTopbar({
   onChange: (tab: DashTab) => void;
 }) {
   return (
-    <div className="md:hidden sticky top-0 z-30 bg-white border-b border-gray-200 px-3 py-2 overflow-x-auto">
-      <div className="flex gap-1 min-w-max">
-        {items.map((it) => {
-          const Icon = it.icon;
-          const isActive = active === it.id;
-          return (
-            <button
-              key={it.id}
-              onClick={() => onChange(it.id)}
-              data-testid={`nav-dash-mobile-${it.id}`}
-              className={
-                "flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold whitespace-nowrap " +
-                (isActive
-                  ? "bg-cuci-primary/10 text-cuci-primary"
-                  : "text-gray-600")
-              }
-            >
-              <Icon className="w-3.5 h-3.5" />
-              {it.label}
-            </button>
-          );
-        })}
-      </div>
-    </div>
+    <nav
+      className="md:hidden fixed bottom-0 inset-x-0 z-30 bg-white border-t border-gray-200 grid grid-cols-5 pb-[env(safe-area-inset-bottom)]"
+      data-testid="nav-dash-mobile"
+    >
+      {items.map((it) => {
+        const Icon = it.icon;
+        const isActive = active === it.id;
+        return (
+          <button
+            key={it.id}
+            onClick={() => onChange(it.id)}
+            data-testid={`nav-dash-mobile-${it.id}`}
+            className={
+              "flex flex-col items-center justify-center gap-0.5 py-2 text-[10px] font-semibold transition-colors " +
+              (isActive ? "text-cuci-primary" : "text-gray-500")
+            }
+          >
+            <Icon className={"w-5 h-5 " + (isActive ? "text-cuci-primary" : "text-gray-500")} />
+            {it.short}
+          </button>
+        );
+      })}
+    </nav>
   );
 }
