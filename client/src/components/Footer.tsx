@@ -27,7 +27,7 @@ export default function Footer() {
 
   const quickLinks = [
     { id: "home", label: "Home" },
-    { id: "stats", label: "Our Success" },
+    { id: "stats", label: "Our Story" },
     { id: "testimonials", label: "Reviews" },
     { id: "locations", label: "Locations" },
     { id: "gallery", label: "Gallery" },

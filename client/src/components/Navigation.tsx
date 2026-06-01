@@ -18,7 +18,7 @@ type NavItem =
 
 const navItems: NavItem[] = [
   { kind: "section", id: "home", label: "Home" },
-  { kind: "section", id: "stats", label: "Our Success" },
+  { kind: "section", id: "stats", label: "Our Story" },
   { kind: "section", id: "locations", label: "Locations" },
   { kind: "section", id: "gallery", label: "Gallery" },
   { kind: "section", id: "service-pricing", label: "Pricing" },
