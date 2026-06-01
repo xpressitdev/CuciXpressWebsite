@@ -140,7 +140,7 @@ export function OverviewTab({ me, orders, memberships, cars, fullName, onChangeT
       <WashHeatmap orders={orders} />
 
       {/* KPI tiles */}
-      <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
+      <div className="grid grid-cols-2 lg:grid-cols-3 gap-3">
         <KpiTile
           label="Washes this month"
           value={String(me.stats.washes_this_month)}
@@ -171,17 +171,6 @@ export function OverviewTab({ me, orders, memberships, cars, fullName, onChangeT
           color="text-gray-900"
           sub={`since ${memberSinceLabel}`}
           testId="kpi-lifetime"
-        />
-        <KpiTile
-          label="Loyalty points"
-          value={me.stats.loyalty_points.toLocaleString()}
-          color="text-cuci-secondary"
-          sub={
-            me.stats.loyalty_points >= 1300
-              ? "Free Premium unlocked!"
-              : `${1300 - me.stats.loyalty_points} to free Premium`
-          }
-          testId="kpi-loyalty"
         />
       </div>
 
