@@ -1,5 +1,5 @@
 import { motion } from "framer-motion";
-import { useLocation } from "wouter";
+import { Link, useLocation } from "wouter";
 
 export default function Footer() {
   const [location] = useLocation();
@@ -32,6 +32,11 @@ export default function Footer() {
     { id: "locations", label: "Locations" },
     { id: "gallery", label: "Gallery" },
     { id: "service-pricing", label: "Pricing" },
+  ];
+
+  const pageLinks = [
+    { href: "/gallery", label: "Full Gallery" },
+    { href: "/partners", label: "Partnerships" },
   ];
 
   const socialLinks = [
@@ -120,6 +125,17 @@ export default function Footer() {
                   >
                     {link.label}
                   </button>
+                </li>
+              ))}
+              {pageLinks.map((link) => (
+                <li key={link.href}>
+                  <Link
+                    href={link.href}
+                    className="text-gray-300 hover:text-cuci-primary transition-colors"
+                    data-testid={`link-footer-${link.href.replace(/\//g, "")}`}
+                  >
+                    {link.label}
+                  </Link>
                 </li>
               ))}
             </ul>

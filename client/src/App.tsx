@@ -5,6 +5,8 @@ import { Toaster } from "@/components/ui/toaster";
 import { TooltipProvider } from "@/components/ui/tooltip";
 import { useEffect } from "react";
 import Home from "@/pages/home";
+import GalleryPage from "@/pages/gallery";
+import Partners from "@/pages/partners";
 import QueuePage from "@/pages/queue";
 import LoginPage from "@/pages/login";
 import DashboardPage from "@/pages/dashboard";
@@ -31,6 +33,8 @@ function Router() {
   return (
     <Switch>
       <Route path="/" component={Home} />
+      <Route path="/gallery" component={GalleryPage} />
+      <Route path="/partners" component={Partners} />
       <Route path="/queue" component={QueuePage} />
       <Route path="/login" component={LoginPage} />
       <Route path="/dashboard" component={DashboardPage} />

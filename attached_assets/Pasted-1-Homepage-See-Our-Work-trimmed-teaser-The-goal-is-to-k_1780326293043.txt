@@ -1,0 +1,20 @@
+1. Homepage "See Our Work" — trimmed teaser
+The goal is to keep the social proof but make it a punchy teaser that hands off to the full Gallery page.
+Section heading: "See Our Work" (keep it).
+Subheading: shorten the current line to something tighter, e.g. "Real cars, real results — across all five branches."
+Layout: a single row of 4 images (or 2×2 on mobile) instead of the full 8-image grid. Choose your strongest customer-facing shots: a happy staff member, a bright storefront, the wash tunnel in action, and a freshly cleaned car. Avoid the darker equipment-only photos here — save those for partnerships.
+Call-to-action below the grid: a button labeled "View Full Gallery →" linking to the existing /gallery page. This is what lets you cut the section down without losing any images.
+Placement: keep it exactly where it is now — right after the reviews section. Reviews plus gallery form a natural "proof" block in the customer flow, sitting before your final "Ready to Get Started?" call-to-action.
+So the homepage flow becomes: Hero/Live Queue → By the Numbers → Locations → Reviews → See Our Work (teaser) → Pricing → Ready to Get Started. The partnership block is removed from this flow entirely.
+2. New dedicated "Partnerships" page
+Suggested URL: /partners (or /for-business). Add it to the footer, and optionally a small secondary-nav or "For Business" link — keep it out of the primary customer nav so it doesn't distract.
+Structure top to bottom:
+Hero / intro: heading "Partner with Local Businesses" with the existing supporting line about supporting local entrepreneurs and building stronger business communities. One clear sentence on who this page is for ("For business owners and entrepreneurs looking to collaborate with Cuci Xpress").
+"Why Collaborate with Us" — keep the existing four value cards: Local Business Support, Community Partnership, Shared Resources, and Mutual Growth. These already exist on the homepage; move them here in full.
+Optional proof strip: this is where you reuse the equipment/systems/operations photos from the gallery (the wash-tunnel and back-of-house shots) — they reinforce the "proven systems and expertise" pitch far better on a B2B page than on the customer homepage.
+The collaboration form: move it here exactly as-is — Full Name, Email, Phone, Business Type dropdown (Retail, F&B, Automotive Services, Technology, Service Provider, Other), and Collaboration Ideas, plus the "Send Collaboration Request →" button and the "We'll review your request and contact you within 48 hours" note.
+Optional closing: a short line pointing business visitors who are actually just customers back to the homepage or live queue, so nobody gets stuck on the wrong page.
+3. Navigation & linking changes
+Footer: add a "Partnerships" (or "For Business") link.
+Homepage: remove the partnership section and its form. If you want a single subtle entry point, a one-line footer-area mention like "Interested in partnering with us? Learn more →" is enough.
+Gallery page: make sure "View Full Gallery →" from the homepage teaser lands here, and that this page holds the complete image set.
