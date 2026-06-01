@@ -171,6 +171,10 @@ describe("Membership wash flow (QR + one-tap POS)", () => {
     expect([200, 201]).toContain(res.status);
     expect(res.body.ok).toBe(true);
     expect(res.body.voucher.package_name).toBe("Unlimited Xpress");
+    // Validity period is surfaced from the membership's expires_at so the
+    // dashboard QR card can show a real "Valid until" date.
+    expect(res.body.voucher.expires_at).toBeTruthy();
+    expect(Number.isNaN(Date.parse(res.body.voucher.expires_at))).toBe(false);
 
     const payload = JSON.parse(res.body.voucher.qr_payload);
     expect(payload.type).toBe("CUCI_XPRESS_PAYMENT");

@@ -460,6 +460,7 @@ interface MembershipVoucher {
   branch_name: string | null;
   plate: string;
   package_name: string;
+  expires_at: string | null;
   qr_payload: string;
 }
 
@@ -519,8 +520,18 @@ function MembershipWashQrDialog({
         <div className="text-center text-xs text-gray-600 space-y-1">
           <div><strong>Plan:</strong> {voucher.package_name}</div>
           <div><strong>Plate:</strong> {voucher.plate}</div>
+          <div data-testid="text-membership-validity">
+            <strong>Valid until:</strong>{" "}
+            {voucher.expires_at
+              ? new Date(voucher.expires_at).toLocaleDateString("en-GB", {
+                  day: "numeric",
+                  month: "short",
+                  year: "numeric",
+                })
+              : "No expiry"}
+          </div>
           <div className="text-[10px] text-gray-400">
-            Valid until used · ref {voucher.payment_ref}
+            ref {voucher.payment_ref}
           </div>
         </div>
         <DialogFooter>

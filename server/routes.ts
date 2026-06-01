@@ -4895,6 +4895,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
                 branch_name: null,
                 plate,
                 package_name: 'Unlimited Xpress',
+                expires_at: membership.expires_at,
                 qr_payload: JSON.stringify({
                   type: 'CUCI_XPRESS_PAYMENT',
                   order_id: existing.payment_ref,
@@ -4936,6 +4937,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
               branch_name: null,
               plate,
               package_name: 'Unlimited Xpress',
+              expires_at: membership.expires_at,
               qr_payload: JSON.stringify({
                 type: 'CUCI_XPRESS_PAYMENT',
                 order_id: paymentRef,
