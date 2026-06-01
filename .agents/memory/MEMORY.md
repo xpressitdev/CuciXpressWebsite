@@ -1,0 +1,1 @@
+- [Auth session cookies](auth-session-cookies.md) — customer login dropping on mobile? Check Lucia `sessionCookie.expires` (true=persistent, false=dies on tab close), not session-expiry bugs.

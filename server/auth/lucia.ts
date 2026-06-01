@@ -149,7 +149,13 @@ export const lucia = new Lucia(new CustomerSessionAdapter(), {
   sessionExpiresIn: new TimeSpan(365, "d"),
   sessionCookie: {
     name: "cx_session",
-    expires: false, // session-cookie semantics: refresh on every request
+    // PERSISTENT cookie (Max-Age ~= session TTL). Previously `false`,
+    // which emitted a browser-*session* cookie — dropped the instant the
+    // mobile tab/app was backgrounded or closed, silently logging the
+    // customer out within minutes even though the DB session is valid for
+    // a year. `true` is what makes "stay signed in for a year" actually
+    // hold across app switches and restarts.
+    expires: true,
     attributes: {
       // `secure` flips on automatically in production via the env check below.
       secure: process.env.NODE_ENV === "production",
