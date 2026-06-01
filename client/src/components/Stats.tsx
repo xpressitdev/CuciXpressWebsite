@@ -22,7 +22,7 @@ function StatCard({ icon, value, label, subtitle, prefix = "", suffix = "", colo
     if (val >= 1000000) {
       return `${Math.floor(val / 1000000)}M+`;
     } else if (val >= 100000) {
-      return `${Math.floor(val).toLocaleString()}+`;
+      return `${Math.floor(val / 1000)}K+`;
     } else if (val < 10) {
       return val.toFixed(1);
     } else {
