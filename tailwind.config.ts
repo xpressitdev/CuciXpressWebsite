@@ -11,6 +11,19 @@ export default {
         sm: "calc(var(--radius) - 4px)",
       },
       colors: {
+        // Brand palette. Registered here (not just as the standalone
+        // `.bg-cuci-*` helpers in index.css) so Tailwind gradient/border/
+        // text utilities like `from-cuci-primary` and `to-cuci-secondary`
+        // actually resolve. Without this the brand gradients (e.g. the
+        // mobile dashboard header logo + avatar) render transparent.
+        "cuci-primary": {
+          DEFAULT: "var(--cuci-primary)",
+          dark: "var(--cuci-primary-dark)",
+        },
+        "cuci-secondary": {
+          DEFAULT: "var(--cuci-secondary)",
+          dark: "var(--cuci-secondary-dark)",
+        },
         background: "var(--background)",
         foreground: "var(--foreground)",
         card: {
