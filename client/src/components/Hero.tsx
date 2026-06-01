@@ -36,7 +36,7 @@ export default function Hero() {
                 And we're just getting started.
               </span>
             </h1>
-            <p className="text-xl text-gray-600 mb-8 leading-relaxed">From a single location to five thriving branches, Cuci Xpress provide fast, consistent drive-thru car washes focus on convenience, reliability, and customer satisfaction.
+            <p className="text-xl text-gray-600 mb-8 leading-relaxed">From a single location to five thriving branches, Cuci Xpress provides fast, consistent drive-thru car washes focused on convenience, reliability, and customer satisfaction.
 
             Built for Brunei. Washed for speed.
 
