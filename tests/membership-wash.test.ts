@@ -195,6 +195,29 @@ describe("Membership wash flow (QR + one-tap POS)", () => {
     expect(o.rows[0].branch_id).toBeNull();
   });
 
+  it("scopes a vehicle-specific check-in to the requested car", async () => {
+    const res = await request(app)
+      .post("/api/customer/membership/checkin")
+      .set("Cookie", custCookie)
+      .send({ vehicle_id: car1Id });
+
+    expect(res.status).toBe(200);
+    expect(res.body.ok).toBe(true);
+    // Same pending order as the unscoped call — it's the same vehicle.
+    expect(res.body.voucher.order_id).toBe(voucherOrderId);
+    expect(res.body.voucher.plate).toBe(plate1);
+  });
+
+  it("404s a vehicle-specific check-in for a car with no unlimited membership", async () => {
+    const res = await request(app)
+      .post("/api/customer/membership/checkin")
+      .set("Cookie", custCookie)
+      .send({ vehicle_id: 999999999 });
+
+    expect(res.status).toBe(404);
+    expect(res.body.error).toBe("no_active_unlimited_membership");
+  });
+
   it("reuses the pending order on a repeat check-in (no duplicate)", async () => {
     const res = await request(app)
       .post("/api/customer/membership/checkin")

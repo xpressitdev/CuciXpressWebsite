@@ -155,7 +155,7 @@ export default function DashboardPage() {
             />
           )}
           {tab === "activity" && <ActivityTab orders={orders} />}
-          {tab === "vehicles" && <VehiclesTab cars={cars} />}
+          {tab === "vehicles" && <VehiclesTab cars={cars} memberships={memberships} />}
           {tab === "subscription" && (
             <SubscriptionTab
               memberships={memberships}

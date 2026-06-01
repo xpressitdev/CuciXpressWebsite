@@ -4838,10 +4838,24 @@ export async function registerRoutes(app: Express): Promise<Server> {
   // same QR are idempotent at the verify-qr layer.
   app.post('/api/customer/membership/checkin', requireLuciaUser, async (req, res) => {
     const userId = Number(req.lucia!.user!.id);
+    // Optional: when the customer taps "Free wash" on a specific garage
+    // card we scope the membership lookup to THAT vehicle. Omitted (e.g.
+    // the Overview hero button) falls back to the latest active unlimited.
+    const rawVehicleId = (req.body ?? {}).vehicle_id;
+    const requestedVehicleId =
+      rawVehicleId === undefined || rawVehicleId === null
+        ? null
+        : Number(rawVehicleId);
+    if (requestedVehicleId !== null && !Number.isInteger(requestedVehicleId)) {
+      return res.status(400).json({ error: 'invalid_vehicle_id' });
+    }
 
     try {
       const out = await db.transaction(async (tx) => {
         // 1. Resolve THIS user's active unlimited membership + its vehicle.
+        //    When a vehicle_id is supplied, scope to that car so multi-car
+        //    accounts get the voucher for the vehicle they actually tapped;
+        //    otherwise pick the latest active unlimited membership.
         const membership = (await tx.execute(sql`
           SELECT m.id, m.vehicle_id, m.status, m.expires_at,
                  ca.license_plate AS vehicle_plate
@@ -4852,6 +4866,9 @@ export async function registerRoutes(app: Express): Promise<Server> {
              AND m.kind   = 'unlimited'
              AND m.status = 'active'
              AND (m.expires_at IS NULL OR m.expires_at > now())
+             ${requestedVehicleId !== null
+               ? sql`AND m.vehicle_id = ${requestedVehicleId}`
+               : sql``}
            ORDER BY m.created_at DESC
            LIMIT 1
            FOR UPDATE OF m

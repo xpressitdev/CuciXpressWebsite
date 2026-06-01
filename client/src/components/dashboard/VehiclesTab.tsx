@@ -39,11 +39,18 @@ import {
 } from "@/components/ui/alert-dialog";
 import { apiRequest } from "@/lib/queryClient";
 import { useToast } from "@/hooks/use-toast";
-import { CarRow } from "./types";
+import { CarRow, MembershipRow } from "./types";
+import { MembershipWashQrDialog, type MembershipVoucher } from "./MembershipWashQrDialog";
 
 interface Props {
   cars: CarRow[];
+  memberships: MembershipRow[];
 }
+
+// Normalise a plate for loose matching (uppercase, alphanumerics only) so
+// "BAP 4455" and "bap4455" line up with a membership's stored plate.
+const normPlate = (p: string | null | undefined) =>
+  (p ?? "").toUpperCase().replace(/[^A-Z0-9]/g, "");
 
 interface FormState {
   license_plate: string;
@@ -126,7 +133,7 @@ async function fileToCompressedDataUrl(file: File): Promise<string> {
   return canvas.toDataURL("image/jpeg", 0.82);
 }
 
-export function VehiclesTab({ cars }: Props) {
+export function VehiclesTab({ cars, memberships }: Props) {
   const qc = useQueryClient();
   const { toast } = useToast();
   const [open, setOpen] = useState(false);
@@ -135,7 +142,47 @@ export function VehiclesTab({ cars }: Props) {
   const [photoBusy, setPhotoBusy] = useState(false);
   const [confirmingCar, setConfirmingCar] = useState<CarRow | null>(null);
   const [disputePlate, setDisputePlate] = useState<string | null>(null);
+  const [qrVoucher, setQrVoucher] = useState<MembershipVoucher | null>(null);
   const fileRef = useRef<HTMLInputElement>(null);
+
+  // Active Unlimited memberships, indexed by the vehicle they cover (by id
+  // and by normalised plate) so we can tell which garage cards get a free
+  // wash instead of the pay-and-queue CTA.
+  const unlimitedVehicleIds = new Set<number>();
+  const unlimitedPlates = new Set<string>();
+  for (const m of memberships) {
+    if (m.status === "active" && m.kind === "unlimited") {
+      if (m.vehicle_id != null) unlimitedVehicleIds.add(m.vehicle_id);
+      if (m.vehicle_plate) unlimitedPlates.add(normPlate(m.vehicle_plate));
+    }
+  }
+  const isUnlimitedCar = (c: CarRow): boolean =>
+    unlimitedVehicleIds.has(c.id) || unlimitedPlates.has(normPlate(c.license_plate));
+
+  // Generate the free Unlimited wash QR (same flow as the Overview tab):
+  // the server resolves the customer's active Unlimited membership and
+  // returns a B$0 voucher to show staff at the lane.
+  const checkin = useMutation({
+    mutationFn: async (vehicleId: number) => {
+      const r = await apiRequest("POST", "/api/customer/membership/checkin", {
+        vehicle_id: vehicleId,
+      });
+      const j = await r.json();
+      if (!r.ok) throw new Error(j.error ?? "checkin_failed");
+      return j as { ok: true; voucher: MembershipVoucher };
+    },
+    onSuccess: (data) => {
+      qc.invalidateQueries({ queryKey: ["/api/customer/orders"] });
+      setQrVoucher(data.voucher);
+    },
+    onError: (e: any) => {
+      toast({
+        title: "Could not create wash QR",
+        description: e?.message ?? "Please try again.",
+        variant: "destructive",
+      });
+    },
+  });
 
   const reset = () => {
     setForm(blank);
@@ -336,13 +383,30 @@ export function VehiclesTab({ cars }: Props) {
               </p>
             </div>
           </div>
-          <Link
-            href="/checkout"
-            className="inline-flex items-center justify-center gap-1.5 px-4 py-2.5 bg-gradient-to-r from-purple-600 to-orange-500 text-white rounded-xl font-black border-2 border-black shadow hover:translate-y-[-1px] transition-transform whitespace-nowrap"
-            data-testid="button-nudge-book-wash"
-          >
-            <Droplet className="w-4 h-4" /> Pay & Queue Now
-          </Link>
+          {isUnlimitedCar(overdue) ? (
+            <button
+              type="button"
+              onClick={() => checkin.mutate(overdue.id)}
+              disabled={checkin.isPending}
+              className="inline-flex items-center justify-center gap-1.5 px-4 py-2.5 bg-gradient-to-r from-emerald-500 to-green-600 text-white rounded-xl font-black border-2 border-black shadow hover:translate-y-[-1px] transition-transform whitespace-nowrap disabled:opacity-60"
+              data-testid="button-nudge-free-wash"
+            >
+              {checkin.isPending ? (
+                <Loader2 className="w-4 h-4 animate-spin" />
+              ) : (
+                <Sparkles className="w-4 h-4" />
+              )}
+              Free wash
+            </button>
+          ) : (
+            <Link
+              href="/checkout"
+              className="inline-flex items-center justify-center gap-1.5 px-4 py-2.5 bg-gradient-to-r from-purple-600 to-orange-500 text-white rounded-xl font-black border-2 border-black shadow hover:translate-y-[-1px] transition-transform whitespace-nowrap"
+              data-testid="button-nudge-book-wash"
+            >
+              <Droplet className="w-4 h-4" /> Pay & Queue Now
+            </Link>
+          )}
         </motion.div>
       )}
 
@@ -370,6 +434,7 @@ export function VehiclesTab({ cars }: Props) {
             const grad = carGradient(c.color, idx);
             const isFav = c.id === favoriteId && c.total_washes > 0;
             const due = needsWash(c);
+            const unlimited = isUnlimitedCar(c);
             const ageDays = daysSince(c.last_seen_at);
             return (
               <motion.article
@@ -478,17 +543,35 @@ export function VehiclesTab({ cars }: Props) {
                   </div>
                 </div>
 
-                {/* Per-card "Pay & Queue Now" CTA appears only when the
-                    car is overdue. Sits at the bottom so the gradient hero
-                    stays clean, full-width on mobile, easy thumb target. */}
-                {due && (
-                  <Link
-                    href="/checkout"
-                    className="flex items-center justify-center gap-1.5 py-2.5 bg-gradient-to-r from-purple-600 to-orange-500 text-white text-sm font-black border-t-2 border-black hover:translate-y-[-1px] transition-transform"
-                    data-testid={`button-card-book-${c.id}`}
+                {/* Bottom CTA. Unlimited members get a free-wash button
+                    (generates the membership QR — no payment) and it always
+                    shows, since their wash is covered any time. Everyone else
+                    only sees "Pay & Queue Now" once the car is overdue. */}
+                {unlimited ? (
+                  <button
+                    type="button"
+                    onClick={() => checkin.mutate(c.id)}
+                    disabled={checkin.isPending}
+                    className="w-full flex items-center justify-center gap-1.5 py-2.5 bg-gradient-to-r from-emerald-500 to-green-600 text-white text-sm font-black border-t-2 border-black hover:translate-y-[-1px] transition-transform disabled:opacity-60"
+                    data-testid={`button-card-free-wash-${c.id}`}
                   >
-                    <Droplet className="w-4 h-4" /> Pay & Queue Now
-                  </Link>
+                    {checkin.isPending ? (
+                      <Loader2 className="w-4 h-4 animate-spin" />
+                    ) : (
+                      <Sparkles className="w-4 h-4" />
+                    )}
+                    Free wash
+                  </button>
+                ) : (
+                  due && (
+                    <Link
+                      href="/checkout"
+                      className="flex items-center justify-center gap-1.5 py-2.5 bg-gradient-to-r from-purple-600 to-orange-500 text-white text-sm font-black border-t-2 border-black hover:translate-y-[-1px] transition-transform"
+                      data-testid={`button-card-book-${c.id}`}
+                    >
+                      <Droplet className="w-4 h-4" /> Pay & Queue Now
+                    </Link>
+                  )
                 )}
 
                 {/* Edit + Delete buttons (always visible on touch devices) */}
@@ -759,6 +842,14 @@ export function VehiclesTab({ cars }: Props) {
           </AlertDialogFooter>
         </AlertDialogContent>
       </AlertDialog>
+
+      {qrVoucher && (
+        <MembershipWashQrDialog
+          open={!!qrVoucher}
+          onClose={() => setQrVoucher(null)}
+          voucher={qrVoucher}
+        />
+      )}
     </div>
   );
 }
