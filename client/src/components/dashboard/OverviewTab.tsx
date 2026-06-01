@@ -1,7 +1,15 @@
-import { useQuery } from "@tanstack/react-query";
-import { ArrowRight, Crown, Droplet } from "lucide-react";
+import { useEffect, useState } from "react";
+import { useQuery, useMutation } from "@tanstack/react-query";
+import { ArrowRight, Crown, Droplet, QrCode } from "lucide-react";
 import { Link } from "wouter";
+import QRCodeLib from "qrcode";
+import { apiRequest, queryClient } from "@/lib/queryClient";
+import { useToast } from "@/hooks/use-toast";
 import { Badge } from "@/components/ui/badge";
+import { Button } from "@/components/ui/button";
+import {
+  Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter,
+} from "@/components/ui/dialog";
 import {
   MeResp,
   OrderRow,
@@ -257,6 +265,38 @@ function ActiveSubscriptionHero({
   const isUnlimited = membership.kind === "unlimited";
   const planName = isUnlimited ? "Unlimited Xpress" : "Wash Pack";
 
+  // An active unlimited plan that's within 7 days of expiry still gets
+  // the "Renew" button (so customers can keep their plan going). Anything
+  // comfortably active shows the "Show wash QR" action instead.
+  const isExpiringSoon =
+    !!membership.expires_at &&
+    new Date(membership.expires_at).getTime() - Date.now() <=
+      7 * 24 * 60 * 60 * 1000;
+  const showWashQr = isUnlimited && !isExpiringSoon;
+
+  const { toast } = useToast();
+  const [qrVoucher, setQrVoucher] = useState<MembershipVoucher | null>(null);
+
+  const checkin = useMutation({
+    mutationFn: async () => {
+      const r = await apiRequest("POST", "/api/customer/membership/checkin", {});
+      const j = await r.json();
+      if (!r.ok) throw new Error(j.error ?? "checkin_failed");
+      return j as { ok: true; voucher: MembershipVoucher };
+    },
+    onSuccess: (data) => {
+      queryClient.invalidateQueries({ queryKey: ["/api/customer/orders"] });
+      setQrVoucher(data.voucher);
+    },
+    onError: (e: any) => {
+      toast({
+        title: "Could not create wash QR",
+        description: e?.message ?? "Please try again.",
+        variant: "destructive",
+      });
+    },
+  });
+
   const TWINKLES = [
     { top: 12, left: "30%", size: 11, delay: "0s" },
     { top: 70, left: "55%", size: 8, delay: "0.4s" },
@@ -366,13 +406,25 @@ function ActiveSubscriptionHero({
           </p>
         </div>
         <div className="flex flex-col gap-2 md:items-end shrink-0">
-          <Link
-            href={isUnlimited ? "/subscriptions" : "/checkout"}
-            className="inline-flex items-center justify-center gap-1 px-5 py-3 bg-white text-gray-900 rounded-xl font-bold border-2 border-black whitespace-nowrap hover:translate-x-[-1px] hover:translate-y-[-1px] transition-transform"
-            data-testid="button-hero-pay"
-          >
-            {isUnlimited ? "Renew" : "Use my plan"} <ArrowRight className="w-4 h-4" />
-          </Link>
+          {showWashQr ? (
+            <button
+              onClick={() => checkin.mutate()}
+              disabled={checkin.isPending}
+              className="inline-flex items-center justify-center gap-1.5 px-5 py-3 bg-white text-gray-900 rounded-xl font-bold border-2 border-black whitespace-nowrap hover:translate-x-[-1px] hover:translate-y-[-1px] transition-transform disabled:opacity-70"
+              data-testid="button-hero-wash-qr"
+            >
+              <QrCode className="w-4 h-4" />
+              {checkin.isPending ? "Preparing…" : "Show wash QR"}
+            </button>
+          ) : (
+            <Link
+              href={isUnlimited ? "/subscriptions" : "/checkout"}
+              className="inline-flex items-center justify-center gap-1 px-5 py-3 bg-white text-gray-900 rounded-xl font-bold border-2 border-black whitespace-nowrap hover:translate-x-[-1px] hover:translate-y-[-1px] transition-transform"
+              data-testid="button-hero-pay"
+            >
+              {isUnlimited ? "Renew" : "Use my plan"} <ArrowRight className="w-4 h-4" />
+            </Link>
+          )}
           <button
             onClick={onManage}
             className="text-xs font-bold hover:underline"
@@ -383,7 +435,105 @@ function ActiveSubscriptionHero({
           </button>
         </div>
       </div>
+
+      {qrVoucher && (
+        <MembershipWashQrDialog
+          open={!!qrVoucher}
+          onClose={() => setQrVoucher(null)}
+          voucher={qrVoucher}
+        />
+      )}
     </article>
+  );
+}
+
+// ----------------------------------------------------------------------
+// MembershipWashQrDialog — shows the Unlimited Xpress wash QR. Staff
+// scan it at the lane (same scanner as the loyalty free-wash voucher),
+// which queues the wash for free under the membership. Mirrors the
+// VoucherDialog in LoyaltyCard.tsx.
+// ----------------------------------------------------------------------
+interface MembershipVoucher {
+  order_id: string;
+  payment_ref: string;
+  branch_id: number | null;
+  branch_name: string | null;
+  plate: string;
+  package_name: string;
+  qr_payload: string;
+}
+
+function MembershipWashQrDialog({
+  open, onClose, voucher,
+}: {
+  open: boolean;
+  onClose: () => void;
+  voucher: MembershipVoucher;
+}) {
+  const [qrDataUrl, setQrDataUrl] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (!open) return;
+    let cancelled = false;
+    QRCodeLib.toDataURL(voucher.qr_payload, {
+      width: 280,
+      margin: 1,
+      color: { dark: "#000000", light: "#ffffff" },
+    })
+      .then((url) => { if (!cancelled) setQrDataUrl(url); })
+      .catch((err) => {
+        console.error("[membership.wash] QR generation failed:", err);
+      });
+    return () => { cancelled = true; };
+  }, [open, voucher.qr_payload]);
+
+  return (
+    <Dialog open={open} onOpenChange={(v) => { if (!v) onClose(); }}>
+      <DialogContent className="border-2 border-black sm:max-w-md">
+        <DialogHeader>
+          <DialogTitle className="flex items-center gap-2">
+            <Crown className="w-5 h-5 text-cuci-secondary" />
+            Your Unlimited wash QR
+          </DialogTitle>
+          <DialogDescription>
+            Show this code to staff at any Cuci Xpress branch. They'll
+            scan it and queue your <strong>{voucher.package_name}</strong> wash
+            for <strong className="font-mono">{voucher.plate}</strong> — free
+            under your membership.
+          </DialogDescription>
+        </DialogHeader>
+        <div className="flex justify-center py-4 min-h-[280px] items-center">
+          {qrDataUrl ? (
+            <img
+              src={qrDataUrl}
+              alt="Unlimited wash QR code"
+              width={280}
+              height={280}
+              className="rounded-md"
+              data-testid="img-membership-qr"
+            />
+          ) : (
+            <div className="text-xs text-gray-400">Generating QR…</div>
+          )}
+        </div>
+        <div className="text-center text-xs text-gray-600 space-y-1">
+          <div><strong>Plan:</strong> {voucher.package_name}</div>
+          <div><strong>Plate:</strong> {voucher.plate}</div>
+          <div className="text-[10px] text-gray-400">
+            Valid until used · ref {voucher.payment_ref}
+          </div>
+        </div>
+        <DialogFooter>
+          <Button
+            variant="outline"
+            className="border-2 border-black w-full"
+            onClick={onClose}
+          >
+            Close
+          </Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
   );
 }
 

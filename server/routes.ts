@@ -3173,7 +3173,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
             LEFT JOIN branches  b ON b.id = o.branch_id
             LEFT JOIN cars    car ON car.id = o.vehicle_id
             LEFT JOIN customers c ON c.id = car.customer_id
-           WHERE o.qr_provider IN ('pocket_pay','loyalty')
+           WHERE o.qr_provider IN ('pocket_pay','loyalty','membership')
              AND o.payment_ref = ${ppOrderId}
            LIMIT 1
            FOR UPDATE OF o
@@ -4822,6 +4822,133 @@ export async function registerRoutes(app: Express): Promise<Server> {
     } catch (err) {
       console.error('[customer.loyalty.redeem] failed:', err);
       return res.status(500).json({ error: 'redeem_failed' });
+    }
+  });
+
+  // POST /api/customer/membership/checkin — Membership Wash QR.
+  // The logged-in customer with an ACTIVE Unlimited membership taps
+  // "Show wash QR" on the dashboard. We create (or reuse) a branchless
+  // B$0 order for that membership's vehicle marked qr_provider='membership'
+  // and return a CUCI_XPRESS_PAYMENT QR payload — exactly the shape the
+  // loyalty free-wash voucher uses. Staff scan it at the lane, where
+  // /api/verify-qr (now widened to 'membership') allocates a T-NNN ticket,
+  // stamps the scanning branch, and queues the wash at B$0 as
+  // "Unlimited Xpress". Reuses the most recent still-pending membership
+  // order for that vehicle instead of stacking duplicates; rescans of the
+  // same QR are idempotent at the verify-qr layer.
+  app.post('/api/customer/membership/checkin', requireLuciaUser, async (req, res) => {
+    const userId = Number(req.lucia!.user!.id);
+
+    try {
+      const out = await db.transaction(async (tx) => {
+        // 1. Resolve THIS user's active unlimited membership + its vehicle.
+        const membership = (await tx.execute(sql`
+          SELECT m.id, m.vehicle_id, m.status, m.expires_at,
+                 ca.license_plate AS vehicle_plate
+            FROM memberships m
+            JOIN customers c ON c.id = m.customer_id
+            LEFT JOIN cars ca ON ca.id = m.vehicle_id
+           WHERE c.user_id = ${userId}
+             AND m.kind   = 'unlimited'
+             AND m.status = 'active'
+             AND (m.expires_at IS NULL OR m.expires_at > now())
+           ORDER BY m.created_at DESC
+           LIMIT 1
+           FOR UPDATE OF m
+        `)).rows[0] as
+          | { id: string; vehicle_id: number | null; status: string; expires_at: string | null; vehicle_plate: string | null }
+          | undefined;
+
+        if (!membership) {
+          return { http: 404, body: { error: 'no_active_unlimited_membership' } };
+        }
+        if (!membership.vehicle_id || !membership.vehicle_plate) {
+          // Unlimited plans are single-car; without a linked plate we
+          // can't create the wash order (orders.plate is NOT NULL).
+          return { http: 409, body: { error: 'membership_no_vehicle' } };
+        }
+        const vehicleId = membership.vehicle_id;
+        const plate     = membership.vehicle_plate;
+
+        // 2. Reuse the most recent still-pending membership order for this
+        //    vehicle instead of stacking duplicates. "Pending" = paid (B$0)
+        //    but not yet ticketed at a lane.
+        const existing = (await tx.execute(sql`
+          SELECT id, payment_ref FROM orders
+           WHERE vehicle_id  = ${vehicleId}
+             AND qr_provider = 'membership'
+             AND status      = 'paid'
+             AND ticket_code IS NULL
+           ORDER BY created_at DESC
+           LIMIT 1
+        `)).rows[0] as { id: string; payment_ref: string } | undefined;
+
+        if (existing) {
+          return {
+            http: 200,
+            body: {
+              ok: true,
+              voucher: {
+                order_id: existing.id,
+                payment_ref: existing.payment_ref,
+                branch_id: null,
+                branch_name: null,
+                plate,
+                package_name: 'Unlimited Xpress',
+                qr_payload: JSON.stringify({
+                  type: 'CUCI_XPRESS_PAYMENT',
+                  order_id: existing.payment_ref,
+                }),
+              },
+            },
+          };
+        }
+
+        // 3. Create a fresh branchless B$0 membership wash order. Branch is
+        //    stamped when the cashier scans the QR at a lane.
+        const orderId    = `ord_mem_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 8)}`;
+        const paymentRef = `mem_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 8)}`;
+
+        await tx.execute(sql`
+          INSERT INTO orders (
+            id, branch_id, customer_id, vehicle_id, plate,
+            package_id, package_name, package_price_cents,
+            addons, subtotal_cents, total_cents,
+            payment_method, payment_ref, qr_provider,
+            ticket_code, status, customer_name_walkin
+          ) VALUES (
+            ${orderId}, NULL, ${userId}, ${vehicleId}, ${plate},
+            NULL, 'Unlimited Xpress', 0,
+            '[]'::jsonb, 0, 0,
+            'subscription', ${paymentRef}, 'membership',
+            NULL, 'paid', NULL
+          )
+        `);
+
+        return {
+          http: 201,
+          body: {
+            ok: true,
+            voucher: {
+              order_id: orderId,
+              payment_ref: paymentRef,
+              branch_id: null,
+              branch_name: null,
+              plate,
+              package_name: 'Unlimited Xpress',
+              qr_payload: JSON.stringify({
+                type: 'CUCI_XPRESS_PAYMENT',
+                order_id: paymentRef,
+              }),
+            },
+          },
+        };
+      });
+
+      return res.status(out.http).json(out.body);
+    } catch (err) {
+      console.error('[customer.membership.checkin] failed:', err);
+      return res.status(500).json({ error: 'checkin_failed' });
     }
   });
 
