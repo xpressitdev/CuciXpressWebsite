@@ -609,21 +609,30 @@ export default function POS() {
     }
   };
 
-  const createOrder = useMutation({
-    mutationFn: async () => {
+  const createOrder = useMutation<
+    { ok: true; order: CreatedOrder },
+    Error,
+    { unlimited?: boolean } | void
+  >({
+    mutationFn: async (vars) => {
+      // The "Free Unlimited wash" path skips package/add-on/payment
+      // selection entirely: it sends no package_id and forces a
+      // subscription redemption against the active Unlimited membership.
+      // The server synthesizes a B$0 "Unlimited Xpress" line.
+      const oneTap = !!vars && (vars as { unlimited?: boolean }).unlimited === true;
       const res = await apiRequest("POST", "/api/pos/orders", {
-        package_id: packageId,
+        package_id: oneTap ? null : packageId,
         plate: plate.trim(),
-        addon_ids: Array.from(selectedAddons),
-        payment_method: paymentMethod,
-        payment_ref: paymentRef.trim() || null,
+        addon_ids: oneTap ? [] : Array.from(selectedAddons),
+        payment_method: oneTap ? "subscription" : paymentMethod,
+        payment_ref: oneTap ? null : paymentRef.trim() || null,
         branch_id: branchId,
-        item_notes: itemNotes.trim() || null,
+        item_notes: oneTap ? null : itemNotes.trim() || null,
         vehicle_id: matchedVehicleId,
-        customer_phone: customerPhone.trim() || null,
-        customer_name: customerName.trim() || null,
+        customer_phone: oneTap ? null : customerPhone.trim() || null,
+        customer_name: oneTap ? null : customerName.trim() || null,
         membership_id:
-          paymentMethod === "subscription" && activeMembership
+          (oneTap || paymentMethod === "subscription") && activeMembership
             ? activeMembership.id
             : null,
       });
@@ -635,7 +644,7 @@ export default function POS() {
         queryKey: ["/api/pos/orders/today", branchId],
       });
       // Refresh membership balance after a redemption.
-      if (paymentMethod === "subscription") {
+      if (data.order.payment_method === "subscription") {
         queryClient.invalidateQueries({
           queryKey: ["/api/pos/memberships/active"],
         });
@@ -1415,6 +1424,38 @@ export default function POS() {
                       No active wash pack found for this customer.
                       Pick a different payment method or sell a pack first.
                     </p>
+                  )}
+                  {activeMembership?.kind === "unlimited" && (
+                    <div className="space-y-1">
+                      <Button
+                        type="button"
+                        className="w-full bg-emerald-600 hover:bg-emerald-700 text-white"
+                        size="lg"
+                        disabled={
+                          plate.trim().length === 0 ||
+                          branchId === null ||
+                          createOrder.isPending
+                        }
+                        onClick={() => createOrder.mutate({ unlimited: true })}
+                        data-testid="button-unlimited-wash"
+                      >
+                        {createOrder.isPending ? (
+                          <>
+                            <Loader2 className="w-4 h-4 mr-2 animate-spin" />
+                            Submitting…
+                          </>
+                        ) : (
+                          <>
+                            <ShieldCheck className="w-4 h-4 mr-2" />
+                            Free Unlimited wash · B$0
+                          </>
+                        )}
+                      </Button>
+                      <p className="text-xs text-gray-500 text-center">
+                        Covers the wash instantly. Use the form below only to
+                        add paid extras.
+                      </p>
+                    </div>
                   )}
                   <Button
                     className="w-full"

@@ -1,1 +1,2 @@
 - [Auth session cookies](auth-session-cookies.md) — customer login dropping on mobile? Check Lucia `sessionCookie.expires` (true=persistent, false=dies on tab close), not session-expiry bugs.
+- [Staging DB schema drift](staging-db-schema-drift.md) — STAGING_DATABASE_URL is an older snapshot; apply migrations/manual/*.sql (idempotent) before running DB-backed tests, never patch dev/prod.

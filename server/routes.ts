@@ -5414,7 +5414,9 @@ export async function registerRoutes(app: Express): Promise<Server> {
   // The server authoritatively recomputes the price from the catalog and
   // generates a per-branch-per-day ticket code.
   const posOrderSchema = z.object({
-    package_id: z.string().min(1),
+    // Optional: the streamlined "Free Unlimited wash" path omits it and
+    // the server synthesizes a B$0 "Unlimited Xpress" line (see handler).
+    package_id: z.string().min(1).optional().nullable(),
     plate: z.string().trim().min(1).max(20),
     addon_ids: z.array(z.string().min(1)).default([]),
     payment_method: z.enum([
@@ -5500,18 +5502,40 @@ export async function registerRoutes(app: Express): Promise<Server> {
       // mid-flow failure can't leak a wash from a customer's pack or
       // produce an order without its redemption row.
       const result = await db.transaction(async (tx) => {
-        // 1. Look up the package + flat price (2026-05-04_03 — no size).
-        const pkgRows = (await tx.execute(sql`
-          SELECT id, name, price_cents
-            FROM packages
-           WHERE id = ${body.package_id}
-             AND is_active = true
-           LIMIT 1
-        `)).rows as Array<{ id: string; name: string; price_cents: number }>;
-        if (pkgRows.length === 0) {
-          throw new PosOrderError(400, 'package_not_available');
+        // 1. Resolve the package + flat price (2026-05-04_03 — no size).
+        //    Normally the cashier selects a package from the catalog. The
+        //    streamlined "Free Unlimited wash" path omits package_id: we
+        //    synthesize a B$0 "Unlimited Xpress" line and require the order
+        //    to redeem an active *unlimited* membership (enforced in the
+        //    redemption block below).
+        const isUnlimitedOneTap = !body.package_id;
+        let pkg: { id: string | null; name: string; price_cents: number };
+        if (isUnlimitedOneTap) {
+          if (body.payment_method !== 'subscription') {
+            throw new PosOrderError(400, 'package_required');
+          }
+          // The membership discount below zeroes the entire subtotal. With no
+          // package line, any attached add-ons would ride along for free —
+          // reject them so a packageless redemption can't be abused to give
+          // away paid extras. Paid add-ons must go through a normal package
+          // order (or be sold as a separate line).
+          if (body.addon_ids.length > 0) {
+            throw new PosOrderError(400, 'addons_not_allowed_on_unlimited');
+          }
+          pkg = { id: null, name: 'Unlimited Xpress', price_cents: 0 };
+        } else {
+          const pkgRows = (await tx.execute(sql`
+            SELECT id, name, price_cents
+              FROM packages
+             WHERE id = ${body.package_id}
+               AND is_active = true
+             LIMIT 1
+          `)).rows as Array<{ id: string; name: string; price_cents: number }>;
+          if (pkgRows.length === 0) {
+            throw new PosOrderError(400, 'package_not_available');
+          }
+          pkg = pkgRows[0];
         }
-        const pkg = pkgRows[0];
 
         // 2. Look up + snapshot the requested addons.
         let addonSnapshots: Array<{ id: string; name: string; price_cents: number }> = [];
@@ -5665,6 +5689,11 @@ export async function registerRoutes(app: Express): Promise<Server> {
           }
           if (m.vehicle_id != null && m.vehicle_id !== resolvedVehicleId) {
             throw new PosOrderError(409, 'membership_wrong_vehicle');
+          }
+          // The packageless one-tap path is for unlimited plans only —
+          // a wash-pack redemption must still go through a real package.
+          if (isUnlimitedOneTap && m.kind !== 'unlimited') {
+            throw new PosOrderError(400, 'unlimited_required');
           }
           // Kind-specific gating:
           //   * pack      → must have washes left; decrement after redeem.
