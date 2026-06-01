@@ -171,7 +171,7 @@ export default function Stats() {
         >
           <div className="cuci-eyebrow mb-3">By the numbers</div>
           <h2 className="text-4xl md:text-5xl font-extrabold tracking-tight text-gray-900 mb-4">
-            Our <span className="text-cuci-primary">story</span>
+            Our <span className="text-cuci-primary">Story</span>
           </h2>
           <p className="text-lg md:text-xl text-gray-600 max-w-3xl mx-auto">
             From humble beginnings to becoming the most trusted Xpress drive-thru car wash service, our numbers speak for themselves.
