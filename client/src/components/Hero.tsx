@@ -2,6 +2,7 @@ import { useState } from "react";
 import { motion } from "framer-motion";
 import { useLocation } from "wouter";
 import LiveQueueWidget from "@/components/LiveQueueWidget";
+import GoogleReviewBadge from "@/components/GoogleReviewBadge";
 
 export default function Hero() {
   const [location] = useLocation();
@@ -80,6 +81,7 @@ export default function Hero() {
                 View Pricing →
               </motion.button>
             </div>
+            <GoogleReviewBadge />
           </motion.div>
           <motion.div
             initial={{ opacity: 0, x: 50 }}
