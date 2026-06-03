@@ -164,10 +164,10 @@ export function DashSidebar({
       <div className="px-6 pt-6 pb-8">
         <Link href="/" className="block">
           <span
-            className="text-2xl font-black bg-gradient-to-r from-cuci-primary to-cuci-secondary bg-clip-text text-transparent"
+            className="text-2xl font-black text-cuci-primary"
             data-testid="link-dash-brand"
           >
-            CuciXpress
+            Cuci<span className="text-cuci-secondary">Xpress</span>
           </span>
         </Link>
       </div>
@@ -379,8 +379,8 @@ export function DashMobileHeader({
         <span className="w-8 h-8 rounded-lg bg-gradient-to-br from-cuci-primary to-cuci-secondary grid place-items-center shrink-0">
           <Home className="w-4 h-4 text-white" />
         </span>
-        <span className="text-lg font-black bg-gradient-to-r from-cuci-primary to-cuci-secondary bg-clip-text text-transparent">
-          CuciXpress
+        <span className="text-lg font-black text-cuci-primary">
+          Cuci<span className="text-cuci-secondary">Xpress</span>
         </span>
       </Link>
 
