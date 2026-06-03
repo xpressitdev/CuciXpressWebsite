@@ -42,9 +42,7 @@ export default function Hero() {
               className={`text-xl text-gray-600 mb-2 leading-relaxed lg:mb-8 lg:line-clamp-none ${
                 expanded ? "" : "line-clamp-2"
               }`}
-            >
-              From a single location to five thriving branches, Cuci Xpress provides fast, consistent drive-thru car washes focused on convenience, reliability, and customer satisfaction. Built for Brunei. Washed for speed. It’s all part of our mission to Bina Wawasan Negara (BWN) — building time-saving services that help move Brunei forward.
-            </p>
+            >Cuci Xpress provides fast, consistent drive-thru car washes focused on convenience, reliability, and customer satisfaction. Built for Brunei. Washed for speed. It’s all part of our mission to Bina Wawasan Negara (BWN) — building time-saving services that help move Brunei forward.</p>
             <button
               type="button"
               onClick={() => setExpanded((v) => !v)}
