@@ -160,7 +160,7 @@ export function DashSidebar({
   const initials = initialsOf(fullName);
 
   return (
-    <aside className="hidden md:flex w-60 shrink-0 bg-white border-r border-gray-200 flex-col h-screen sticky top-0">
+    <aside className="hidden md:flex w-60 shrink-0 cuci-dash-nav border-r border-black/10 flex-col h-screen sticky top-0">
       <div className="px-6 pt-6 pb-8">
         <Link href="/" className="block">
           <span
@@ -184,8 +184,8 @@ export function DashSidebar({
               className={
                 "w-full flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm font-medium transition-colors " +
                 (isActive
-                  ? "bg-cuci-primary/10 text-cuci-primary"
-                  : "text-gray-700 hover:bg-gray-50")
+                  ? "bg-cuci-primary text-white"
+                  : "text-gray-700 hover:bg-white/70")
               }
             >
               <Icon className="w-4 h-4" />
@@ -195,7 +195,7 @@ export function DashSidebar({
         })}
       </nav>
 
-      <div className="p-3 border-t border-gray-200">
+      <div className="p-3 border-t border-black/10">
         <AccountMenu
           fullName={fullName}
           onLogout={onLogout}
@@ -205,7 +205,7 @@ export function DashSidebar({
           align="end"
           trigger={
             <button
-              className="w-full flex items-center gap-3 p-2 rounded-lg hover:bg-gray-50 text-left"
+              className="w-full flex items-center gap-3 p-2 rounded-lg hover:bg-white/70 text-left"
               data-testid="button-dash-account"
             >
               <div className="w-9 h-9 rounded-full bg-gradient-to-br from-cuci-primary to-cuci-secondary text-white grid place-items-center font-bold text-xs shrink-0">
@@ -218,9 +218,9 @@ export function DashSidebar({
                 >
                   {fullName}
                 </p>
-                <p className="text-[11px] text-gray-500 truncate">{membershipLabel}</p>
+                <p className="text-[11px] text-gray-600 truncate">{membershipLabel}</p>
               </div>
-              <ChevronUp className="w-4 h-4 text-gray-400 shrink-0" />
+              <ChevronUp className="w-4 h-4 text-gray-500 shrink-0" />
             </button>
           }
         />
@@ -370,7 +370,7 @@ export function DashMobileHeader({
 }) {
   const initials = initialsOf(fullName);
   return (
-    <header className="md:hidden sticky top-0 z-30 bg-white border-b border-gray-200 h-14 px-4 flex items-center justify-between">
+    <header className="md:hidden sticky top-0 z-30 cuci-dash-nav border-b border-black/10 h-14 px-4 flex items-center justify-between">
       <Link
         href="/"
         className="flex items-center gap-2"
@@ -393,7 +393,7 @@ export function DashMobileHeader({
         align="end"
         trigger={
           <button
-            className="flex items-center gap-2 rounded-full pl-1 pr-1 py-1 hover:bg-gray-50"
+            className="flex items-center gap-2 rounded-full pl-1 pr-1 py-1 hover:bg-white/70"
             data-testid="button-dash-account-mobile"
           >
             <div className="w-9 h-9 rounded-full bg-gradient-to-br from-cuci-primary to-cuci-secondary text-white grid place-items-center font-bold text-xs shrink-0">
@@ -416,7 +416,7 @@ export function DashMobileNav({
 }) {
   return (
     <nav
-      className="md:hidden fixed bottom-0 inset-x-0 z-30 bg-white border-t border-gray-200 grid grid-cols-5 pb-[env(safe-area-inset-bottom)]"
+      className="md:hidden fixed bottom-0 inset-x-0 z-30 cuci-dash-nav border-t border-black/10 grid grid-cols-5 pb-[env(safe-area-inset-bottom)]"
       data-testid="nav-dash-mobile"
     >
       {items.map((it) => {
@@ -429,10 +429,10 @@ export function DashMobileNav({
             data-testid={`nav-dash-mobile-${it.id}`}
             className={
               "flex flex-col items-center justify-center gap-0.5 py-2 text-[10px] font-semibold transition-colors " +
-              (isActive ? "text-cuci-primary" : "text-gray-500")
+              (isActive ? "text-cuci-primary" : "text-gray-600")
             }
           >
-            <Icon className={"w-5 h-5 " + (isActive ? "text-cuci-primary" : "text-gray-500")} />
+            <Icon className={"w-5 h-5 " + (isActive ? "text-cuci-primary" : "text-gray-600")} />
             {it.short}
           </button>
         );

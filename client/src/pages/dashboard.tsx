@@ -93,8 +93,8 @@ export default function DashboardPage() {
 
   if (whoLoading || !who?.authenticated || !me) {
     return (
-      <div className="min-h-screen bg-gray-50 grid place-items-center">
-        <p className="text-sm text-gray-500">Loading your dashboard…</p>
+      <div className="min-h-screen cuci-dash-bg grid place-items-center">
+        <p className="text-sm text-gray-600">Loading your dashboard…</p>
       </div>
     );
   }
@@ -120,7 +120,7 @@ export default function DashboardPage() {
     : "Pay-as-you-go";
 
   return (
-    <div className="min-h-screen bg-gray-50 flex">
+    <div className="min-h-screen cuci-dash-bg flex">
       <DashSidebar
         active={tab}
         onChange={setTab}

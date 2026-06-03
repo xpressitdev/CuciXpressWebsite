@@ -125,6 +125,20 @@ html {
     hsl(0, 0%, 99%);
 }
 
+/* Dashboard page background — a warm cream tint (a desaturated wash of
+   the brand orange hue) so the dashboard reads softer and less stark
+   than plain white, while white cards still pop on top of it. */
+.cuci-dash-bg {
+  background-color: hsl(38, 44%, 95%);
+}
+
+/* Dashboard navigation surface — a light lavender tint (a desaturated
+   wash of the brand purple hue). Gives the sidebar / mobile nav a clear
+   colour of its own, distinct from both the cream page and white cards. */
+.cuci-dash-nav {
+  background-color: hsl(257, 46%, 95%);
+}
+
 /* Neo-brutalist white card — bold border + offset shadow. */
 .cuci-card {
   @apply bg-white rounded-2xl border-2 border-black;
