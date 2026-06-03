@@ -30,12 +30,9 @@ export default function Hero() {
             className="text-center lg:text-left"
           >
             <h1 className="text-4xl md:text-6xl font-black tracking-tight text-gray-900 leading-[1.05] mb-6">
-              We've cleaned over{" "}
-              <span className="cuci-rainbow-text">120,000</span>{" "}
-              cars.
-              <span className="cuci-rainbow-text block">
-                And we're just getting started.
-              </span>
+              Drive in.
+              <span className="block">Drive out.</span>
+              <span className="cuci-rainbow-text block">Sparkling clean.</span>
             </h1>
             <p
               id="hero-description"
