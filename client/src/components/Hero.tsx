@@ -1,7 +1,6 @@
 import { motion } from "framer-motion";
-import { CheckCircle } from "lucide-react";
-import { Link, useLocation } from "wouter";
-import heroVideo from "../assets/hero-video.mp4";
+import { useLocation } from "wouter";
+import LiveQueueWidget from "@/components/LiveQueueWidget";
 
 export default function Hero() {
   const [location] = useLocation();
@@ -79,36 +78,7 @@ export default function Hero() {
             transition={{ duration: 0.8, delay: 0.2 }}
             className="relative"
           >
-            {/* Video Container */}
-            <div className="relative w-full h-0 pb-[56.25%] rounded-2xl overflow-hidden shadow-2xl bg-black">
-              <video
-                className="absolute inset-0 w-full h-full object-cover"
-                autoPlay
-                muted
-                loop
-                playsInline
-              >
-                <source src={heroVideo} type="video/mp4" />
-                Your browser does not support the video tag.
-              </video>
-            </div>
-            
-            <motion.div
-              initial={{ opacity: 0, y: 50 }}
-              animate={{ opacity: 1, y: 0 }}
-              transition={{ duration: 0.8, delay: 0.5 }}
-              className="absolute -bottom-6 -left-6 bg-white p-6 rounded-xl shadow-lg"
-            >
-              <div className="flex items-center space-x-4">
-                <div className="bg-cuci-primary/10 p-3 rounded-full">
-                  <CheckCircle className="w-8 h-8 text-cuci-primary" />
-                </div>
-                <div>
-                  <p className="text-sm text-gray-600">Xpress, Convenient, Clean</p>
-                  <p className="font-semibold text-gray-900">Guaranteed</p>
-                </div>
-              </div>
-            </motion.div>
+            <LiveQueueWidget embedded />
           </motion.div>
         </div>
       </div>

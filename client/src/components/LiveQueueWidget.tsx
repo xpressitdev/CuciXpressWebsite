@@ -18,7 +18,7 @@ interface Snap {
 
 const shortBranchName = (name: string) => name.replace(/^Cuci Xpress\s+/i, "");
 
-export default function LiveQueueWidget() {
+export default function LiveQueueWidget({ embedded = false }: { embedded?: boolean }) {
   const { data, isLoading } = useQuery<Snap>({
     queryKey: ["/api/queue/snapshot"],
     refetchInterval: 15_000,
@@ -33,12 +33,11 @@ export default function LiveQueueWidget() {
     minute: "2-digit",
   });
 
-  return (
-    <section className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-10">
-      <div
-        className="bg-white rounded-2xl border-2 border-black shadow-[4px_4px_0px_0px_rgba(0,0,0,0.9)] p-5 md:p-6 max-w-3xl mx-auto"
-        data-testid="widget-live-queue"
-      >
+  const card = (
+    <div
+      className="bg-white rounded-2xl border-2 border-black shadow-[4px_4px_0px_0px_rgba(0,0,0,0.9)] p-5 md:p-6 w-full"
+      data-testid="widget-live-queue"
+    >
         <div className="flex items-center justify-between mb-4 flex-wrap gap-2">
           <span className="inline-flex items-center gap-2 text-emerald-600 text-sm font-semibold">
             <span className="relative flex h-2 w-2">
@@ -132,7 +131,16 @@ export default function LiveQueueWidget() {
             See live queue <ArrowRight className="w-4 h-4" />
           </Link>
         </div>
-      </div>
+    </div>
+  );
+
+  if (embedded) {
+    return card;
+  }
+
+  return (
+    <section className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-10">
+      <div className="max-w-3xl mx-auto">{card}</div>
     </section>
   );
 }

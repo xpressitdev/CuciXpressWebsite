@@ -1,6 +1,6 @@
 import Navigation from "@/components/Navigation";
 import Hero from "@/components/Hero";
-import LiveQueueWidget from "@/components/LiveQueueWidget";
+import BrandVideo from "@/components/BrandVideo";
 import Stats from "@/components/Stats";
 import LocationsWithTestimonials from "@/components/LocationsWithTestimonials";
 import Gallery from "@/components/Gallery";
@@ -14,7 +14,7 @@ export default function Home() {
       <Navigation />
       <main>
         <Hero />
-        <LiveQueueWidget />
+        <BrandVideo />
         <Stats />
         <LocationsWithTestimonials />
         <Gallery />
