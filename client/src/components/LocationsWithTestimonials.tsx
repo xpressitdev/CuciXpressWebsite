@@ -188,22 +188,22 @@ export default function LocationsWithTestimonials() {
   const testimonials = reviewsData?.reviews || [];
 
   return (
-    <section id="locations" className="py-16 bg-gray-50">
+    <section id="locations" className="py-12 sm:py-16 bg-gray-50">
       <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
         <motion.div
           initial={{ opacity: 0, y: 20 }}
           whileInView={{ opacity: 1, y: 0 }}
           transition={{ duration: 0.6 }}
           viewport={{ once: true }}
-          className="text-center mb-16"
+          className="text-center mb-10 sm:mb-16"
         >
           <h2 className="text-4xl font-bold text-gray-900 mb-4">Find Us Near You</h2>
           <p className="text-xl text-gray-600 max-w-3xl mx-auto">With 5 locations across the region, regular Xpress car wash is always within reach.</p>
         </motion.div>
 
-        <div className="grid lg:grid-cols-2 gap-12 items-start">
+        <div className="grid lg:grid-cols-2 gap-8 lg:gap-12 items-start">
           {/* Locations Grid */}
-          <div className="space-y-6">
+          <div className="space-y-4 sm:space-y-6">
             {locations.map((location, index) => (
               <LocationCard
                 key={index}
@@ -220,9 +220,9 @@ export default function LocationsWithTestimonials() {
             whileInView={{ opacity: 1, y: 0 }}
             transition={{ duration: 0.6 }}
             viewport={{ once: true }}
-            className="bg-gray-100 rounded-2xl p-8"
+            className="bg-gray-100 rounded-2xl p-5 sm:p-8"
           >
-            <div className="text-center mb-8">
+            <div className="text-center mb-6 sm:mb-8">
               <h3 className="text-2xl font-bold text-gray-900 mb-2">What Our Customers Say</h3>
               <p className="text-gray-600">Reviews from {selectedLocation.name}</p>
             </div>

@@ -71,14 +71,14 @@ const serviceOptions: ServiceOption[] = [
 
 export default function ServicePricing() {
   return (
-    <section id="service-pricing" className="py-16 bg-white">
+    <section id="service-pricing" className="py-12 sm:py-16 bg-white">
       <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
         <motion.div
           initial={{ opacity: 0, y: 20 }}
           whileInView={{ opacity: 1, y: 0 }}
           transition={{ duration: 0.6 }}
           viewport={{ once: true }}
-          className="text-center mb-16"
+          className="text-center mb-10 sm:mb-16"
         >
           <h2 className="text-4xl font-bold text-gray-900 mb-4">Service Pricing</h2>
           <p className="text-xl text-gray-600 max-w-3xl mx-auto">
@@ -86,7 +86,7 @@ export default function ServicePricing() {
           </p>
         </motion.div>
 
-        <div className="grid md:grid-cols-3 gap-8 mb-12">
+        <div className="grid md:grid-cols-3 gap-6 sm:gap-8 mb-10 sm:mb-12">
           {serviceOptions.map((service, index) => (
             <motion.div
               key={service.name}
@@ -163,7 +163,7 @@ export default function ServicePricing() {
           whileInView={{ opacity: 1, y: 0 }}
           transition={{ duration: 0.6, delay: 0.2 }}
           viewport={{ once: true }}
-          className="text-center bg-gradient-to-br from-purple-50 to-orange-50 rounded-2xl p-8 mb-8"
+          className="text-center bg-gradient-to-br from-purple-50 to-orange-50 rounded-2xl p-5 sm:p-8 mb-6 sm:mb-8"
         >
           <h3 className="text-2xl font-bold text-gray-900 mb-4">Payment Methods</h3>
           <p className="text-gray-600 mb-8">We accept multiple convenient payment options</p>
@@ -247,7 +247,7 @@ export default function ServicePricing() {
           whileInView={{ opacity: 1, y: 0 }}
           transition={{ duration: 0.6, delay: 0.3 }}
           viewport={{ once: true }}
-          className="text-center bg-gray-50 rounded-2xl p-8"
+          className="text-center bg-gray-50 rounded-2xl p-5 sm:p-8"
         >
           <h3 className="text-2xl font-bold text-gray-900 mb-4">Ready to Get Started?</h3>
           <p className="text-gray-600 mb-6">

@@ -36,16 +36,16 @@ function StatCard({ icon, value, label, subtitle, prefix = "", suffix = "", colo
       initial={{ opacity: 0, y: 50 }}
       animate={isVisible ? { opacity: 1, y: 0 } : { opacity: 0, y: 50 }}
       transition={{ duration: 0.6 }}
-      className="cuci-kpi text-center p-8"
+      className="cuci-kpi text-center p-5 sm:p-8"
     >
       <div 
-        className="inline-flex items-center justify-center w-16 h-16 rounded-full mb-6"
+        className="inline-flex items-center justify-center w-14 h-14 sm:w-16 sm:h-16 rounded-full mb-4 sm:mb-6"
         style={{ backgroundColor: color === "text-cuci-primary" ? "#6C5CE7" : color === "text-cuci-secondary" ? "#FFA500" : "#22C55E" }}
       >
         <div className="text-white w-8 h-8 flex items-center justify-center">{icon}</div>
       </div>
       <motion.div
-        className="text-4xl md:text-5xl font-extrabold tracking-tight text-gray-900 mb-2"
+        className="text-3xl sm:text-4xl md:text-5xl font-extrabold tracking-tight text-gray-900 mb-2"
         initial={{ opacity: 0 }}
         animate={isVisible ? { opacity: 1 } : { opacity: 0 }}
         transition={{ duration: 1, delay: 0.3 }}
@@ -61,7 +61,7 @@ function StatCard({ icon, value, label, subtitle, prefix = "", suffix = "", colo
         )}
       </motion.div>
       <div className="text-center">
-        <p className="text-gray-600">{label}</p>
+        <p className="text-sm sm:text-base text-gray-600">{label}</p>
         {subtitle && (
           <p className="text-sm text-gray-500 mt-1">{subtitle}</p>
         )}
@@ -160,14 +160,14 @@ export default function Stats() {
   ];
 
   return (
-    <section id="stats" className="py-20 bg-white">
+    <section id="stats" className="py-12 sm:py-20 bg-white">
       <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
         <motion.div
           initial={{ opacity: 0, y: 30 }}
           whileInView={{ opacity: 1, y: 0 }}
           transition={{ duration: 0.6 }}
           viewport={{ once: true }}
-          className="text-center mb-16"
+          className="text-center mb-10 sm:mb-16"
         >
           <div className="cuci-eyebrow mb-3">By the numbers</div>
           <h2 className="text-4xl md:text-5xl font-extrabold tracking-tight text-gray-900 mb-4">
@@ -178,7 +178,7 @@ export default function Stats() {
           </p>
         </motion.div>
 
-        <div className="grid md:grid-cols-2 lg:grid-cols-4 gap-8">
+        <div className="grid grid-cols-2 lg:grid-cols-4 gap-4 sm:gap-8">
           {stats.map((stat, index) => (
             <StatCard key={index} {...stat} />
           ))}
@@ -189,9 +189,9 @@ export default function Stats() {
           whileInView={{ opacity: 1, y: 0 }}
           transition={{ duration: 0.6 }}
           viewport={{ once: true }}
-          className="text-center mt-16"
+          className="text-center mt-10 sm:mt-16"
         >
-          <div className="text-4xl md:text-6xl font-black tracking-tight text-gray-900 leading-[1.05]">
+          <div className="text-2xl sm:text-4xl md:text-6xl font-black tracking-tight text-gray-900 leading-[1.05]">
             We've cleaned over{" "}
             <span className="cuci-rainbow-text">120,000</span>{" "}
             cars.
