@@ -24,6 +24,7 @@ import {
   LogOut,
   MapPin,
   Plus,
+  Printer,
   ReceiptText,
   ShieldCheck,
   Upload,
@@ -60,6 +61,11 @@ import {
 import { useStaffAuth } from "@/hooks/useStaffAuth";
 import { useToast } from "@/hooks/use-toast";
 import { apiRequest } from "@/lib/queryClient";
+import {
+  printReceipt,
+  isBluetoothPrintingSupported,
+  BluetoothPrintError,
+} from "@/lib/btPrinter";
 
 type PaymentMethod =
   | "cash" | "bank_transfer" | "card" | "qr_code"
@@ -245,6 +251,7 @@ export default function POS() {
 
   // Confirmation state
   const [lastOrder, setLastOrder] = useState<CreatedOrder | null>(null);
+  const [printing, setPrinting] = useState<boolean>(false);
 
   // Branch resolution.
   // - Owner & manager pick a branch via the dropdown; choice persists
@@ -681,6 +688,65 @@ export default function POS() {
     // Keep packageId, paymentMethod sticky for fast successive orders.
   };
 
+  // On-demand Bluetooth thermal-printer receipt. Digital receipts remain the
+  // default; this only fires when a cashier taps "Print receipt".
+  const handlePrintReceipt = async () => {
+    if (!lastOrder) return;
+    if (!isBluetoothPrintingSupported()) {
+      toast({
+        variant: "destructive",
+        title: "Bluetooth printing unavailable",
+        description:
+          "Use Chrome or Edge on an Android tablet, phone, or computer over a secure connection. It isn't supported on iPhone/iPad.",
+      });
+      return;
+    }
+    setPrinting(true);
+    try {
+      const items = [
+        {
+          name: lastOrder.package_name,
+          price: formatBND(lastOrder.package_price_cents),
+        },
+        ...lastOrder.addons.map((a) => ({
+          name: `+ ${a.name}`,
+          price: formatBND(a.price_cents),
+        })),
+      ];
+      await printReceipt({
+        branchName: BRANCH_NAME_BY_ID[lastOrder.branch_id] ?? "Cuci Xpress",
+        ticketCode: lastOrder.ticket_code,
+        plate: lastOrder.plate,
+        dateTime: new Date().toLocaleString("en-GB", {
+          day: "2-digit",
+          month: "2-digit",
+          year: "numeric",
+          hour: "2-digit",
+          minute: "2-digit",
+          timeZone: "Asia/Brunei",
+        }),
+        items,
+        total: formatBND(lastOrder.total_cents),
+        paymentLabel: PAYMENT_LABELS[lastOrder.payment_method],
+        cashierName: staff?.name ?? undefined,
+      });
+      toast({ title: "Receipt sent to printer" });
+    } catch (e) {
+      const err = e as BluetoothPrintError;
+      if (err?.code === "cancelled") {
+        setPrinting(false);
+        return;
+      }
+      toast({
+        variant: "destructive",
+        title: "Couldn't print",
+        description: err?.message ?? "Please try again.",
+      });
+    } finally {
+      setPrinting(false);
+    }
+  };
+
   const toggleAddon = (id: string) => {
     setSelectedAddons((prev) => {
       const next = new Set(prev);
@@ -773,8 +839,27 @@ export default function POS() {
               </div>
 
               <button
+                onClick={handlePrintReceipt}
+                disabled={printing}
+                className="cuci-cta border-2 border-black bg-white text-gray-900 w-full rounded-lg px-4 py-3 mt-6 inline-flex items-center justify-center gap-2 text-base disabled:opacity-60"
+                data-testid="button-print-receipt"
+              >
+                {printing ? (
+                  <>
+                    <Loader2 className="w-5 h-5 animate-spin" />
+                    Printing…
+                  </>
+                ) : (
+                  <>
+                    <Printer className="w-5 h-5" />
+                    Print receipt
+                  </>
+                )}
+              </button>
+
+              <button
                 onClick={resetForNew}
-                className="cuci-cta bg-cuci-primary text-white w-full rounded-lg px-4 py-3 mt-6 inline-flex items-center justify-center gap-2 text-base"
+                className="cuci-cta bg-cuci-primary text-white w-full rounded-lg px-4 py-3 mt-3 inline-flex items-center justify-center gap-2 text-base"
                 data-testid="button-new-order"
               >
                 <Plus className="w-5 h-5" />
