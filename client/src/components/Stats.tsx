@@ -183,6 +183,23 @@ export default function Stats() {
             <StatCard key={index} {...stat} />
           ))}
         </div>
+
+        <motion.div
+          initial={{ opacity: 0, y: 30 }}
+          whileInView={{ opacity: 1, y: 0 }}
+          transition={{ duration: 0.6 }}
+          viewport={{ once: true }}
+          className="text-center mt-16"
+        >
+          <div className="text-4xl md:text-6xl font-black tracking-tight text-gray-900 leading-[1.05]">
+            We've cleaned over{" "}
+            <span className="cuci-rainbow-text">120,000</span>{" "}
+            cars.
+            <span className="cuci-rainbow-text block">
+              And we're just getting started.
+            </span>
+          </div>
+        </motion.div>
       </div>
     </section>
   );
