@@ -1,9 +1,11 @@
+import { useState } from "react";
 import { motion } from "framer-motion";
 import { useLocation } from "wouter";
 import LiveQueueWidget from "@/components/LiveQueueWidget";
 
 export default function Hero() {
   const [location] = useLocation();
+  const [expanded, setExpanded] = useState(false);
 
   const handleNavigation = (sectionId: string) => {
     if (location !== "/") {
@@ -35,12 +37,24 @@ export default function Hero() {
                 And we're just getting started.
               </span>
             </h1>
-            <p className="text-xl text-gray-600 mb-8 leading-relaxed">From a single location to five thriving branches, Cuci Xpress provides fast, consistent drive-thru car washes focused on convenience, reliability, and customer satisfaction.
-
-            Built for Brunei. Washed for speed.
-
-            It’s all part of our mission to Bina Wawasan Negara (BWN) — building time-saving services that help move Brunei forward.
-</p>
+            <p
+              id="hero-description"
+              className={`text-xl text-gray-600 mb-2 leading-relaxed lg:mb-8 lg:line-clamp-none ${
+                expanded ? "" : "line-clamp-2"
+              }`}
+            >
+              From a single location to five thriving branches, Cuci Xpress provides fast, consistent drive-thru car washes focused on convenience, reliability, and customer satisfaction. Built for Brunei. Washed for speed. It’s all part of our mission to Bina Wawasan Negara (BWN) — building time-saving services that help move Brunei forward.
+            </p>
+            <button
+              type="button"
+              onClick={() => setExpanded((v) => !v)}
+              aria-expanded={expanded}
+              aria-controls="hero-description"
+              className="lg:hidden mb-6 text-sm font-bold text-cuci-primary underline"
+              data-testid="button-toggle-hero-text"
+            >
+              {expanded ? "Show less" : "Read more"}
+            </button>
             <div className="flex flex-col sm:flex-row gap-4 justify-center lg:justify-start">
               <motion.button
                 whileHover={{ 
