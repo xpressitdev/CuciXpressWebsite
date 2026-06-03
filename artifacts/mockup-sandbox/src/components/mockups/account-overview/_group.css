@@ -14,6 +14,7 @@
 .hover\:bg-cuci-primary-dark:hover { background-color: var(--cuci-primary-dark); }
 .hover\:bg-cuci-secondary-dark:hover { background-color: var(--cuci-secondary-dark); }
 
+/* Page shell — soft purple->orange wash. */
 .cuci-page-bg {
   min-height: 100vh;
   background:
@@ -22,12 +23,31 @@
     hsl(0, 0%, 99%);
 }
 
+/* Neo-brutalist white card — bold border + offset shadow. */
 .cuci-card {
   background: #fff;
   border-radius: 1rem;
   border: 2px solid #000;
   box-shadow: 4px 4px 0px 0px rgba(0, 0, 0, 0.9);
 }
+
+/* Subtler card for dense lists. */
+.cuci-card-soft {
+  background: #fff;
+  border-radius: 0.75rem;
+  border: 1px solid #e5e7eb;
+}
+
+/* KPI tile — smaller shadow. */
+.cuci-kpi {
+  background: #fff;
+  border-radius: 0.75rem;
+  border: 2px solid #000;
+  padding: 1rem;
+  box-shadow: 3px 3px 0px 0px rgba(0, 0, 0, 0.9);
+  transition: transform 120ms ease, box-shadow 120ms ease;
+}
+.cuci-kpi:hover { transform: translate(-1px, -1px); box-shadow: 4px 4px 0px 0px rgba(0, 0, 0, 0.9); }
 
 .cuci-eyebrow {
   font-size: 0.75rem;
@@ -46,3 +66,16 @@
 }
 .cuci-cta:hover { transform: translate(-1px, -1px); box-shadow: 5px 5px 0px 0px rgba(0, 0, 0, 0.9); }
 .cuci-cta:active { transform: translate(2px, 2px); box-shadow: 1px 1px 0px 0px rgba(0, 0, 0, 0.9); }
+
+/* Live pulsing dot. */
+.cuci-live-dot { position: relative; display: inline-flex; width: 0.5rem; height: 0.5rem; }
+.cuci-live-dot::before {
+  content: ""; position: absolute; inset: 0; border-radius: 9999px;
+  background: hsl(142, 71%, 45%); opacity: 0.75;
+  animation: cuci-ping 1.5s cubic-bezier(0, 0, 0.2, 1) infinite;
+}
+.cuci-live-dot::after {
+  content: ""; position: relative; width: 0.5rem; height: 0.5rem;
+  border-radius: 9999px; background: hsl(142, 71%, 36%);
+}
+@keyframes cuci-ping { 75%, 100% { transform: scale(2); opacity: 0; } }

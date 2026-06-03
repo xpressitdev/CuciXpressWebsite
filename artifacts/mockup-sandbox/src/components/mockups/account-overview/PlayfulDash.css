@@ -1,0 +1,57 @@
+/* PlayfulDash.css */
+.playful-bg {
+  background-color: #fcf9f2;
+  background-image: radial-gradient(#e5e7eb 2px, transparent 2px);
+  background-size: 24px 24px;
+}
+
+.playful-card {
+  background: white;
+  border: 3px solid black;
+  border-radius: 20px;
+  box-shadow: 6px 6px 0px black;
+  transition: transform 0.15s, box-shadow 0.15s;
+}
+
+.playful-card:hover {
+  transform: translate(-2px, -2px);
+  box-shadow: 8px 8px 0px black;
+}
+
+.playful-button {
+  background: white;
+  border: 3px solid black;
+  border-radius: 16px;
+  box-shadow: 4px 4px 0px black;
+  font-weight: 800;
+  transition: all 0.1s;
+}
+
+.playful-button:active {
+  transform: translate(4px, 4px);
+  box-shadow: 0px 0px 0px black;
+}
+
+.sticker {
+  border: 2px solid black;
+  box-shadow: 2px 2px 0px black;
+}
+
+.playful-badge {
+  border: 3px solid black;
+  box-shadow: 4px 4px 0px black;
+  border-radius: 16px;
+}
+
+.playful-progress-bar {
+  border: 2px solid black;
+  border-radius: 99px;
+  overflow: hidden;
+}
+
+.playful-kpi {
+  border: 3px solid black;
+  box-shadow: 4px 4px 0px black;
+  border-radius: 16px;
+  background: white;
+}

@@ -1,0 +1,54 @@
+.bold-blocks-bg {
+  min-height: 100vh;
+  background-color: #f4f4f0;
+  background-image: radial-gradient(#000 1px, transparent 1px);
+  background-size: 20px 20px;
+}
+
+.bold-card {
+  background: #fff;
+  border: 4px solid #000;
+  box-shadow: 8px 8px 0px 0px #000;
+  transition: transform 0.1s, box-shadow 0.1s;
+}
+
+.bold-card:hover {
+  transform: translate(2px, 2px);
+  box-shadow: 6px 6px 0px 0px #000;
+}
+
+.bold-card-header {
+  border-bottom: 4px solid #000;
+}
+
+.bold-kpi {
+  background: #fff;
+  border: 4px solid #000;
+  box-shadow: 6px 6px 0px 0px #000;
+}
+
+.bold-kpi-val {
+  text-shadow: 2px 2px 0px rgba(0,0,0,0.1);
+}
+
+.bold-btn {
+  background: #fff;
+  border: 4px solid #000;
+  box-shadow: 4px 4px 0px 0px #000;
+  transition: all 0.1s;
+}
+
+.bold-btn:active {
+  transform: translate(4px, 4px);
+  box-shadow: 0px 0px 0px 0px #000;
+}
+
+.bold-btn-primary {
+  background: var(--cuci-primary);
+  color: #fff;
+}
+
+.bold-btn-secondary {
+  background: var(--cuci-secondary);
+  color: #000;
+}
