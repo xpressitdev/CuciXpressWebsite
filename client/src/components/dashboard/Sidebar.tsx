@@ -167,7 +167,7 @@ export function DashSidebar({
             className="text-2xl font-black text-cuci-primary"
             data-testid="link-dash-brand"
           >
-            Cuci<span className="text-cuci-secondary">Xpress</span>
+            Cuci <span className="text-cuci-secondary">Xpress</span>
           </span>
         </Link>
       </div>
@@ -380,7 +380,7 @@ export function DashMobileHeader({
           <Home className="w-4 h-4 text-white" />
         </span>
         <span className="text-lg font-black text-cuci-primary">
-          Cuci<span className="text-cuci-secondary">Xpress</span>
+          Cuci <span className="text-cuci-secondary">Xpress</span>
         </span>
       </Link>
 

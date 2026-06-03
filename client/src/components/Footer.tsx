@@ -87,8 +87,8 @@ export default function Footer() {
             className="lg:col-span-2"
           >
             <div className="flex items-center mb-6">
-              <span className="text-3xl font-bold text-cuci-primary">
-                Cuci<span className="text-cuci-secondary">Xpress</span>
+              <span className="text-3xl font-black text-cuci-primary">
+                Cuci <span className="text-cuci-secondary">Xpress</span>
               </span>
             </div>
             <p className="text-gray-300 mb-6 leading-relaxed">Brunei's drive-thru car wash — five branches, eight-minute washes, zero appointments. We've cleaned 120,000+ cars and counting.</p>

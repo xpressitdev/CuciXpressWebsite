@@ -83,10 +83,10 @@ export default function Navigation() {
         <div className="flex justify-between items-center h-16">
           <button
             onClick={goToHome}
-            className="text-2xl font-bold text-cuci-primary hover:opacity-80 transition-opacity whitespace-nowrap"
+            className="text-2xl font-black text-cuci-primary hover:opacity-80 transition-opacity whitespace-nowrap"
             data-testid="link-nav-brand"
           >
-            Cuci<span className="text-cuci-secondary">Xpress</span>
+            Cuci <span className="text-cuci-secondary">Xpress</span>
           </button>
 
           {/* Desktop Navigation */}
