@@ -10,12 +10,15 @@ import {
 import {
   Table, TableBody, TableCell, TableHead, TableHeader, TableRow,
 } from "@/components/ui/table";
+import {
+  Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter,
+} from "@/components/ui/dialog";
 import { Separator } from "@/components/ui/separator";
 import {
   Search, Phone, Car as CarIcon, Receipt, ChevronLeft, ChevronRight,
   Pencil, Save, X, MapPin, Globe, Clock, AlertTriangle, CheckCircle2,
   Download, Crown, AlertCircle, Building2, Sparkles, Users, History,
-  TrendingUp, Award, Medal,
+  TrendingUp, Award, Medal, UserPlus, Trash2,
 } from "lucide-react";
 import { apiRequest } from "@/lib/queryClient";
 import { useToast } from "@/hooks/use-toast";
@@ -158,11 +161,51 @@ interface CustomerDetailResp {
 }
 
 export default function CustomersTab() {
+  const queryClient = useQueryClient();
+  const { toast } = useToast();
   const [search, setSearch] = useState("");
   const [branch, setBranch] = useState("all");
   const [segment, setSegment] = useState("all");
   const [page, setPage] = useState(1);
   const [selectedId, setSelectedId] = useState<number | null>(null);
+
+  // POS Control Room: walk-in customer create.
+  const [newOpen, setNewOpen] = useState(false);
+  const [newPhone, setNewPhone] = useState("");
+  const [newName, setNewName] = useState("");
+  const [newNotes, setNewNotes] = useState("");
+
+  const createCustomer = useMutation({
+    mutationFn: async () =>
+      apiRequest("POST", "/api/admin/customers", {
+        phone: newPhone.trim(),
+        name: newName.trim(),
+        notes: newNotes.trim() || null,
+      }),
+    onSuccess: async (res) => {
+      const created = (await res.json()) as { customer?: { id: number } };
+      queryClient.invalidateQueries({ queryKey: ["/api/admin/customers"] });
+      queryClient.invalidateQueries({ queryKey: ["/api/admin/customers/stats"] });
+      toast({ title: "Customer added", description: newName.trim() });
+      setNewOpen(false);
+      setNewPhone("");
+      setNewName("");
+      setNewNotes("");
+      if (created?.customer?.id) setSelectedId(created.customer.id);
+    },
+    onError: (err: any) => {
+      const msg = String(err?.message ?? err);
+      toast({
+        title: "Could not add customer",
+        description: msg.includes("phone_taken")
+          ? "A customer with this phone number already exists."
+          : msg.includes("invalid")
+            ? "Please enter a valid name and phone number."
+            : msg,
+        variant: "destructive",
+      });
+    },
+  });
 
   const qs = new URLSearchParams();
   if (search.trim().length >= 2) qs.set("search", search.trim());
@@ -213,13 +256,24 @@ export default function CustomersTab() {
       <div className="lg:col-span-2 space-y-4">
         <Card className="cuci-card border-2 border-black">
           <CardHeader>
-            <div className="cuci-eyebrow">Relationship management</div>
-            <CardTitle className="text-2xl font-extrabold tracking-tight">
-              <span className="text-cuci-primary">Customers</span>
-            </CardTitle>
-            <p className="text-sm text-gray-600">
-              Search by name, phone, or plate. Click a row to see full profile, visit history, and lifetime spend.
-            </p>
+            <div className="flex items-start justify-between gap-3">
+              <div>
+                <div className="cuci-eyebrow">Relationship management</div>
+                <CardTitle className="text-2xl font-extrabold tracking-tight">
+                  <span className="text-cuci-primary">Customers</span>
+                </CardTitle>
+                <p className="text-sm text-gray-600">
+                  Search by name, phone, or plate. Click a row to see full profile, visit history, and lifetime spend.
+                </p>
+              </div>
+              <Button
+                className="cuci-cta border-2 border-black shrink-0 gap-1.5"
+                onClick={() => setNewOpen(true)}
+                data-testid="button-new-customer"
+              >
+                <UserPlus className="w-4 h-4" /> New customer
+              </Button>
+            </div>
           </CardHeader>
           <CardContent className="space-y-4">
             <div className="grid grid-cols-1 md:grid-cols-4 gap-3">
@@ -427,12 +481,67 @@ export default function CustomersTab() {
             {selectedId === null ? (
               <p className="text-gray-500 italic py-4 text-center">Click a customer to view their full profile.</p>
             ) : (
-              <CustomerDetail id={selectedId} key={selectedId} />
+              <CustomerDetail id={selectedId} key={selectedId} onDeleted={() => setSelectedId(null)} />
             )}
           </CardContent>
         </Card>
       </div>
       </div>
+
+      {/* New customer dialog */}
+      <Dialog open={newOpen} onOpenChange={setNewOpen}>
+        <DialogContent className="border-2 border-black">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2">
+              <UserPlus className="w-5 h-5 text-cuci-primary" /> New customer
+            </DialogTitle>
+          </DialogHeader>
+          <div className="space-y-3">
+            <div>
+              <label className="text-xs font-semibold text-gray-700 mb-1 block">Name</label>
+              <Input
+                placeholder="Customer name"
+                value={newName}
+                onChange={(e) => setNewName(e.target.value)}
+                data-testid="input-new-customer-name"
+              />
+            </div>
+            <div>
+              <label className="text-xs font-semibold text-gray-700 mb-1 block">Phone</label>
+              <Input
+                placeholder="e.g. 7123456"
+                value={newPhone}
+                onChange={(e) => setNewPhone(e.target.value)}
+                data-testid="input-new-customer-phone"
+              />
+            </div>
+            <div>
+              <label className="text-xs font-semibold text-gray-700 mb-1 block">Notes (optional)</label>
+              <textarea
+                className="w-full border-2 border-black rounded-md p-2 text-sm"
+                rows={2}
+                placeholder="Notes visible to staff only"
+                value={newNotes}
+                onChange={(e) => setNewNotes(e.target.value)}
+                data-testid="input-new-customer-notes"
+              />
+            </div>
+          </div>
+          <DialogFooter>
+            <Button variant="outline" className="border-2 border-black" onClick={() => setNewOpen(false)}>
+              Cancel
+            </Button>
+            <Button
+              className="cuci-cta border-2 border-black"
+              disabled={createCustomer.isPending || newName.trim().length === 0 || newPhone.trim().length === 0}
+              onClick={() => createCustomer.mutate()}
+              data-testid="button-save-new-customer"
+            >
+              <UserPlus className="w-4 h-4 mr-1" /> {createCustomer.isPending ? "Adding…" : "Add customer"}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }
@@ -912,7 +1021,7 @@ function LiabilitiesPanel() {
   );
 }
 
-function CustomerDetail({ id }: { id: number }) {
+function CustomerDetail({ id, onDeleted }: { id: number; onDeleted?: () => void }) {
   const queryClient = useQueryClient();
   const { toast } = useToast();
   const { data, isLoading, error } = useQuery<CustomerDetailResp>({
@@ -927,6 +1036,7 @@ function CustomerDetail({ id }: { id: number }) {
   const [editing, setEditing] = useState(false);
   const [editName, setEditName] = useState("");
   const [editNotes, setEditNotes] = useState("");
+  const [confirmDelete, setConfirmDelete] = useState(false);
 
   const update = useMutation({
     mutationFn: async (body: { name?: string; notes?: string | null }) => {
@@ -938,6 +1048,28 @@ function CustomerDetail({ id }: { id: number }) {
       setEditing(false);
     },
     onError: () => toast({ title: "Failed to save", variant: "destructive" }),
+  });
+
+  const remove = useMutation({
+    mutationFn: async () => apiRequest("DELETE", `/api/admin/customers/${id}`),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["/api/admin/customers"] });
+      queryClient.invalidateQueries({ queryKey: ["/api/admin/customers/stats"] });
+      toast({ title: "Customer deleted" });
+      setConfirmDelete(false);
+      onDeleted?.();
+    },
+    onError: (err: any) => {
+      const msg = String(err?.message ?? err);
+      toast({
+        title: "Could not delete customer",
+        description: msg.includes("has_memberships")
+          ? "This customer has active wash packs. Refund or expire those first."
+          : msg,
+        variant: "destructive",
+      });
+      setConfirmDelete(false);
+    },
   });
 
   if (isLoading) return <p className="text-sm text-gray-500">Loading…</p>;
@@ -998,11 +1130,49 @@ function CustomerDetail({ id }: { id: number }) {
                 </div>
               </div>
               {!isGhost && (
-                <Button size="sm" variant="outline" className="border-2 border-black h-8" onClick={startEdit} data-testid="button-edit-customer">
-                  <Pencil className="w-3 h-3 mr-1" /> Edit
-                </Button>
+                <div className="flex gap-1.5 shrink-0">
+                  <Button size="sm" variant="outline" className="border-2 border-black h-8" onClick={startEdit} data-testid="button-edit-customer">
+                    <Pencil className="w-3 h-3 mr-1" /> Edit
+                  </Button>
+                  <Button
+                    size="sm"
+                    variant="outline"
+                    className="border-2 border-red-500 text-red-600 hover:bg-red-50 h-8"
+                    onClick={() => setConfirmDelete(true)}
+                    data-testid="button-delete-customer"
+                  >
+                    <Trash2 className="w-3 h-3" />
+                  </Button>
+                </div>
               )}
             </div>
+
+            <Dialog open={confirmDelete} onOpenChange={setConfirmDelete}>
+              <DialogContent className="border-2 border-black">
+                <DialogHeader>
+                  <DialogTitle className="flex items-center gap-2">
+                    <AlertTriangle className="w-5 h-5 text-red-600" /> Delete customer?
+                  </DialogTitle>
+                </DialogHeader>
+                <p className="text-sm text-gray-700">
+                  This permanently removes <span className="font-semibold">{customer.name}</span> and
+                  unlinks their vehicles. Past orders and visit history are kept. This cannot be undone.
+                </p>
+                <DialogFooter>
+                  <Button variant="outline" className="border-2 border-black" onClick={() => setConfirmDelete(false)}>
+                    Cancel
+                  </Button>
+                  <Button
+                    className="bg-red-600 hover:bg-red-700 text-white border-2 border-black"
+                    disabled={remove.isPending}
+                    onClick={() => remove.mutate()}
+                    data-testid="button-confirm-delete-customer"
+                  >
+                    <Trash2 className="w-4 h-4 mr-1" /> {remove.isPending ? "Deleting…" : "Delete"}
+                  </Button>
+                </DialogFooter>
+              </DialogContent>
+            </Dialog>
             <div className="flex flex-wrap gap-1.5">
               {stats.vip_tier && <VipBadge tier={stats.vip_tier} />}
               {customer.user_id ? (

@@ -422,6 +422,9 @@ export const packages = pgTable("packages", {
   price_cents: integer("price_cents").notNull(),
   is_active: boolean("is_active").default(true).notNull(),
   sort_order: integer("sort_order").default(0).notNull(),
+  // POS Control Room (2026-06-05): optional grouping for the POS grid.
+  // NULL = "Uncategorised". FK is lazy so categories may be declared later.
+  category_id: text("category_id").references(() => categories.id, { onDelete: "set null" }),
   created_at: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
 });
 
@@ -430,6 +433,85 @@ export const insertPackageSchema = createInsertSchema(packages).omit({
 });
 export type Package = typeof packages.$inferSelect;
 export type InsertPackage = z.infer<typeof insertPackageSchema>;
+
+// ============================================================
+// POS CONTROL ROOM (Task #7, 2026-06-05)
+// Categories, Discounts, Promo codes, Payment methods.
+// Discounts / promo codes / payment methods drive POS checkout.
+// ============================================================
+
+// --- Categories (POS product grouping) -----------------------
+export const categories = pgTable("categories", {
+  id: text("id").primaryKey(),
+  name: text("name").notNull(),
+  sort_order: integer("sort_order").default(0).notNull(),
+  is_active: boolean("is_active").default(true).notNull(),
+  created_at: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
+});
+export const insertCategorySchema = createInsertSchema(categories).omit({
+  created_at: true,
+});
+export type Category = typeof categories.$inferSelect;
+export type InsertCategory = z.infer<typeof insertCategorySchema>;
+
+// --- Discounts (cashier-applied at checkout) -----------------
+// kind='percent' → value is a whole percent 1-100.
+// kind='fixed'   → value is an amount in BND cents.
+export const discounts = pgTable("discounts", {
+  id: text("id").primaryKey(),
+  name: text("name").notNull(),
+  kind: text("kind").notNull(), // 'percent' | 'fixed'
+  value: integer("value").notNull(),
+  is_active: boolean("is_active").default(true).notNull(),
+  sort_order: integer("sort_order").default(0).notNull(),
+  created_at: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
+});
+export const insertDiscountSchema = createInsertSchema(discounts).omit({
+  created_at: true,
+});
+export type Discount = typeof discounts.$inferSelect;
+export type InsertDiscount = z.infer<typeof insertDiscountSchema>;
+
+// --- Promo codes (customer-entered at checkout) --------------
+// Same value semantics as discounts. Optional date window + usage cap.
+export const promoCodes = pgTable("promo_codes", {
+  id: text("id").primaryKey(),
+  code: text("code").notNull().unique(), // stored normalised UPPERCASE
+  kind: text("kind").notNull(), // 'percent' | 'fixed'
+  value: integer("value").notNull(),
+  is_active: boolean("is_active").default(true).notNull(),
+  starts_at: timestamp("starts_at", { withTimezone: true }),
+  expires_at: timestamp("expires_at", { withTimezone: true }),
+  max_uses: integer("max_uses"), // NULL = unlimited
+  used_count: integer("used_count").default(0).notNull(),
+  created_at: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
+});
+export const insertPromoCodeSchema = createInsertSchema(promoCodes).omit({
+  created_at: true,
+  used_count: true,
+});
+export type PromoCode = typeof promoCodes.$inferSelect;
+export type InsertPromoCode = z.infer<typeof insertPromoCodeSchema>;
+
+// --- Payment methods (POS dropdown config) -------------------
+// Presentation/config layer over the fixed orders.payment_method CHECK
+// codes. `method` is the underlying code; `qr_provider` discriminates
+// wallet methods (method='qr_code'). System rows can't be hard-deleted.
+export const paymentMethods = pgTable("payment_methods", {
+  id: text("id").primaryKey(),
+  label: text("label").notNull(),
+  method: text("method").notNull(), // underlying orders.payment_method code
+  qr_provider: text("qr_provider"), // only when method='qr_code'
+  is_active: boolean("is_active").default(true).notNull(),
+  sort_order: integer("sort_order").default(0).notNull(),
+  is_system: boolean("is_system").default(false).notNull(),
+  created_at: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
+});
+export const insertPaymentMethodSchema = createInsertSchema(paymentMethods).omit({
+  created_at: true,
+});
+export type PaymentMethodConfig = typeof paymentMethods.$inferSelect;
+export type InsertPaymentMethodConfig = z.infer<typeof insertPaymentMethodSchema>;
 
 // --- Orders (POS transactions) -------------------------------
 // addons: jsonb array of { id: string, name: string, price_cents: number }
@@ -495,6 +577,10 @@ export const orders = pgTable("orders", {
   tax_cents: integer("tax_cents").default(0).notNull(),
   discount_cents: integer("discount_cents").default(0).notNull(),
   promo_discount_cents: integer("promo_discount_cents").default(0).notNull(),
+  // POS Control Room (2026-06-05): which configured discount / promo
+  // drove the amounts above (audit + reporting). NULL = none applied.
+  discount_id: text("discount_id"),
+  promo_code_id: text("promo_code_id"),
   paid_amount_cents: integer("paid_amount_cents"),            // what cashier accepted; >= total when tip given
   change_cents: integer("change_cents").default(0).notNull(),
   order_notes: text("order_notes"),                           // operational notes ("water pressure low", "tips $1")

@@ -16,8 +16,28 @@ They are stored as `payment_method='qr_code'` plus a `qr_provider` discriminator
 
 The server reporting `paymentLabel(pm, qrProvider)` (in `server/routes.ts`) is the
 source of truth for turning these into display labels; the qr_code default falls
-back to "Pocket Payment QR". `qr_provider` is free text — there is NO CHECK
-constraint, so adding a new wallet method needs no DB migration.
+back to "Pocket Payment QR". On the `orders` table `qr_provider` is still free text
+(no CHECK), but the **admin-configurable** `payment_methods` table (POS Control Room)
+is stricter — see below.
+
+# Admin payment-method config: providers are an enforced enum (lockstep)
+
+The POS Control Room lets the owner configure payment methods. A `qr_code` wallet
+method must carry a `qr_provider` from a fixed allowed set, duplicated in two places
+that must stay in lockstep:
+- POS client checkout clamp: `ALLOWED_QR_PROVIDERS` in `client/src/pages/pos.tsx`
+- Admin create/update validation: `ALLOWED_QR_PROVIDERS` in `server/routes.ts`
+Currently: `pocket_pay_qr`, `pocket_pay_invoice`, `baiduri_ms`.
+
+**Why:** the POS order endpoint only persists a `qr_provider` that's in the client's
+allowed set — anything else is silently coerced to `NULL`. Before this was enforced,
+an owner could save a wallet method with an unknown provider that looked selectable in
+POS but recorded `qr_provider = NULL`, corrupting payment attribution/reporting. The
+`payment_methods` table also has a CHECK blocking `qr_provider = 'pocket_pay'`.
+
+**How to apply:** adding/removing a wallet provider means updating BOTH `ALLOWED_QR_PROVIDERS`
+lists together; a `qr_code` method must always have a recognised provider, non-`qr_code`
+methods must not set one.
 
 **Why:** synced data (KedaiPOS) and reports already model these via qr_provider, so
 the POS must match to keep aggregation/reconciliation consistent. Inventing new

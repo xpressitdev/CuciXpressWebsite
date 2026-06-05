@@ -22,7 +22,7 @@ import { lucia } from "./auth/lucia";
 import { staffLucia } from "./auth/staffLucia";
 import { requireLuciaUser, requireStaff, requireStaffRole, requireStaffOrPlateOwner } from "./auth/middleware";
 import { sendOtp, verifyOtp, OTP_CONSTANTS } from "./auth/otp";
-import { loginStaff } from "./auth/staff";
+import { loginStaff, createStaff, hashStaffPassword, STAFF_ROLES, MIN_PASSWORD_LENGTH } from "./auth/staff";
 import {
   loadGoogleOAuthConfig,
   buildGoogleClient,
@@ -2176,7 +2176,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
   app.get('/api/admin/catalog/packages', requireStaff, requireStaffRole('owner'), async (_req, res) => {
     try {
       const rows = (await db.execute(sql`
-        SELECT id, name, description, duration_minutes, price_cents, is_active, sort_order, created_at
+        SELECT id, name, description, duration_minutes, price_cents, is_active, sort_order, category_id, created_at
           FROM packages
          ORDER BY is_active DESC, sort_order ASC, name ASC
       `)).rows;
@@ -2219,6 +2219,8 @@ export async function registerRoutes(app: Express): Promise<Server> {
     price_cents: z.number().int().min(0).max(1_000_00),
     is_active: z.boolean().optional(),
     sort_order: z.number().int().min(0).max(999).optional(),
+    // POS Control Room: optional category grouping. null = Uncategorised.
+    category_id: z.string().trim().min(1).max(60).nullable().optional(),
     // Empty array = available at all branches (POS treats "no rows" as
     // "show everywhere"). A non-empty array restricts the package to
     // those specific branches.
@@ -2248,16 +2250,16 @@ export async function registerRoutes(app: Express): Promise<Server> {
     if (!parsed.success) {
       return res.status(400).json({ error: 'invalid_body', details: parsed.error.flatten() });
     }
-    const { name, description, duration_minutes, price_cents, is_active, sort_order, branch_ids } = parsed.data;
+    const { name, description, duration_minutes, price_cents, is_active, sort_order, category_id, branch_ids } = parsed.data;
     const id = `pkg_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 8)}`;
     try {
       const inserted = (await db.execute(sql`
-        INSERT INTO packages (id, name, description, duration_minutes, price_cents, is_active, sort_order)
+        INSERT INTO packages (id, name, description, duration_minutes, price_cents, is_active, sort_order, category_id)
         VALUES (
           ${id}, ${name}, ${description ?? null}, ${duration_minutes ?? null},
-          ${price_cents}, ${is_active ?? true}, ${sort_order ?? 0}
+          ${price_cents}, ${is_active ?? true}, ${sort_order ?? 0}, ${category_id ?? null}
         )
-        RETURNING id, name, description, duration_minutes, price_cents, is_active, sort_order, created_at
+        RETURNING id, name, description, duration_minutes, price_cents, is_active, sort_order, category_id, created_at
       `)).rows[0];
       if (branch_ids && branch_ids.length > 0) {
         await rewritePackageBranches(id, branch_ids);
@@ -2286,9 +2288,10 @@ export async function registerRoutes(app: Express): Promise<Server> {
                duration_minutes = CASE WHEN ${p.duration_minutes !== undefined} THEN ${p.duration_minutes ?? null} ELSE duration_minutes END,
                price_cents      = COALESCE(${p.price_cents      ?? null}, price_cents),
                is_active        = COALESCE(${p.is_active        ?? null}, is_active),
-               sort_order       = COALESCE(${p.sort_order       ?? null}, sort_order)
+               sort_order       = COALESCE(${p.sort_order       ?? null}, sort_order),
+               category_id      = CASE WHEN ${p.category_id !== undefined} THEN ${p.category_id ?? null} ELSE category_id END
          WHERE id = ${id}
-         RETURNING id, name, description, duration_minutes, price_cents, is_active, sort_order, created_at
+         RETURNING id, name, description, duration_minutes, price_cents, is_active, sort_order, category_id, created_at
       `)).rows[0];
       if (!updated) return res.status(404).json({ error: 'not_found' });
       // Only touch branch assignments when the caller actually sent the
@@ -2493,6 +2496,645 @@ export async function registerRoutes(app: Express): Promise<Server> {
       res.json({ ok: true, deactivated: true });
     } catch (err) {
       console.error('[admin.catalog.addons.delete] failed:', err);
+      res.status(500).json({ error: 'delete_failed' });
+    }
+  });
+
+  // ====================================================================
+  // POS CONTROL ROOM — Categories / Discounts / Promo codes /
+  // Payment methods / Staff / Customer create+delete. (Task #7)
+  // All owner-gated except where noted. Mirrors the soft-delete +
+  // ?force=1 hard-delete-if-unused pattern used by the catalog routes.
+  // ====================================================================
+
+  // ---- Categories -----------------------------------------------------
+  const categoryBodySchema = z.object({
+    name: z.string().trim().min(1).max(80),
+    is_active: z.boolean().optional(),
+    sort_order: z.number().int().min(0).max(999).optional(),
+  });
+
+  app.get('/api/admin/catalog/categories', requireStaff, requireStaffRole('owner'), async (_req, res) => {
+    try {
+      const rows = (await db.execute(sql`
+        SELECT c.id, c.name, c.is_active, c.sort_order, c.created_at,
+               COALESCE(p.n, 0)::int AS package_count
+          FROM categories c
+          LEFT JOIN (
+            SELECT category_id, COUNT(*)::int AS n
+              FROM packages WHERE category_id IS NOT NULL GROUP BY category_id
+          ) p ON p.category_id = c.id
+         ORDER BY c.is_active DESC, c.sort_order ASC, c.name ASC
+      `)).rows;
+      res.json({ rows });
+    } catch (err) {
+      console.error('[admin.categories.list] failed:', err);
+      res.status(500).json({ error: 'list_failed' });
+    }
+  });
+
+  app.post('/api/admin/catalog/categories', requireStaff, requireStaffRole('owner'), async (req, res) => {
+    const parsed = categoryBodySchema.safeParse(req.body);
+    if (!parsed.success) return res.status(400).json({ error: 'invalid_body', details: parsed.error.flatten() });
+    const { name, is_active, sort_order } = parsed.data;
+    const id = `cat_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 8)}`;
+    try {
+      const row = (await db.execute(sql`
+        INSERT INTO categories (id, name, is_active, sort_order)
+        VALUES (${id}, ${name}, ${is_active ?? true}, ${sort_order ?? 0})
+        RETURNING id, name, is_active, sort_order, created_at
+      `)).rows[0];
+      res.json({ row: { ...row, package_count: 0 } });
+    } catch (err) {
+      console.error('[admin.categories.create] failed:', err);
+      res.status(500).json({ error: 'create_failed' });
+    }
+  });
+
+  app.patch('/api/admin/catalog/categories/:id', requireStaff, requireStaffRole('owner'), async (req, res) => {
+    const id = String(req.params.id ?? '').trim();
+    if (!id) return res.status(400).json({ error: 'missing_id' });
+    const parsed = categoryBodySchema.partial().safeParse(req.body);
+    if (!parsed.success) return res.status(400).json({ error: 'invalid_body', details: parsed.error.flatten() });
+    const p = parsed.data;
+    try {
+      const row = (await db.execute(sql`
+        UPDATE categories
+           SET name       = COALESCE(${p.name ?? null}, name),
+               is_active  = COALESCE(${p.is_active ?? null}, is_active),
+               sort_order = COALESCE(${p.sort_order ?? null}, sort_order)
+         WHERE id = ${id}
+         RETURNING id, name, is_active, sort_order, created_at
+      `)).rows[0];
+      if (!row) return res.status(404).json({ error: 'not_found' });
+      res.json({ row });
+    } catch (err) {
+      console.error('[admin.categories.update] failed:', err);
+      res.status(500).json({ error: 'update_failed' });
+    }
+  });
+
+  // DELETE — soft by default; ?force=1 hard-deletes. Hard delete is always
+  // safe: the FK on packages.category_id is ON DELETE SET NULL, so any
+  // packages just fall back to "Uncategorised".
+  app.delete('/api/admin/catalog/categories/:id', requireStaff, requireStaffRole('owner'), async (req, res) => {
+    const id = String(req.params.id ?? '').trim();
+    const force = String(req.query.force ?? '') === '1';
+    if (!id) return res.status(400).json({ error: 'missing_id' });
+    try {
+      if (force) {
+        const deleted = (await db.execute(sql`DELETE FROM categories WHERE id = ${id} RETURNING id`)).rows[0];
+        if (!deleted) return res.status(404).json({ error: 'not_found' });
+        return res.json({ ok: true, deleted: true });
+      }
+      const updated = (await db.execute(sql`
+        UPDATE categories SET is_active = false WHERE id = ${id} RETURNING id
+      `)).rows[0];
+      if (!updated) return res.status(404).json({ error: 'not_found' });
+      res.json({ ok: true, deactivated: true });
+    } catch (err) {
+      console.error('[admin.categories.delete] failed:', err);
+      res.status(500).json({ error: 'delete_failed' });
+    }
+  });
+
+  // ---- Discounts ------------------------------------------------------
+  const discountBaseSchema = z.object({
+    name: z.string().trim().min(1).max(120),
+    kind: z.enum(['percent', 'fixed']),
+    value: z.number().int(),
+    is_active: z.boolean().optional(),
+    sort_order: z.number().int().min(0).max(999).optional(),
+  });
+  const discountBodySchema = discountBaseSchema.refine(
+    (d) => (d.kind === 'percent' ? d.value >= 1 && d.value <= 100 : d.value >= 0),
+    { message: 'percent must be 1-100; fixed must be >= 0', path: ['value'] },
+  );
+
+  app.get('/api/admin/discounts', requireStaff, requireStaffRole('owner'), async (_req, res) => {
+    try {
+      const rows = (await db.execute(sql`
+        SELECT d.id, d.name, d.kind, d.value, d.is_active, d.sort_order, d.created_at,
+               COALESCE(o.n, 0)::int AS order_count
+          FROM discounts d
+          LEFT JOIN (
+            SELECT discount_id, COUNT(*)::int AS n
+              FROM orders WHERE discount_id IS NOT NULL GROUP BY discount_id
+          ) o ON o.discount_id = d.id
+         ORDER BY d.is_active DESC, d.sort_order ASC, d.name ASC
+      `)).rows;
+      res.json({ rows });
+    } catch (err) {
+      console.error('[admin.discounts.list] failed:', err);
+      res.status(500).json({ error: 'list_failed' });
+    }
+  });
+
+  app.post('/api/admin/discounts', requireStaff, requireStaffRole('owner'), async (req, res) => {
+    const parsed = discountBodySchema.safeParse(req.body);
+    if (!parsed.success) return res.status(400).json({ error: 'invalid_body', details: parsed.error.flatten() });
+    const { name, kind, value, is_active, sort_order } = parsed.data;
+    const id = `disc_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 8)}`;
+    try {
+      const row = (await db.execute(sql`
+        INSERT INTO discounts (id, name, kind, value, is_active, sort_order)
+        VALUES (${id}, ${name}, ${kind}, ${value}, ${is_active ?? true}, ${sort_order ?? 0})
+        RETURNING id, name, kind, value, is_active, sort_order, created_at
+      `)).rows[0];
+      res.json({ row: { ...row, order_count: 0 } });
+    } catch (err) {
+      console.error('[admin.discounts.create] failed:', err);
+      res.status(500).json({ error: 'create_failed' });
+    }
+  });
+
+  app.patch('/api/admin/discounts/:id', requireStaff, requireStaffRole('owner'), async (req, res) => {
+    const id = String(req.params.id ?? '').trim();
+    if (!id) return res.status(400).json({ error: 'missing_id' });
+    const parsed = discountBaseSchema.partial().safeParse(req.body);
+    if (!parsed.success) return res.status(400).json({ error: 'invalid_body', details: parsed.error.flatten() });
+    const p = parsed.data;
+    try {
+      const row = (await db.execute(sql`
+        UPDATE discounts
+           SET name       = COALESCE(${p.name ?? null}, name),
+               kind       = COALESCE(${p.kind ?? null}, kind),
+               value      = COALESCE(${p.value ?? null}, value),
+               is_active  = COALESCE(${p.is_active ?? null}, is_active),
+               sort_order = COALESCE(${p.sort_order ?? null}, sort_order)
+         WHERE id = ${id}
+         RETURNING id, name, kind, value, is_active, sort_order, created_at
+      `)).rows[0];
+      if (!row) return res.status(404).json({ error: 'not_found' });
+      res.json({ row });
+    } catch (err: any) {
+      if (err?.code === '23514') return res.status(400).json({ error: 'invalid_value' });
+      console.error('[admin.discounts.update] failed:', err);
+      res.status(500).json({ error: 'update_failed' });
+    }
+  });
+
+  app.delete('/api/admin/discounts/:id', requireStaff, requireStaffRole('owner'), async (req, res) => {
+    const id = String(req.params.id ?? '').trim();
+    const force = String(req.query.force ?? '') === '1';
+    if (!id) return res.status(400).json({ error: 'missing_id' });
+    try {
+      if (force) {
+        const used = (await db.execute(
+          sql`SELECT COUNT(*)::int AS n FROM orders WHERE discount_id = ${id}`,
+        )).rows[0] as { n: number };
+        if (used.n > 0) return res.status(409).json({ error: 'in_use', order_count: used.n });
+        const deleted = (await db.execute(sql`DELETE FROM discounts WHERE id = ${id} RETURNING id`)).rows[0];
+        if (!deleted) return res.status(404).json({ error: 'not_found' });
+        return res.json({ ok: true, deleted: true });
+      }
+      const updated = (await db.execute(sql`
+        UPDATE discounts SET is_active = false WHERE id = ${id} RETURNING id
+      `)).rows[0];
+      if (!updated) return res.status(404).json({ error: 'not_found' });
+      res.json({ ok: true, deactivated: true });
+    } catch (err) {
+      console.error('[admin.discounts.delete] failed:', err);
+      res.status(500).json({ error: 'delete_failed' });
+    }
+  });
+
+  // ---- Promo codes ----------------------------------------------------
+  const promoBaseSchema = z.object({
+    code: z.string().trim().min(2).max(40),
+    kind: z.enum(['percent', 'fixed']),
+    value: z.number().int(),
+    is_active: z.boolean().optional(),
+    starts_at: z.string().datetime().nullable().optional(),
+    expires_at: z.string().datetime().nullable().optional(),
+    max_uses: z.number().int().min(1).max(1_000_000).nullable().optional(),
+  });
+  const promoBodySchema = promoBaseSchema.refine(
+    (d) => (d.kind === 'percent' ? d.value >= 1 && d.value <= 100 : d.value >= 0),
+    { message: 'percent must be 1-100; fixed must be >= 0', path: ['value'] },
+  );
+
+  app.get('/api/admin/promo-codes', requireStaff, requireStaffRole('owner'), async (_req, res) => {
+    try {
+      const rows = (await db.execute(sql`
+        SELECT id, code, kind, value, is_active, starts_at, expires_at,
+               max_uses, used_count, created_at
+          FROM promo_codes
+         ORDER BY is_active DESC, created_at DESC
+      `)).rows;
+      res.json({ rows });
+    } catch (err) {
+      console.error('[admin.promo.list] failed:', err);
+      res.status(500).json({ error: 'list_failed' });
+    }
+  });
+
+  app.post('/api/admin/promo-codes', requireStaff, requireStaffRole('owner'), async (req, res) => {
+    const parsed = promoBodySchema.safeParse(req.body);
+    if (!parsed.success) return res.status(400).json({ error: 'invalid_body', details: parsed.error.flatten() });
+    const { code, kind, value, is_active, starts_at, expires_at, max_uses } = parsed.data;
+    const codeNorm = code.toUpperCase().replace(/\s+/g, '');
+    const id = `promo_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 8)}`;
+    try {
+      const row = (await db.execute(sql`
+        INSERT INTO promo_codes (id, code, kind, value, is_active, starts_at, expires_at, max_uses)
+        VALUES (${id}, ${codeNorm}, ${kind}, ${value}, ${is_active ?? true},
+                ${starts_at ?? null}, ${expires_at ?? null}, ${max_uses ?? null})
+        RETURNING id, code, kind, value, is_active, starts_at, expires_at, max_uses, used_count, created_at
+      `)).rows[0];
+      res.json({ row });
+    } catch (err: any) {
+      if (err?.code === '23505') return res.status(409).json({ error: 'code_taken' });
+      console.error('[admin.promo.create] failed:', err);
+      res.status(500).json({ error: 'create_failed' });
+    }
+  });
+
+  app.patch('/api/admin/promo-codes/:id', requireStaff, requireStaffRole('owner'), async (req, res) => {
+    const id = String(req.params.id ?? '').trim();
+    if (!id) return res.status(400).json({ error: 'missing_id' });
+    const parsed = promoBaseSchema.partial().safeParse(req.body);
+    if (!parsed.success) return res.status(400).json({ error: 'invalid_body', details: parsed.error.flatten() });
+    const p = parsed.data;
+    const codeNorm = p.code !== undefined ? p.code.toUpperCase().replace(/\s+/g, '') : null;
+    try {
+      const row = (await db.execute(sql`
+        UPDATE promo_codes
+           SET code       = COALESCE(${codeNorm}, code),
+               kind       = COALESCE(${p.kind ?? null}, kind),
+               value      = COALESCE(${p.value ?? null}, value),
+               is_active  = COALESCE(${p.is_active ?? null}, is_active),
+               starts_at  = CASE WHEN ${p.starts_at !== undefined} THEN ${p.starts_at ?? null} ELSE starts_at END,
+               expires_at = CASE WHEN ${p.expires_at !== undefined} THEN ${p.expires_at ?? null} ELSE expires_at END,
+               max_uses   = CASE WHEN ${p.max_uses !== undefined} THEN ${p.max_uses ?? null} ELSE max_uses END
+         WHERE id = ${id}
+         RETURNING id, code, kind, value, is_active, starts_at, expires_at, max_uses, used_count, created_at
+      `)).rows[0];
+      if (!row) return res.status(404).json({ error: 'not_found' });
+      res.json({ row });
+    } catch (err: any) {
+      if (err?.code === '23505') return res.status(409).json({ error: 'code_taken' });
+      if (err?.code === '23514') return res.status(400).json({ error: 'invalid_value' });
+      console.error('[admin.promo.update] failed:', err);
+      res.status(500).json({ error: 'update_failed' });
+    }
+  });
+
+  app.delete('/api/admin/promo-codes/:id', requireStaff, requireStaffRole('owner'), async (req, res) => {
+    const id = String(req.params.id ?? '').trim();
+    const force = String(req.query.force ?? '') === '1';
+    if (!id) return res.status(400).json({ error: 'missing_id' });
+    try {
+      if (force) {
+        const used = (await db.execute(
+          sql`SELECT COUNT(*)::int AS n FROM orders WHERE promo_code_id = ${id}`,
+        )).rows[0] as { n: number };
+        if (used.n > 0) return res.status(409).json({ error: 'in_use', order_count: used.n });
+        const deleted = (await db.execute(sql`DELETE FROM promo_codes WHERE id = ${id} RETURNING id`)).rows[0];
+        if (!deleted) return res.status(404).json({ error: 'not_found' });
+        return res.json({ ok: true, deleted: true });
+      }
+      const updated = (await db.execute(sql`
+        UPDATE promo_codes SET is_active = false WHERE id = ${id} RETURNING id
+      `)).rows[0];
+      if (!updated) return res.status(404).json({ error: 'not_found' });
+      res.json({ ok: true, deactivated: true });
+    } catch (err) {
+      console.error('[admin.promo.delete] failed:', err);
+      res.status(500).json({ error: 'delete_failed' });
+    }
+  });
+
+  // ---- Payment methods (POS dropdown config) --------------------------
+  // Wallet (method='qr_code') providers the POS order endpoint will accept and
+  // persist. Keep in lockstep with ALLOWED_QR_PROVIDERS in client/src/pages/pos.tsx
+  // — anything outside this set is silently dropped to NULL at checkout, which
+  // would break payment-method attribution/reporting.
+  const ALLOWED_QR_PROVIDERS = ['pocket_pay_qr', 'pocket_pay_invoice', 'baiduri_ms'] as const;
+  const paymentMethodBaseSchema = z.object({
+    label: z.string().trim().min(1).max(80),
+    method: z.enum([
+      'cash', 'bank_transfer', 'card', 'qr_code',
+      'baiduri_pay', 'quick_pay', 'subscription', 'voucher',
+    ]),
+    qr_provider: z.enum(ALLOWED_QR_PROVIDERS).nullable().optional(),
+    is_active: z.boolean().optional(),
+    sort_order: z.number().int().min(0).max(999).optional(),
+  });
+  // A qr_code wallet method MUST carry a recognised provider; non-qr_code
+  // methods must not. ('pocket_pay' can never pass z.enum above — it stays
+  // blocked both here and via the DB CHECK constraint.)
+  const paymentMethodProviderRefine = (d: { method: string; qr_provider?: string | null }) =>
+    d.method === 'qr_code' ? !!d.qr_provider : !d.qr_provider;
+  const paymentMethodBodySchema = paymentMethodBaseSchema.refine(
+    paymentMethodProviderRefine,
+    {
+      message: "qr_code methods require a valid qr_provider; other methods must not set one",
+      path: ['qr_provider'],
+    },
+  );
+
+  app.get('/api/admin/payment-methods', requireStaff, requireStaffRole('owner'), async (_req, res) => {
+    try {
+      const rows = (await db.execute(sql`
+        SELECT id, label, method, qr_provider, is_active, sort_order, is_system, created_at
+          FROM payment_methods
+         ORDER BY sort_order ASC, label ASC
+      `)).rows;
+      res.json({ rows });
+    } catch (err) {
+      console.error('[admin.payment_methods.list] failed:', err);
+      res.status(500).json({ error: 'list_failed' });
+    }
+  });
+
+  app.post('/api/admin/payment-methods', requireStaff, requireStaffRole('owner'), async (req, res) => {
+    const parsed = paymentMethodBodySchema.safeParse(req.body);
+    if (!parsed.success) return res.status(400).json({ error: 'invalid_body', details: parsed.error.flatten() });
+    const { label, method, qr_provider, is_active, sort_order } = parsed.data;
+    // Providers only make sense on qr_code methods.
+    const provider = method === 'qr_code' ? (qr_provider ?? null) : null;
+    if (method === 'qr_code' && !provider) return res.status(400).json({ error: 'provider_required_for_qr' });
+    const id = `pm_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 8)}`;
+    try {
+      const row = (await db.execute(sql`
+        INSERT INTO payment_methods (id, label, method, qr_provider, is_active, sort_order, is_system)
+        VALUES (${id}, ${label}, ${method}, ${provider}, ${is_active ?? true}, ${sort_order ?? 0}, false)
+        RETURNING id, label, method, qr_provider, is_active, sort_order, is_system, created_at
+      `)).rows[0];
+      res.json({ row });
+    } catch (err: any) {
+      if (err?.code === '23505') return res.status(409).json({ error: 'method_provider_taken' });
+      if (err?.code === '23514') return res.status(400).json({ error: 'invalid_method' });
+      console.error('[admin.payment_methods.create] failed:', err);
+      res.status(500).json({ error: 'create_failed' });
+    }
+  });
+
+  // PATCH — label / active / order are always editable. method+provider are
+  // editable for custom rows only (system rows are locked to their code).
+  app.patch('/api/admin/payment-methods/:id', requireStaff, requireStaffRole('owner'), async (req, res) => {
+    const id = String(req.params.id ?? '').trim();
+    if (!id) return res.status(400).json({ error: 'missing_id' });
+    const parsed = paymentMethodBaseSchema.partial().safeParse(req.body);
+    if (!parsed.success) return res.status(400).json({ error: 'invalid_body', details: parsed.error.flatten() });
+    const p = parsed.data;
+    try {
+      const existing = (await db.execute(
+        sql`SELECT is_system FROM payment_methods WHERE id = ${id} LIMIT 1`,
+      )).rows[0] as { is_system: boolean } | undefined;
+      if (!existing) return res.status(404).json({ error: 'not_found' });
+      // System rows: ignore any method/provider change (locked to code).
+      const allowCode = !existing.is_system;
+      const provider =
+        p.method !== undefined && p.method !== 'qr_code' ? null : (p.qr_provider ?? null);
+      const row = (await db.execute(sql`
+        UPDATE payment_methods
+           SET label       = COALESCE(${p.label ?? null}, label),
+               method      = CASE WHEN ${allowCode && p.method !== undefined} THEN ${p.method ?? null} ELSE method END,
+               qr_provider = CASE WHEN ${allowCode && (p.method !== undefined || p.qr_provider !== undefined)} THEN ${provider} ELSE qr_provider END,
+               is_active   = COALESCE(${p.is_active ?? null}, is_active),
+               sort_order  = COALESCE(${p.sort_order ?? null}, sort_order)
+         WHERE id = ${id}
+         RETURNING id, label, method, qr_provider, is_active, sort_order, is_system, created_at
+      `)).rows[0];
+      res.json({ row });
+    } catch (err: any) {
+      if (err?.code === '23505') return res.status(409).json({ error: 'method_provider_taken' });
+      if (err?.code === '23514') return res.status(400).json({ error: 'invalid_method' });
+      console.error('[admin.payment_methods.update] failed:', err);
+      res.status(500).json({ error: 'update_failed' });
+    }
+  });
+
+  // DELETE — system rows can't be hard-deleted (only deactivated).
+  app.delete('/api/admin/payment-methods/:id', requireStaff, requireStaffRole('owner'), async (req, res) => {
+    const id = String(req.params.id ?? '').trim();
+    const force = String(req.query.force ?? '') === '1';
+    if (!id) return res.status(400).json({ error: 'missing_id' });
+    try {
+      const existing = (await db.execute(
+        sql`SELECT is_system FROM payment_methods WHERE id = ${id} LIMIT 1`,
+      )).rows[0] as { is_system: boolean } | undefined;
+      if (!existing) return res.status(404).json({ error: 'not_found' });
+      if (force) {
+        if (existing.is_system) return res.status(409).json({ error: 'system_locked' });
+        await db.execute(sql`DELETE FROM payment_methods WHERE id = ${id}`);
+        return res.json({ ok: true, deleted: true });
+      }
+      await db.execute(sql`UPDATE payment_methods SET is_active = false WHERE id = ${id}`);
+      res.json({ ok: true, deactivated: true });
+    } catch (err) {
+      console.error('[admin.payment_methods.delete] failed:', err);
+      res.status(500).json({ error: 'delete_failed' });
+    }
+  });
+
+  // ---- Staff management ----------------------------------------------
+  app.get('/api/admin/staff', requireStaff, requireStaffRole('owner'), async (_req, res) => {
+    try {
+      const rows = (await db.execute(sql`
+        SELECT s.id, s.email, s.name, s.role, s.branch_id, s.is_active, s.created_at,
+               b.name AS branch_name,
+               COALESCE(o.n, 0)::int AS order_count
+          FROM staff s
+          LEFT JOIN branches b ON b.id = s.branch_id
+          LEFT JOIN (
+            SELECT staff_id, COUNT(*)::int AS n FROM orders
+             WHERE staff_id IS NOT NULL GROUP BY staff_id
+          ) o ON o.staff_id = s.id
+         ORDER BY s.is_active DESC, s.role ASC, s.name ASC
+      `)).rows;
+      res.json({ rows });
+    } catch (err) {
+      console.error('[admin.staff.list] failed:', err);
+      res.status(500).json({ error: 'list_failed' });
+    }
+  });
+
+  const staffCreateSchema = z.object({
+    email: z.string().trim().email().max(160),
+    name: z.string().trim().min(1).max(120),
+    role: z.enum(STAFF_ROLES),
+    branch_id: z.number().int().positive().nullable().optional(),
+    password: z.string().min(MIN_PASSWORD_LENGTH).max(200),
+  });
+
+  app.post('/api/admin/staff', requireStaff, requireStaffRole('owner'), async (req, res) => {
+    const parsed = staffCreateSchema.safeParse(req.body);
+    if (!parsed.success) return res.status(400).json({ error: 'invalid_body', details: parsed.error.flatten() });
+    const { email, name, role, branch_id, password } = parsed.data;
+    // Lane/cashier/manager are branch-bound; owner is global.
+    if (role !== 'owner' && branch_id == null) {
+      return res.status(400).json({ error: 'branch_required_for_role' });
+    }
+    try {
+      const id = await createStaff({ email, name, role, branchId: role === 'owner' ? null : branch_id, password });
+      const row = (await db.execute(sql`
+        SELECT s.id, s.email, s.name, s.role, s.branch_id, s.is_active, s.created_at,
+               b.name AS branch_name
+          FROM staff s LEFT JOIN branches b ON b.id = s.branch_id
+         WHERE s.id = ${id} LIMIT 1
+      `)).rows[0];
+      res.json({ row: { ...row, order_count: 0 } });
+    } catch (err: any) {
+      if (err?.code === '23505') return res.status(409).json({ error: 'email_taken' });
+      if (typeof err?.message === 'string' && err.message.includes('password')) {
+        return res.status(400).json({ error: 'weak_password' });
+      }
+      console.error('[admin.staff.create] failed:', err);
+      res.status(500).json({ error: 'create_failed' });
+    }
+  });
+
+  const staffUpdateSchema = z.object({
+    name: z.string().trim().min(1).max(120).optional(),
+    role: z.enum(STAFF_ROLES).optional(),
+    branch_id: z.number().int().positive().nullable().optional(),
+    is_active: z.boolean().optional(),
+    password: z.string().min(MIN_PASSWORD_LENGTH).max(200).optional(),
+  });
+
+  app.patch('/api/admin/staff/:id', requireStaff, requireStaffRole('owner'), async (req, res) => {
+    const id = String(req.params.id ?? '').trim();
+    if (!id) return res.status(400).json({ error: 'missing_id' });
+    const parsed = staffUpdateSchema.safeParse(req.body);
+    if (!parsed.success) return res.status(400).json({ error: 'invalid_body', details: parsed.error.flatten() });
+    const p = parsed.data;
+    const selfId = (req.staff!.user as any).id as string;
+    try {
+      const target = (await db.execute(
+        sql`SELECT id, role, is_active FROM staff WHERE id = ${id} LIMIT 1`,
+      )).rows[0] as { id: string; role: string; is_active: boolean } | undefined;
+      if (!target) return res.status(404).json({ error: 'not_found' });
+
+      // Guard: don't let the owner demote / deactivate the last active owner
+      // (that would lock everyone out of the Control Room).
+      const wouldDropOwner =
+        (p.role !== undefined && p.role !== 'owner' && target.role === 'owner') ||
+        (p.is_active === false && target.role === 'owner');
+      if (wouldDropOwner) {
+        const owners = (await db.execute(sql`
+          SELECT COUNT(*)::int AS n FROM staff WHERE role = 'owner' AND is_active = true
+        `)).rows[0] as { n: number };
+        if (owners.n <= 1) return res.status(409).json({ error: 'last_owner' });
+      }
+      if (p.is_active === false && id === selfId) {
+        return res.status(409).json({ error: 'cannot_deactivate_self' });
+      }
+
+      const newRole = p.role ?? target.role;
+      // Keep the branch rule consistent with create: only owner may be global.
+      const branchSql =
+        p.branch_id !== undefined
+          ? (newRole === 'owner' ? null : p.branch_id)
+          : undefined;
+      const passwordHash = p.password ? await hashStaffPassword(p.password) : null;
+
+      const row = (await db.execute(sql`
+        UPDATE staff
+           SET name          = COALESCE(${p.name ?? null}, name),
+               role          = COALESCE(${p.role ?? null}, role),
+               branch_id     = CASE
+                                 WHEN ${newRole === 'owner'} THEN NULL
+                                 WHEN ${branchSql !== undefined} THEN ${branchSql ?? null}
+                                 ELSE branch_id
+                               END,
+               is_active     = COALESCE(${p.is_active ?? null}, is_active),
+               password_hash = COALESCE(${passwordHash}, password_hash)
+         WHERE id = ${id}
+         RETURNING id, email, name, role, branch_id, is_active, created_at
+      `)).rows[0];
+      const branch = row && (row as any).branch_id != null
+        ? (await db.execute(sql`SELECT name FROM branches WHERE id = ${(row as any).branch_id} LIMIT 1`)).rows[0]
+        : null;
+      res.json({ row: { ...row, branch_name: (branch as any)?.name ?? null } });
+    } catch (err: any) {
+      if (typeof err?.message === 'string' && err.message.includes('password')) {
+        return res.status(400).json({ error: 'weak_password' });
+      }
+      console.error('[admin.staff.update] failed:', err);
+      res.status(500).json({ error: 'update_failed' });
+    }
+  });
+
+  // DELETE — soft (deactivate) by default; ?force=1 hard-deletes only when
+  // the account has never rung an order. Can't delete yourself or the last owner.
+  app.delete('/api/admin/staff/:id', requireStaff, requireStaffRole('owner'), async (req, res) => {
+    const id = String(req.params.id ?? '').trim();
+    const force = String(req.query.force ?? '') === '1';
+    if (!id) return res.status(400).json({ error: 'missing_id' });
+    const selfId = (req.staff!.user as any).id as string;
+    if (id === selfId) return res.status(409).json({ error: 'cannot_delete_self' });
+    try {
+      const target = (await db.execute(
+        sql`SELECT id, role FROM staff WHERE id = ${id} LIMIT 1`,
+      )).rows[0] as { id: string; role: string } | undefined;
+      if (!target) return res.status(404).json({ error: 'not_found' });
+      if (target.role === 'owner') {
+        const owners = (await db.execute(sql`
+          SELECT COUNT(*)::int AS n FROM staff WHERE role = 'owner' AND is_active = true
+        `)).rows[0] as { n: number };
+        if (owners.n <= 1) return res.status(409).json({ error: 'last_owner' });
+      }
+      if (force) {
+        const used = (await db.execute(
+          sql`SELECT COUNT(*)::int AS n FROM orders WHERE staff_id = ${id}`,
+        )).rows[0] as { n: number };
+        if (used.n > 0) return res.status(409).json({ error: 'in_use', order_count: used.n });
+        const deleted = (await db.execute(sql`DELETE FROM staff WHERE id = ${id} RETURNING id`)).rows[0];
+        if (!deleted) return res.status(404).json({ error: 'not_found' });
+        return res.json({ ok: true, deleted: true });
+      }
+      await db.execute(sql`UPDATE staff SET is_active = false WHERE id = ${id}`);
+      res.json({ ok: true, deactivated: true });
+    } catch (err) {
+      console.error('[admin.staff.delete] failed:', err);
+      res.status(500).json({ error: 'delete_failed' });
+    }
+  });
+
+  // ---- Customers: create + delete (list/stats/patch already exist) ----
+  const customerCreateSchema = z.object({
+    phone: z.string().trim().min(4).max(40),
+    name: z.string().trim().min(1).max(120),
+    notes: z.string().trim().max(2000).nullable().optional(),
+  });
+
+  app.post('/api/admin/customers', requireStaff, requireStaffRole('owner', 'manager'), async (req, res) => {
+    const parsed = customerCreateSchema.safeParse(req.body);
+    if (!parsed.success) return res.status(400).json({ error: 'invalid_request', details: parsed.error.flatten() });
+    const { phone, name, notes } = parsed.data;
+    try {
+      const row = (await db.execute(sql`
+        INSERT INTO customers (phone, name, notes)
+        VALUES (${phone}, ${name}, ${notes ?? null})
+        RETURNING id, phone, name, notes, user_id, created_at, updated_at
+      `)).rows[0];
+      res.json({ customer: row });
+    } catch (err: any) {
+      if (err?.code === '23505') return res.status(409).json({ error: 'phone_taken' });
+      console.error('[admin.customers.create] failed:', err);
+      res.status(500).json({ error: 'create_failed' });
+    }
+  });
+
+  // DELETE — blocked when the customer still holds memberships (prepaid
+  // liability). Otherwise detaches their vehicles and removes the row.
+  app.delete('/api/admin/customers/:id', requireStaff, requireStaffRole('owner'), async (req, res) => {
+    const id = Number(req.params.id);
+    if (!Number.isFinite(id) || id <= 0) return res.status(400).json({ error: 'invalid_id' });
+    try {
+      const mem = (await db.execute(
+        sql`SELECT COUNT(*)::int AS n FROM memberships WHERE customer_id = ${id}`,
+      )).rows[0] as { n: number };
+      if (mem.n > 0) return res.status(409).json({ error: 'has_memberships', membership_count: mem.n });
+      await db.execute(sql`UPDATE cars SET customer_id = NULL WHERE customer_id = ${id}`);
+      const deleted = (await db.execute(sql`DELETE FROM customers WHERE id = ${id} RETURNING id`)).rows[0];
+      if (!deleted) return res.status(404).json({ error: 'not_found' });
+      res.json({ ok: true, deleted: true });
+    } catch (err) {
+      console.error('[admin.customers.delete] failed:', err);
       res.status(500).json({ error: 'delete_failed' });
     }
   });
@@ -5413,9 +6055,18 @@ export async function registerRoutes(app: Express): Promise<Server> {
         sort_order: number;
       }>;
 
+      // POS Control Room: active categories so the grid can group packages.
+      const categoryRows = (await db.execute(sql`
+        SELECT id, name, sort_order
+          FROM categories
+         WHERE is_active = true
+         ORDER BY sort_order ASC, name ASC
+      `)).rows as Array<{ id: string; name: string; sort_order: number }>;
+
       res.json({
         packages: packagesRows,
         addons: addonsRows,
+        categories: categoryRows,
         payment_methods: [
           'cash',
           'bank_transfer',
@@ -5430,6 +6081,108 @@ export async function registerRoutes(app: Express): Promise<Server> {
     } catch (err) {
       console.error('[pos.catalog] failed:', err);
       res.status(500).json({ error: 'Failed to load catalog' });
+    }
+  });
+
+  // GET /api/pos/payment-methods — active, ordered. Drives the POS dropdown.
+  app.get('/api/pos/payment-methods', requireStaff, async (_req, res) => {
+    try {
+      const rows = (await db.execute(sql`
+        SELECT id, label, method, qr_provider, sort_order
+          FROM payment_methods
+         WHERE is_active = true
+         ORDER BY sort_order ASC, label ASC
+      `)).rows;
+      res.json({ rows });
+    } catch (err) {
+      console.error('[pos.payment_methods] failed:', err);
+      res.status(500).json({ error: 'list_failed' });
+    }
+  });
+
+  // GET /api/pos/discounts — active cashier-selectable discounts.
+  app.get('/api/pos/discounts', requireStaff, async (_req, res) => {
+    try {
+      const rows = (await db.execute(sql`
+        SELECT id, name, kind, value
+          FROM discounts
+         WHERE is_active = true
+         ORDER BY sort_order ASC, name ASC
+      `)).rows;
+      res.json({ rows });
+    } catch (err) {
+      console.error('[pos.discounts] failed:', err);
+      res.status(500).json({ error: 'list_failed' });
+    }
+  });
+
+  // Shared promo lookup. Returns the row + a typed reason when unusable.
+  // `subtotalCents` lets us pre-compute the would-be discount for display.
+  async function lookupPromo(
+    executor: { execute: typeof db.execute },
+    rawCode: string,
+    subtotalCents: number | null,
+  ): Promise<
+    | { ok: true; row: { id: string; code: string; kind: 'percent' | 'fixed'; value: number; max_uses: number | null; used_count: number }; amountCents: number | null }
+    | { ok: false; reason: 'not_found' | 'inactive' | 'not_started' | 'expired' | 'exhausted' }
+  > {
+    const code = rawCode.toUpperCase().replace(/\s+/g, '');
+    const row = (await executor.execute(sql`
+      SELECT id, code, kind, value, is_active, starts_at, expires_at, max_uses, used_count
+        FROM promo_codes
+       WHERE code = ${code}
+       LIMIT 1
+    `)).rows[0] as
+      | {
+          id: string; code: string; kind: 'percent' | 'fixed'; value: number;
+          is_active: boolean; starts_at: string | null; expires_at: string | null;
+          max_uses: number | null; used_count: number;
+        }
+      | undefined;
+    if (!row) return { ok: false, reason: 'not_found' };
+    if (!row.is_active) return { ok: false, reason: 'inactive' };
+    const now = new Date();
+    if (row.starts_at && new Date(row.starts_at) > now) return { ok: false, reason: 'not_started' };
+    if (row.expires_at && new Date(row.expires_at) < now) return { ok: false, reason: 'expired' };
+    if (row.max_uses != null && row.used_count >= row.max_uses) return { ok: false, reason: 'exhausted' };
+    const amountCents =
+      subtotalCents == null
+        ? null
+        : row.kind === 'percent'
+          ? Math.round((subtotalCents * row.value) / 100)
+          : Math.min(row.value, subtotalCents);
+    return {
+      ok: true,
+      row: { id: row.id, code: row.code, kind: row.kind, value: row.value, max_uses: row.max_uses, used_count: row.used_count },
+      amountCents,
+    };
+  }
+
+  // GET /api/pos/promo/validate?code=XYZ&subtotal_cents=NNN
+  // Instant cashier feedback before the order is submitted. The authoritative
+  // re-check + usage increment happens inside the order transaction.
+  app.get('/api/pos/promo/validate', requireStaff, async (req, res) => {
+    const code = String(req.query.code ?? '').trim();
+    if (!code) return res.status(400).json({ error: 'missing_code' });
+    const rawSub = req.query.subtotal_cents;
+    const subtotal = rawSub != null && rawSub !== '' ? Number(rawSub) : null;
+    const subtotalCents = subtotal != null && Number.isFinite(subtotal) && subtotal >= 0 ? Math.floor(subtotal) : null;
+    try {
+      const result = await lookupPromo(db, code, subtotalCents);
+      if (!result.ok) return res.json({ valid: false, reason: result.reason });
+      res.json({
+        valid: true,
+        promo: {
+          id: result.row.id,
+          code: result.row.code,
+          kind: result.row.kind,
+          value: result.row.value,
+          discount_cents: result.amountCents,
+        },
+      });
+    } catch (err) {
+      console.error('[pos.promo.validate] failed:', err);
+      res.status(500).json({ error: 'validate_failed' });
     }
   });
 
@@ -5478,6 +6231,12 @@ export async function registerRoutes(app: Express): Promise<Server> {
     // sends the membership_id to redeem against. The server still
     // validates ownership + remaining balance inside the txn.
     membership_id: z.string().trim().min(1).max(60).optional().nullable(),
+    // POS Control Room (2026-06-05): checkout-time discount + promo.
+    // Both are recomputed server-side off the subtotal and rejected on
+    // subscription (free) washes. `promo_code` is the raw code; the
+    // server normalises + re-validates + increments usage in the txn.
+    discount_id: z.string().trim().min(1).max(60).optional().nullable(),
+    promo_code: z.string().trim().min(1).max(40).optional().nullable(),
   });
 
   app.post('/api/pos/orders', requireStaff, async (req, res) => {
@@ -5701,6 +6460,9 @@ export async function registerRoutes(app: Express): Promise<Server> {
           total: number;
         } | null = null;
         let discountCents = 0;
+        let promoDiscountCents = 0;
+        let appliedDiscountId: string | null = null;
+        let appliedPromoId: string | null = null;
         let chargedTotal = subtotal;
         if (body.payment_method === 'subscription') {
           if (!body.membership_id) {
@@ -5749,6 +6511,61 @@ export async function registerRoutes(app: Express): Promise<Server> {
           // simplification as before; applies to both kinds.
           discountCents = subtotal;
           chargedTotal = 0;
+          // A free (membership) wash already zeroes the subtotal — stacking
+          // a discount/promo on top is meaningless and could underflow.
+          if (body.discount_id || body.promo_code) {
+            throw new PosOrderError(400, 'discount_not_allowed_on_subscription');
+          }
+        } else {
+          // 6.1 POS Control Room — checkout discount + promo (normal orders).
+          // Both are recomputed here off the server-side subtotal; never trust
+          // client amounts. discount is clamped to the subtotal, then promo is
+          // clamped to whatever's left, so the total can never go negative.
+          if (body.discount_id) {
+            const dRows = (await tx.execute(sql`
+              SELECT id, kind, value FROM discounts
+               WHERE id = ${body.discount_id} AND is_active = true
+               LIMIT 1
+            `)).rows as Array<{ id: string; kind: 'percent' | 'fixed'; value: number }>;
+            if (dRows.length === 0) throw new PosOrderError(400, 'discount_not_available');
+            const d = dRows[0];
+            const raw = d.kind === 'percent'
+              ? Math.round((subtotal * d.value) / 100)
+              : d.value;
+            discountCents = Math.max(0, Math.min(raw, subtotal));
+            appliedDiscountId = d.id;
+          }
+          if (body.promo_code) {
+            // Lock the promo row FOR UPDATE so concurrent checkouts can't
+            // blow past max_uses. Re-validate everything inside the lock.
+            const pRows = (await tx.execute(sql`
+              SELECT id, kind, value, is_active, starts_at, expires_at, max_uses, used_count
+                FROM promo_codes
+               WHERE code = ${body.promo_code.toUpperCase().replace(/\s+/g, '')}
+               FOR UPDATE
+            `)).rows as Array<{
+              id: string; kind: 'percent' | 'fixed'; value: number;
+              is_active: boolean; starts_at: string | null; expires_at: string | null;
+              max_uses: number | null; used_count: number;
+            }>;
+            if (pRows.length === 0) throw new PosOrderError(400, 'promo_not_found');
+            const pr = pRows[0];
+            const now = new Date();
+            if (!pr.is_active) throw new PosOrderError(400, 'promo_inactive');
+            if (pr.starts_at && new Date(pr.starts_at) > now) throw new PosOrderError(400, 'promo_not_started');
+            if (pr.expires_at && new Date(pr.expires_at) < now) throw new PosOrderError(400, 'promo_expired');
+            if (pr.max_uses != null && pr.used_count >= pr.max_uses) throw new PosOrderError(409, 'promo_exhausted');
+            const raw = pr.kind === 'percent'
+              ? Math.round((subtotal * pr.value) / 100)
+              : pr.value;
+            const room = subtotal - discountCents;
+            promoDiscountCents = Math.max(0, Math.min(raw, room));
+            appliedPromoId = pr.id;
+            await tx.execute(sql`
+              UPDATE promo_codes SET used_count = used_count + 1 WHERE id = ${pr.id}
+            `);
+          }
+          chargedTotal = Math.max(0, subtotal - discountCents - promoDiscountCents);
         }
 
         // 6.5 Phase 8: tag the order with the cashier's open shift
@@ -5788,7 +6605,8 @@ export async function registerRoutes(app: Express): Promise<Server> {
           INSERT INTO orders (
             id, branch_id, staff_id, plate,
             package_id, package_name, package_price_cents,
-            addons, subtotal_cents, total_cents, discount_cents,
+            addons, subtotal_cents, total_cents,
+            discount_cents, promo_discount_cents, discount_id, promo_code_id,
             payment_method, qr_provider, payment_ref,
             paid_amount_cents, change_cents,
             ticket_code, status,
@@ -5798,7 +6616,8 @@ export async function registerRoutes(app: Express): Promise<Server> {
           ) VALUES (
             ${orderId}, ${effectiveBranchId}, ${staffId}, ${plateUpper},
             ${pkg.id}, ${pkg.name}, ${pkg.price_cents},
-            ${JSON.stringify(addonSnapshots)}::jsonb, ${subtotal}, ${chargedTotal}, ${discountCents},
+            ${JSON.stringify(addonSnapshots)}::jsonb, ${subtotal}, ${chargedTotal},
+            ${discountCents}, ${promoDiscountCents}, ${appliedDiscountId}, ${appliedPromoId},
             ${body.payment_method}, ${body.payment_method === 'qr_code' ? (body.qr_provider ?? null) : null}, ${body.payment_ref ?? null},
             ${paidAmountCents}, ${changeCents},
             ${ticketCode}, 'queued',
@@ -5832,7 +6651,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
         return {
           orderId, ticketCode, pkg, addonSnapshots, subtotal,
-          chargedTotal, discountCents, redeemMembership,
+          chargedTotal, discountCents, promoDiscountCents, redeemMembership,
           paidAmountCents, changeCents,
         };
       });
@@ -5850,6 +6669,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
           subtotal_cents: result.subtotal,
           total_cents: result.chargedTotal,
           discount_cents: result.discountCents,
+          promo_discount_cents: result.promoDiscountCents,
           paid_amount_cents: result.paidAmountCents,
           change_cents: result.changeCents,
           payment_method: body.payment_method,

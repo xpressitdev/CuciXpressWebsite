@@ -78,6 +78,7 @@ interface CatalogPackage {
   duration_minutes: number | null;
   sort_order: number;
   price_cents: number;
+  category_id: string | null;
 }
 interface CatalogAddon {
   id: string;
@@ -85,11 +86,36 @@ interface CatalogAddon {
   price_cents: number;
   sort_order: number;
 }
+interface CatalogCategory {
+  id: string;
+  name: string;
+  sort_order: number;
+}
 interface CatalogResponse {
   packages: CatalogPackage[];
   addons: CatalogAddon[];
   payment_methods: readonly PaymentMethod[];
+  categories?: CatalogCategory[];
 }
+
+// POS Control Room: rows the cashier-facing endpoints return.
+interface PosPaymentMethod {
+  id: string;
+  label: string;
+  method: PaymentMethod;
+  qr_provider: string | null;
+  sort_order: number;
+}
+interface PosDiscount {
+  id: string;
+  name: string;
+  kind: "percent" | "fixed";
+  value: number;
+}
+// qr_provider values the order endpoint will accept. Custom wallet
+// providers outside this set can't be sent (server enum) — we fall back
+// to a plain qr_code with no provider so checkout still succeeds.
+const ALLOWED_QR_PROVIDERS = ["pocket_pay_qr", "pocket_pay_invoice", "baiduri_ms"] as const;
 
 interface ActiveMembership {
   id: string;
@@ -270,14 +296,19 @@ export default function POS() {
   const [plate, setPlate] = useState<string>("");
   const [selectedAddons, setSelectedAddons] = useState<Set<string>>(new Set());
   const [paymentKey, setPaymentKey] = useState<string>("cash");
-  const selectedPayment =
-    PAYMENT_OPTIONS.find((o) => o.key === paymentKey) ?? PAYMENT_OPTIONS[0];
-  const paymentMethod = selectedPayment.method;
-  const qrProvider = selectedPayment.qrProvider;
   const [paymentRef, setPaymentRef] = useState<string>("");
   const [cashReceived, setCashReceived] = useState<string>("");
   const [itemNotes, setItemNotes] = useState<string>("");
   const [scanOpen, setScanOpen] = useState<boolean>(false);
+
+  // POS Control Room: cashier-selected discount + promo code.
+  const [discountId, setDiscountId] = useState<string>("none");
+  const [promoInput, setPromoInput] = useState<string>("");
+  const [appliedPromo, setAppliedPromo] = useState<
+    { code: string; kind: "percent" | "fixed"; value: number; discount_cents: number } | null
+  >(null);
+  const [promoError, setPromoError] = useState<string | null>(null);
+  const [promoChecking, setPromoChecking] = useState<boolean>(false);
 
   // Phase 1: vehicle/customer linkage.
   // - `matchedVehicleId` is set when the cashier picks a suggestion from
@@ -351,6 +382,58 @@ export default function POS() {
       return r.json();
     },
   });
+
+  // POS Control Room: payment methods + discounts the owner configured.
+  // The payment dropdown is driven by this instead of the hardcoded list;
+  // we fall back to PAYMENT_OPTIONS until the fetch lands so the UI never
+  // shows an empty selector.
+  const { data: paymentMethodsData } = useQuery<{ rows: PosPaymentMethod[] }>({
+    queryKey: ["/api/pos/payment-methods"],
+    enabled: isAuthenticated,
+    queryFn: async () => {
+      const r = await fetch("/api/pos/payment-methods", { credentials: "include" });
+      if (!r.ok) throw new Error(`${r.status}`);
+      return r.json();
+    },
+  });
+
+  const { data: discountsData } = useQuery<{ rows: PosDiscount[] }>({
+    queryKey: ["/api/pos/discounts"],
+    enabled: isAuthenticated,
+    queryFn: async () => {
+      const r = await fetch("/api/pos/discounts", { credentials: "include" });
+      if (!r.ok) throw new Error(`${r.status}`);
+      return r.json();
+    },
+  });
+
+  // Map configured payment methods onto the existing PaymentOption shape so
+  // the qr_provider special-handling downstream keeps working. Key is the
+  // provider (for wallet methods) or the method code — unique by the
+  // (method, qr_provider) DB constraint and stable across reloads.
+  const paymentOptions: ReadonlyArray<PaymentOption> = useMemo(() => {
+    const rows = paymentMethodsData?.rows ?? [];
+    if (rows.length === 0) return PAYMENT_OPTIONS;
+    return rows.map((r) => ({
+      key: r.qr_provider ?? r.method,
+      label: r.label,
+      method: r.method,
+      qrProvider: r.qr_provider,
+    }));
+  }, [paymentMethodsData]);
+
+  const selectedPayment =
+    paymentOptions.find((o) => o.key === paymentKey) ?? paymentOptions[0];
+  const paymentMethod = selectedPayment.method;
+  const qrProvider = selectedPayment.qrProvider;
+
+  // If the configured list doesn't contain the sticky selection (e.g. the
+  // owner removed a method), snap to the first available option.
+  useEffect(() => {
+    if (!paymentOptions.some((o) => o.key === paymentKey)) {
+      setPaymentKey(paymentOptions[0]?.key ?? "cash");
+    }
+  }, [paymentOptions, paymentKey]);
 
   // Default to the first package as soon as the catalog loads.
   useEffect(() => {
@@ -452,7 +535,87 @@ export default function POS() {
   const useMembership =
     paymentMethod === "subscription" && activeMembership !== null;
   const discount = useMembership ? subtotal : 0;
-  const total = subtotal - discount;
+
+  // POS Control Room: manual discount + promo code. Both are computed off
+  // the subtotal, stacked, and clamped so the total never goes below zero.
+  // The server recomputes these authoritatively at checkout — this is only
+  // a live display estimate. Neither applies to a subscription redemption.
+  const selectedDiscount = useMemo(
+    () => discountsData?.rows.find((d) => d.id === discountId) ?? null,
+    [discountsData, discountId],
+  );
+
+  const manualDiscountCents = useMemo(() => {
+    if (paymentMethod === "subscription" || !selectedDiscount) return 0;
+    const raw =
+      selectedDiscount.kind === "percent"
+        ? Math.round((subtotal * selectedDiscount.value) / 100)
+        : selectedDiscount.value;
+    return Math.min(Math.max(raw, 0), subtotal);
+  }, [selectedDiscount, subtotal, paymentMethod]);
+
+  const promoDiscountCents = useMemo(() => {
+    if (paymentMethod === "subscription" || !appliedPromo) return 0;
+    const remaining = Math.max(subtotal - manualDiscountCents, 0);
+    return Math.min(Math.max(appliedPromo.discount_cents, 0), remaining);
+  }, [appliedPromo, subtotal, manualDiscountCents, paymentMethod]);
+
+  const total = useMembership
+    ? 0
+    : Math.max(subtotal - manualDiscountCents - promoDiscountCents, 0);
+
+  // Re-validate an applied promo against the live subtotal so the displayed
+  // amount stays correct as the cashier changes packages/add-ons.
+  const validatePromo = async (rawCode: string) => {
+    const code = rawCode.trim();
+    if (code === "") {
+      setAppliedPromo(null);
+      setPromoError(null);
+      return;
+    }
+    setPromoChecking(true);
+    setPromoError(null);
+    try {
+      const r = await fetch(
+        `/api/pos/promo/validate?code=${encodeURIComponent(code)}&subtotal_cents=${subtotal}`,
+        { credentials: "include" },
+      );
+      const data = await r.json();
+      if (!r.ok || !data?.valid) {
+        setAppliedPromo(null);
+        setPromoError(
+          data?.reason === "expired"
+            ? "This promo code has expired."
+            : data?.reason === "exhausted"
+              ? "This promo code has reached its usage limit."
+              : data?.reason === "not_started"
+                ? "This promo code isn't active yet."
+                : "Promo code not found.",
+        );
+        return;
+      }
+      setAppliedPromo({
+        code: data.promo.code,
+        kind: data.promo.kind,
+        value: data.promo.value,
+        discount_cents: data.promo.discount_cents,
+      });
+      setPromoError(null);
+    } catch {
+      setAppliedPromo(null);
+      setPromoError("Couldn't check the promo code. Try again.");
+    } finally {
+      setPromoChecking(false);
+    }
+  };
+
+  // Keep the applied promo's amount in sync when the subtotal changes.
+  useEffect(() => {
+    if (appliedPromo) {
+      validatePromo(appliedPromo.code);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [subtotal]);
 
   // Cash handling — only meaningful when paying by cash. We let the
   // cashier punch in the cash handed over so the receipt can show the
@@ -691,7 +854,14 @@ export default function POS() {
         plate: plate.trim(),
         addon_ids: oneTap ? [] : Array.from(selectedAddons),
         payment_method: oneTap ? "subscription" : paymentMethod,
-        qr_provider: oneTap ? null : qrProvider,
+        // The order endpoint only accepts the three known wallet providers;
+        // a custom qr_code method with an unrecognised provider falls back
+        // to a plain qr_code so checkout still succeeds.
+        qr_provider:
+          oneTap || !qrProvider ||
+          !(ALLOWED_QR_PROVIDERS as readonly string[]).includes(qrProvider)
+            ? null
+            : qrProvider,
         payment_ref: oneTap ? null : paymentRef.trim() || null,
         paid_amount_cents:
           oneTap || paymentMethod !== "cash" ? null : cashReceivedCents,
@@ -704,6 +874,16 @@ export default function POS() {
           (oneTap || paymentMethod === "subscription") && activeMembership
             ? activeMembership.id
             : null,
+        // POS Control Room: discount + promo. Skipped on the unlimited
+        // one-tap path and on subscription (server rejects them anyway).
+        discount_id:
+          oneTap || paymentMethod === "subscription" || discountId === "none"
+            ? null
+            : discountId,
+        promo_code:
+          oneTap || paymentMethod === "subscription" || !appliedPromo
+            ? null
+            : appliedPromo.code,
       });
       return (await res.json()) as { ok: true; order: CreatedOrder };
     },
@@ -748,6 +928,10 @@ export default function POS() {
     setCustomerPhone("");
     setCustomerName("");
     setShowCustomerForm(false);
+    setDiscountId("none");
+    setPromoInput("");
+    setAppliedPromo(null);
+    setPromoError(null);
     // Keep packageId, paymentMethod sticky for fast successive orders.
   };
 
@@ -1133,20 +1317,57 @@ export default function POS() {
                 <CardHeader>
                   <CardTitle className="text-base">Package</CardTitle>
                 </CardHeader>
-                <CardContent className="space-y-3">
-                  <div className="flex flex-wrap gap-2">
-                    {catalog?.packages.map((p) => (
-                      <Button
-                        key={p.id}
-                        type="button"
-                        variant={p.id === packageId ? "default" : "outline"}
-                        onClick={() => setPackageId(p.id)}
-                        data-testid={`button-package-${p.id}`}
-                      >
-                        {p.name}
-                      </Button>
-                    ))}
-                  </div>
+                <CardContent className="space-y-4">
+                  {(() => {
+                    const pkgs = catalog?.packages ?? [];
+                    const cats = [...(catalog?.categories ?? [])].sort(
+                      (a, b) => a.sort_order - b.sort_order,
+                    );
+                    // Build category groups in order, then an "Other" bucket
+                    // for packages with no (or an unknown) category. When no
+                    // categories exist at all, fall back to one flat group.
+                    const groups: Array<{ id: string; name: string | null; items: CatalogPackage[] }> = [];
+                    for (const c of cats) {
+                      const items = pkgs.filter((p) => p.category_id === c.id);
+                      if (items.length > 0) groups.push({ id: c.id, name: c.name, items });
+                    }
+                    const known = new Set(cats.map((c) => c.id));
+                    const uncategorised = pkgs.filter(
+                      (p) => !p.category_id || !known.has(p.category_id),
+                    );
+                    if (uncategorised.length > 0) {
+                      groups.push({
+                        id: "__uncat",
+                        name: groups.length > 0 ? "Other" : null,
+                        items: uncategorised,
+                      });
+                    }
+                    return groups.map((g) => (
+                      <div key={g.id} className="space-y-2">
+                        {g.name && (
+                          <p
+                            className="text-xs font-semibold uppercase tracking-wide text-gray-500"
+                            data-testid={`label-category-${g.id}`}
+                          >
+                            {g.name}
+                          </p>
+                        )}
+                        <div className="flex flex-wrap gap-2">
+                          {g.items.map((p) => (
+                            <Button
+                              key={p.id}
+                              type="button"
+                              variant={p.id === packageId ? "default" : "outline"}
+                              onClick={() => setPackageId(p.id)}
+                              data-testid={`button-package-${p.id}`}
+                            >
+                              {p.name}
+                            </Button>
+                          ))}
+                        </div>
+                      </div>
+                    ));
+                  })()}
                   {activePackage?.description && (
                     <p className="text-sm text-gray-500">
                       {activePackage.description}
@@ -1502,7 +1723,7 @@ export default function POS() {
                         <SelectValue />
                       </SelectTrigger>
                       <SelectContent>
-                        {PAYMENT_OPTIONS.map((opt) => (
+                        {paymentOptions.map((opt) => (
                           <SelectItem key={opt.key} value={opt.key}>
                             {opt.label}
                           </SelectItem>
@@ -1510,6 +1731,94 @@ export default function POS() {
                       </SelectContent>
                     </Select>
                   </div>
+                  {/* POS Control Room: discount + promo. Hidden on a
+                      subscription redemption (the pack covers the wash). */}
+                  {paymentMethod !== "subscription" && (
+                    <>
+                      <div>
+                        <Label htmlFor="discount-select">
+                          Discount{" "}
+                          <span className="text-gray-400 text-xs">(optional)</span>
+                        </Label>
+                        <Select value={discountId} onValueChange={setDiscountId}>
+                          <SelectTrigger id="discount-select" data-testid="select-discount">
+                            <SelectValue />
+                          </SelectTrigger>
+                          <SelectContent>
+                            <SelectItem value="none">No discount</SelectItem>
+                            {(discountsData?.rows ?? []).map((d) => (
+                              <SelectItem key={d.id} value={d.id}>
+                                {d.name} (
+                                {d.kind === "percent"
+                                  ? `${d.value}%`
+                                  : formatBND(d.value)}
+                                )
+                              </SelectItem>
+                            ))}
+                          </SelectContent>
+                        </Select>
+                      </div>
+                      <div>
+                        <Label htmlFor="promo-code">
+                          Promo code{" "}
+                          <span className="text-gray-400 text-xs">(optional)</span>
+                        </Label>
+                        <div className="flex gap-2">
+                          <Input
+                            id="promo-code"
+                            value={promoInput}
+                            onChange={(e) => {
+                              setPromoInput(e.target.value.toUpperCase());
+                              setPromoError(null);
+                            }}
+                            placeholder="e.g. CUCI10"
+                            data-testid="input-promo-code"
+                            disabled={appliedPromo !== null}
+                          />
+                          {appliedPromo ? (
+                            <Button
+                              type="button"
+                              variant="outline"
+                              onClick={() => {
+                                setAppliedPromo(null);
+                                setPromoInput("");
+                                setPromoError(null);
+                              }}
+                              data-testid="button-remove-promo"
+                            >
+                              Remove
+                            </Button>
+                          ) : (
+                            <Button
+                              type="button"
+                              variant="outline"
+                              onClick={() => validatePromo(promoInput)}
+                              disabled={promoChecking || promoInput.trim() === ""}
+                              data-testid="button-apply-promo"
+                            >
+                              {promoChecking ? "Checking…" : "Apply"}
+                            </Button>
+                          )}
+                        </div>
+                        {promoError && (
+                          <p
+                            className="mt-1 text-xs text-red-600"
+                            data-testid="text-promo-error"
+                          >
+                            {promoError}
+                          </p>
+                        )}
+                        {appliedPromo && (
+                          <p
+                            className="mt-1 text-xs text-emerald-700"
+                            data-testid="text-promo-applied"
+                          >
+                            {appliedPromo.code} applied.
+                          </p>
+                        )}
+                      </div>
+                    </>
+                  )}
                   {paymentMethod === "cash" && (
                     <div>
                       <Label htmlFor="cash-received">
@@ -1618,6 +1927,24 @@ export default function POS() {
                           : "Wash pack redemption"}
                       </span>
                       <span>−{formatBND(discount)}</span>
+                    </div>
+                  )}
+                  {!useMembership && manualDiscountCents > 0 && (
+                    <div
+                      className="flex justify-between text-sm text-emerald-700 font-medium"
+                      data-testid="row-summary-discount"
+                    >
+                      <span>{selectedDiscount?.name ?? "Discount"}</span>
+                      <span>−{formatBND(manualDiscountCents)}</span>
+                    </div>
+                  )}
+                  {!useMembership && promoDiscountCents > 0 && (
+                    <div
+                      className="flex justify-between text-sm text-emerald-700 font-medium"
+                      data-testid="row-summary-promo"
+                    >
+                      <span>Promo {appliedPromo?.code}</span>
+                      <span>−{formatBND(promoDiscountCents)}</span>
                     </div>
                   )}
                   <Separator />

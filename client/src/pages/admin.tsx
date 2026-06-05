@@ -54,6 +54,9 @@ import {
   Building2,
   UserCircle2,
   MapPinned,
+  Percent,
+  Tag,
+  Wallet,
 } from "lucide-react";
 import { Link } from "wouter";
 import { motion } from "framer-motion";
@@ -62,6 +65,11 @@ import { useStaffAuth } from "@/hooks/useStaffAuth";
 import type { CollaborationSubmission, SubscriptionSignup } from "@shared/schema";
 import CustomersTab from "@/components/admin/CustomersTab";
 import BranchesTab from "@/components/admin/BranchesTab";
+import DiscountsTab from "@/components/admin/DiscountsTab";
+import PromoCodesTab from "@/components/admin/PromoCodesTab";
+import PaymentSetupTab from "@/components/admin/PaymentSetupTab";
+import StaffTab from "@/components/admin/StaffTab";
+import CategoriesSection from "@/components/admin/CategoriesSection";
 import {
   AreaChart,
   Area,
@@ -254,7 +262,7 @@ export default function Admin() {
               "payments",
               "best-selling",
               ...(isManagerOrOwner ? ["customers"] : []),
-              ...(isOwner ? ["branches", "catalog"] : []),
+              ...(isOwner ? ["branches", "catalog", "discounts", "promo-codes", "payment-setup", "staff"] : []),
               ...(isManagerOrOwner ? ["shifts", "collaborations", "subscriptions"] : []),
             ];
             const colMd = visibleTabs.length;
@@ -304,6 +312,30 @@ export default function Admin() {
                 <TabsTrigger value="catalog" className="flex items-center gap-2" data-testid="tab-catalog">
                   <PackageIcon className="w-4 h-4" />
                   Catalog
+                </TabsTrigger>
+              )}
+              {isOwner && (
+                <TabsTrigger value="discounts" className="flex items-center gap-2" data-testid="tab-discounts">
+                  <Percent className="w-4 h-4" />
+                  Discounts
+                </TabsTrigger>
+              )}
+              {isOwner && (
+                <TabsTrigger value="promo-codes" className="flex items-center gap-2" data-testid="tab-promo-codes">
+                  <Tag className="w-4 h-4" />
+                  Promo Codes
+                </TabsTrigger>
+              )}
+              {isOwner && (
+                <TabsTrigger value="payment-setup" className="flex items-center gap-2" data-testid="tab-payment-setup">
+                  <Wallet className="w-4 h-4" />
+                  Payment Setup
+                </TabsTrigger>
+              )}
+              {isOwner && (
+                <TabsTrigger value="staff" className="flex items-center gap-2" data-testid="tab-staff">
+                  <ShieldCheck className="w-4 h-4" />
+                  Staff
                 </TabsTrigger>
               )}
               {isManagerOrOwner && (
@@ -366,6 +398,30 @@ export default function Admin() {
             {isOwner && (
               <TabsContent value="catalog" className="mt-6">
                 <CatalogTab isOwner={true} />
+              </TabsContent>
+            )}
+
+            {isOwner && (
+              <TabsContent value="discounts" className="mt-6">
+                <DiscountsTab />
+              </TabsContent>
+            )}
+
+            {isOwner && (
+              <TabsContent value="promo-codes" className="mt-6">
+                <PromoCodesTab />
+              </TabsContent>
+            )}
+
+            {isOwner && (
+              <TabsContent value="payment-setup" className="mt-6">
+                <PaymentSetupTab />
+              </TabsContent>
+            )}
+
+            {isOwner && (
+              <TabsContent value="staff" className="mt-6">
+                <StaffTab />
               </TabsContent>
             )}
 
@@ -1568,6 +1624,7 @@ function CatalogTab({ isOwner }: { isOwner: boolean }) {
           You're signed in as a manager. Catalog changes are owner-only — view only here.
         </div>
       )}
+      {isOwner && <CategoriesSection />}
       <PackagesSection canEdit={isOwner} />
       <AddonsSection canEdit={isOwner} />
     </div>
