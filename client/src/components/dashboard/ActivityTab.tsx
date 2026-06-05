@@ -71,6 +71,39 @@ function packageGradient(name: string) {
   return "from-violet-500 to-purple-600";
 }
 
+// Central business contact line — identical on every printed receipt.
+const BUSINESS_PHONE = "+673 838 7000";
+
+// Loyalty promo footer carried over from the printed thermal receipt.
+const LOYALTY_PROMO =
+  "Collect 4 receipts from the B$12 package for the same car plate and get a FREE WASH of our B$12 full package. No validity period — show all 4 receipts to claim.";
+
+type ReceiptItem = {
+  name: string;
+  price_cents: number | null;
+  kind: "package" | "addon";
+};
+
+// Flattens an order into the printed line items: the package first, then
+// each add-on. Mirrors the "Item / Amount" block on the thermal receipt.
+function receiptItems(order: OrderRow): ReceiptItem[] {
+  const items: ReceiptItem[] = [
+    {
+      name: order.package_name,
+      price_cents: order.package_price_cents ?? null,
+      kind: "package",
+    },
+  ];
+  for (const a of order.addons ?? []) {
+    items.push({ name: a.name, price_cents: a.price_cents, kind: "addon" });
+  }
+  return items;
+}
+
+function totalDiscount(order: OrderRow) {
+  return (order.discount_cents ?? 0) + (order.promo_discount_cents ?? 0);
+}
+
 type ViewMode = "timeline" | "receipts";
 
 // Combined "Activity" tab — merges the old Wash History and Receipts
@@ -600,6 +633,9 @@ function ReceiptView({ order }: { order: OrderRow }) {
           <p className="text-[10px] uppercase tracking-widest font-bold text-gray-400">
             Drive-thru car wash · Brunei
           </p>
+          <p className="text-[10px] font-semibold text-gray-400 mt-0.5">
+            {BUSINESS_PHONE}
+          </p>
         </div>
 
         <div className="px-6">
@@ -623,7 +659,9 @@ function ReceiptView({ order }: { order: OrderRow }) {
         <dl className="px-6 py-4 text-sm space-y-2">
           <Row label="Branch" value={order.branch_name ?? "—"} />
           <Row label="Vehicle" value={order.plate} mono />
-          <Row label="Package" value={order.package_name} />
+          {order.cashier_name && (
+            <Row label="Cashier" value={order.cashier_name} />
+          )}
           <Row
             label="Payment"
             value={payLabel(order.payment_method)}
@@ -636,7 +674,64 @@ function ReceiptView({ order }: { order: OrderRow }) {
           <div className="border-t-2 border-dashed border-gray-200" />
         </div>
 
-        <div className="px-6 py-4 flex items-center justify-between">
+        <div className="px-6 py-4">
+          <div className="flex justify-between text-[10px] uppercase font-bold text-gray-400 tracking-wider mb-2">
+            <span>Item</span>
+            <span>Amount</span>
+          </div>
+          <div className="space-y-1.5">
+            {receiptItems(order).map((it, i) => (
+              <div key={i} className="flex justify-between gap-2 text-sm">
+                <span
+                  className={
+                    it.kind === "addon"
+                      ? "text-gray-600"
+                      : "text-gray-900 font-semibold"
+                  }
+                >
+                  {it.kind === "addon" ? "+ " : ""}
+                  {it.name}
+                </span>
+                {it.price_cents != null && (
+                  <span
+                    className={
+                      it.kind === "addon"
+                        ? "text-gray-600 font-medium"
+                        : "text-gray-900 font-bold"
+                    }
+                  >
+                    {formatBNDFull(it.price_cents)}
+                  </span>
+                )}
+              </div>
+            ))}
+          </div>
+          {order.item_notes?.trim() && (
+            <p className="mt-2 text-xs italic text-gray-500">
+              Note: {order.item_notes.trim()}
+            </p>
+          )}
+        </div>
+
+        <div className="px-6">
+          <div className="border-t-2 border-dashed border-gray-200" />
+        </div>
+
+        {(order.subtotal_cents != null || totalDiscount(order) > 0) && (
+          <dl className="px-6 pt-4 text-sm space-y-1.5">
+            {order.subtotal_cents != null && (
+              <Row label="Subtotal" value={formatBNDFull(order.subtotal_cents)} />
+            )}
+            {totalDiscount(order) > 0 && (
+              <Row
+                label="Discount"
+                value={`− ${formatBNDFull(totalDiscount(order))}`}
+              />
+            )}
+          </dl>
+        )}
+
+        <div className="px-6 py-3 flex items-center justify-between">
           <span className="text-[11px] uppercase tracking-widest font-black text-gray-500">
             Total
           </span>
@@ -645,10 +740,27 @@ function ReceiptView({ order }: { order: OrderRow }) {
           </span>
         </div>
 
-        <div className="px-6 pb-6 pt-1 text-center">
+        {order.paid_amount_cents != null && (
+          <dl className="px-6 pb-3 text-sm space-y-1.5">
+            <Row
+              label={`Paid (${payLabel(order.payment_method)})`}
+              value={formatBNDFull(order.paid_amount_cents)}
+            />
+            <Row label="Change" value={formatBNDFull(order.change_cents ?? 0)} />
+          </dl>
+        )}
+
+        <div className="px-6">
+          <div className="border-t-2 border-dashed border-gray-200" />
+        </div>
+
+        <div className="px-6 pb-6 pt-3 text-center space-y-2">
           <p className="text-[11px] text-gray-400 inline-flex items-center gap-1">
             <Sparkles className="w-3 h-3" />
             Thank you for choosing CuciXpress · {formatBND(order.total_cents)} earned in loyalty
+          </p>
+          <p className="text-[10px] leading-relaxed text-gray-400">
+            {LOYALTY_PROMO}
           </p>
         </div>
       </div>
@@ -701,6 +813,15 @@ function printReceipt(order: OrderRow) {
     );
   const row = (label: string, value: string) =>
     `<div class="row"><span class="lbl">${esc(label)}</span><span class="val">${esc(value)}</span></div>`;
+  const itemRow = (it: ReceiptItem) =>
+    `<div class="row"><span class="${it.kind === "addon" ? "lbl" : "item"}">${it.kind === "addon" ? "+ " : ""}${esc(it.name)}</span>${
+      it.price_cents != null ? `<span class="val">${esc(formatBNDFull(it.price_cents))}</span>` : ""
+    }</div>`;
+  const items = receiptItems(order).map(itemRow).join("");
+  const note = order.item_notes?.trim()
+    ? `<div class="note">Note: ${esc(order.item_notes.trim())}</div>`
+    : "";
+  const disc = totalDiscount(order);
 
   const html = `<!doctype html><html><head><meta charset="utf-8"><title>Receipt ${esc(shortReceiptId(order.id))}</title>
 <style>
@@ -722,13 +843,18 @@ function printReceipt(order: OrderRow) {
   .total { display: flex; justify-content: space-between; align-items: center; margin: 4px 0; }
   .total .t-lbl { font-size: 11px; letter-spacing: 2px; text-transform: uppercase; font-weight: 800; color: #555; }
   .total .t-val { font-size: 20px; font-weight: 800; color: #7c3aed; }
+  .item { color: #111; font-weight: 700; }
+  .head .lbl { font-weight: 700; color: #999; }
+  .note { font-size: 11px; font-style: italic; color: #777; margin: 4px 0; }
   .foot { font-size: 10px; color: #999; text-align: center; margin-top: 6px; }
+  .promo { font-size: 9px; line-height: 1.5; color: #999; text-align: center; margin-top: 6px; }
 </style></head><body>
 <div class="receipt">
   <div class="bar"></div>
   <div class="center">
     <div class="brand">CuciXpress</div>
     <div class="sub">Drive-thru car wash · Brunei</div>
+    <div class="sub">${esc(BUSINESS_PHONE)}</div>
   </div>
   <div class="hr"></div>
   <div class="center">
@@ -739,13 +865,22 @@ function printReceipt(order: OrderRow) {
   <div class="hr"></div>
   ${row("Branch", order.branch_name ?? "—")}
   ${row("Vehicle", order.plate)}
-  ${row("Package", order.package_name)}
+  ${order.cashier_name ? row("Cashier", order.cashier_name) : ""}
   ${row("Payment", payLabel(order.payment_method))}
   ${row("Status", order.status)}
   <div class="hr"></div>
+  <div class="row head"><span class="lbl">Item</span><span class="lbl">Amount</span></div>
+  ${items}
+  ${note}
+  <div class="hr"></div>
+  ${order.subtotal_cents != null ? row("Subtotal", formatBNDFull(order.subtotal_cents)) : ""}
+  ${disc > 0 ? row("Discount", `− ${formatBNDFull(disc)}`) : ""}
   <div class="total"><span class="t-lbl">Total</span><span class="t-val">${esc(formatBNDFull(order.total_cents))}</span></div>
+  ${order.paid_amount_cents != null ? row(`Paid (${payLabel(order.payment_method)})`, formatBNDFull(order.paid_amount_cents)) : ""}
+  ${order.paid_amount_cents != null ? row("Change", formatBNDFull(order.change_cents ?? 0)) : ""}
   <div class="hr"></div>
   <div class="foot">Thank you for choosing CuciXpress · ${esc(formatBND(order.total_cents))} earned in loyalty</div>
+  <div class="promo">${esc(LOYALTY_PROMO)}</div>
 </div>
 </body></html>`;
 
@@ -784,16 +919,41 @@ function printReceipt(order: OrderRow) {
 }
 
 function shareToWhatsApp(order: OrderRow) {
+  const items = receiptItems(order).map(
+    (it) =>
+      `${it.kind === "addon" ? "  + " : "• "}${it.name}${
+        it.price_cents != null ? ` — ${formatBNDFull(it.price_cents)}` : ""
+      }`,
+  );
+  const disc = totalDiscount(order);
   const lines = [
     "*CuciXpress receipt*",
+    BUSINESS_PHONE,
     "",
     `Receipt: *${shortReceiptId(order.id)}*`,
     `Date: ${formatDateTime(order.created_at)}`,
     `Branch: ${order.branch_name ?? "—"}`,
     `Vehicle: ${order.plate}`,
-    `Package: ${order.package_name}`,
-    `Payment: ${payLabel(order.payment_method)}`,
+    ...(order.cashier_name ? [`Cashier: ${order.cashier_name}`] : []),
+    "",
+    "Items:",
+    ...items,
+    ...(order.item_notes?.trim() ? [`Note: ${order.item_notes.trim()}`] : []),
+    "",
+    ...(order.subtotal_cents != null
+      ? [`Subtotal: ${formatBNDFull(order.subtotal_cents)}`]
+      : []),
+    ...(disc > 0 ? [`Discount: − ${formatBNDFull(disc)}`] : []),
     `Total: *${formatBNDFull(order.total_cents)}*`,
+    `Payment: ${payLabel(order.payment_method)}`,
+    ...(order.paid_amount_cents != null
+      ? [
+          `Paid: ${formatBNDFull(order.paid_amount_cents)}`,
+          `Change: ${formatBNDFull(order.change_cents ?? 0)}`,
+        ]
+      : []),
+    "",
+    LOYALTY_PROMO,
     "",
     "— cucixpress.com",
   ];

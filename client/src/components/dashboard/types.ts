@@ -26,6 +26,12 @@ export interface MeResp {
   };
 }
 
+export interface OrderAddonLine {
+  id: string;
+  name: string;
+  price_cents: number;
+}
+
 export interface OrderRow {
   id: string;
   branch_name: string | null;
@@ -35,6 +41,18 @@ export interface OrderRow {
   status: string;
   created_at: string;
   payment_method: string;
+  // Optional richer fields — populated by /api/customer/orders so the
+  // digital receipt matches the printed one. Older callers ignore them.
+  package_price_cents?: number | null;
+  addons?: OrderAddonLine[] | null;
+  subtotal_cents?: number | null;
+  discount_cents?: number | null;
+  promo_discount_cents?: number | null;
+  paid_amount_cents?: number | null;
+  change_cents?: number | null;
+  item_notes?: string | null;
+  ticket_code?: string | null;
+  cashier_name?: string | null;
 }
 
 export interface MembershipRow {

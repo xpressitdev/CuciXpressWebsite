@@ -4353,9 +4353,14 @@ export async function registerRoutes(app: Express): Promise<Server> {
       )
       SELECT DISTINCT ON (o.id)
              o.id, o.branch_id, b.name AS branch_name, o.plate, o.package_name,
-             o.total_cents, o.status, o.created_at, o.completed_at, o.payment_method
+             o.package_price_cents, o.addons, o.subtotal_cents, o.discount_cents,
+             o.promo_discount_cents, o.total_cents, o.paid_amount_cents,
+             o.change_cents, o.item_notes, o.ticket_code, o.payment_method,
+             s.name AS cashier_name,
+             o.status, o.created_at, o.completed_at
       FROM orders o
       LEFT JOIN branches b ON b.id = o.branch_id
+      LEFT JOIN staff s ON s.id = o.staff_id
       WHERE o.customer_id = ${userId}
          OR o.vehicle_id IN (SELECT id FROM my_cars)
          OR UPPER(REGEXP_REPLACE(o.plate, '\\s+', '', 'g'))
