@@ -851,7 +851,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
           case 'voucher':       return 'Voucher';
           case 'subscription':  return 'Subscription';
           case 'qr_code':
-            if (qrProvider === 'pocket_pay')          return 'Pocket Payment QR';
+            if (qrProvider === 'pocket_pay' || qrProvider === 'pocket_pay_qr') return 'Pocket Payment QR';
             if (qrProvider === 'pocket_pay_invoice')  return 'Pocket Payment Invoice';
             if (qrProvider === 'dst_easy' || qrProvider === 'quickpay') return 'Quickpay';
             if (qrProvider === 'baiduri_ms')          return 'Baiduri MS Payment Request';
@@ -4356,6 +4356,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
              o.package_price_cents, o.addons, o.subtotal_cents, o.discount_cents,
              o.promo_discount_cents, o.total_cents, o.paid_amount_cents,
              o.change_cents, o.item_notes, o.ticket_code, o.payment_method,
+             CASE WHEN o.payment_method = 'qr_code' THEN o.qr_provider ELSE NULL END AS qr_provider,
              s.name AS cashier_name,
              o.status, o.created_at, o.completed_at
       FROM orders o
@@ -5448,6 +5449,17 @@ export async function registerRoutes(app: Express): Promise<Server> {
       'baiduri_pay', 'quick_pay', 'subscription', 'voucher',
     ]),
     payment_ref: z.string().trim().max(120).optional().nullable(),
+    // Discriminates the qr_code "wallet" payment methods so reports can
+    // tell Pocket QR / Pocket Invoice / Baiduri MS apart. Only meaningful
+    // when payment_method='qr_code'; ignored otherwise.
+    // Note: manual POS Pocket QR uses 'pocket_pay_qr' (not 'pocket_pay') so
+    // counter entries never collide with the online Pocket Pay callback
+    // idempotency index (idx_orders_pocket_pay_payment_ref), which is
+    // reserved for qr_provider='pocket_pay'.
+    qr_provider: z
+      .enum(['pocket_pay_qr', 'pocket_pay_invoice', 'baiduri_ms'])
+      .optional()
+      .nullable(),
     // Cash tendered by the customer. Optional — when omitted the server
     // treats it as exact payment (paid = total, change = 0). Used to
     // print/show the amount paid and change due on the receipt.
@@ -5777,7 +5789,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
             id, branch_id, staff_id, plate,
             package_id, package_name, package_price_cents,
             addons, subtotal_cents, total_cents, discount_cents,
-            payment_method, payment_ref,
+            payment_method, qr_provider, payment_ref,
             paid_amount_cents, change_cents,
             ticket_code, status,
             order_notes, item_notes,
@@ -5787,7 +5799,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
             ${orderId}, ${effectiveBranchId}, ${staffId}, ${plateUpper},
             ${pkg.id}, ${pkg.name}, ${pkg.price_cents},
             ${JSON.stringify(addonSnapshots)}::jsonb, ${subtotal}, ${chargedTotal}, ${discountCents},
-            ${body.payment_method}, ${body.payment_ref ?? null},
+            ${body.payment_method}, ${body.payment_method === 'qr_code' ? (body.qr_provider ?? null) : null}, ${body.payment_ref ?? null},
             ${paidAmountCents}, ${changeCents},
             ${ticketCode}, 'queued',
             ${body.order_notes ?? null}, ${body.item_notes ?? null},
@@ -5841,6 +5853,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
           paid_amount_cents: result.paidAmountCents,
           change_cents: result.changeCents,
           payment_method: body.payment_method,
+          qr_provider: body.payment_method === 'qr_code' ? (body.qr_provider ?? null) : null,
           status: 'queued',
           membership: result.redeemMembership
             ? {

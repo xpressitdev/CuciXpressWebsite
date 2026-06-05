@@ -58,9 +58,19 @@ function payIcon(method: string) {
   return CreditCard;
 }
 
-function payLabel(method: string) {
+function payLabel(method: string, qrProvider?: string | null) {
   if (method === "cash") return "Cash";
-  if (method === "qr_code") return "QR Pay";
+  if (method === "qr_code") {
+    if (qrProvider === "pocket_pay_invoice") return "Pocket Payment Invoice";
+    if (qrProvider === "baiduri_ms") return "Baiduri MS Payment Request";
+    return "Pocket Payment QR";
+  }
+  if (method === "bank_transfer") return "Bank Transfer";
+  if (method === "card") return "Card";
+  if (method === "baiduri_pay") return "Baiduripay";
+  if (method === "quick_pay") return "Quickpay";
+  if (method === "subscription") return "Subscription";
+  if (method === "voucher") return "Voucher";
   return method;
 }
 
@@ -567,7 +577,7 @@ export function ActivityTab({ orders }: Props) {
                     {o.branch_name ?? "—"}
                   </p>
                   <p className="text-[11px] text-gray-400 inline-flex items-center gap-1">
-                    <PIcon className="w-3 h-3" /> {payLabel(o.payment_method)} ·{" "}
+                    <PIcon className="w-3 h-3" /> {payLabel(o.payment_method, o.qr_provider)} ·{" "}
                     {d.toTimeString().slice(0, 5)}
                   </p>
                 </div>
@@ -664,7 +674,7 @@ function ReceiptView({ order }: { order: OrderRow }) {
           )}
           <Row
             label="Payment"
-            value={payLabel(order.payment_method)}
+            value={payLabel(order.payment_method, order.qr_provider)}
             icon={<PIcon className="w-3.5 h-3.5 text-gray-400" />}
           />
           <Row label="Status" value={order.status} />
@@ -743,7 +753,7 @@ function ReceiptView({ order }: { order: OrderRow }) {
         {order.paid_amount_cents != null && (
           <dl className="px-6 pb-3 text-sm space-y-1.5">
             <Row
-              label={`Paid (${payLabel(order.payment_method)})`}
+              label={`Paid (${payLabel(order.payment_method, order.qr_provider)})`}
               value={formatBNDFull(order.paid_amount_cents)}
             />
             <Row label="Change" value={formatBNDFull(order.change_cents ?? 0)} />
@@ -866,7 +876,7 @@ function printReceipt(order: OrderRow) {
   ${row("Branch", order.branch_name ?? "—")}
   ${row("Vehicle", order.plate)}
   ${order.cashier_name ? row("Cashier", order.cashier_name) : ""}
-  ${row("Payment", payLabel(order.payment_method))}
+  ${row("Payment", payLabel(order.payment_method, order.qr_provider))}
   ${row("Status", order.status)}
   <div class="hr"></div>
   <div class="row head"><span class="lbl">Item</span><span class="lbl">Amount</span></div>
@@ -876,7 +886,7 @@ function printReceipt(order: OrderRow) {
   ${order.subtotal_cents != null ? row("Subtotal", formatBNDFull(order.subtotal_cents)) : ""}
   ${disc > 0 ? row("Discount", `− ${formatBNDFull(disc)}`) : ""}
   <div class="total"><span class="t-lbl">Total</span><span class="t-val">${esc(formatBNDFull(order.total_cents))}</span></div>
-  ${order.paid_amount_cents != null ? row(`Paid (${payLabel(order.payment_method)})`, formatBNDFull(order.paid_amount_cents)) : ""}
+  ${order.paid_amount_cents != null ? row(`Paid (${payLabel(order.payment_method, order.qr_provider)})`, formatBNDFull(order.paid_amount_cents)) : ""}
   ${order.paid_amount_cents != null ? row("Change", formatBNDFull(order.change_cents ?? 0)) : ""}
   <div class="hr"></div>
   <div class="foot">Thank you for choosing CuciXpress · ${esc(formatBND(order.total_cents))} earned in loyalty</div>
@@ -948,7 +958,7 @@ function receiptCaption(order: OrderRow): string {
       : []),
     ...(disc > 0 ? [`Discount: − ${formatBNDFull(disc)}`] : []),
     `Total: *${formatBNDFull(order.total_cents)}*`,
-    `Payment: ${payLabel(order.payment_method)}`,
+    `Payment: ${payLabel(order.payment_method, order.qr_provider)}`,
     ...(order.paid_amount_cents != null
       ? [
           `Paid: ${formatBNDFull(order.paid_amount_cents)}`,
@@ -1037,7 +1047,7 @@ async function buildReceiptPdfBlob(order: OrderRow): Promise<Blob> {
     lr("Branch", order.branch_name ?? "—");
     lr("Vehicle", order.plate);
     if (order.cashier_name) lr("Cashier", order.cashier_name);
-    lr("Payment", payLabel(order.payment_method));
+    lr("Payment", payLabel(order.payment_method, order.qr_provider));
 
     divider();
 

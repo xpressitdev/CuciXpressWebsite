@@ -1,4 +1,5 @@
 - [Auth session cookies](auth-session-cookies.md) — customer login dropping on mobile? Check Lucia `sessionCookie.expires` (true=persistent, false=dies on tab close), not session-expiry bugs.
+- [Payment methods & qr_provider](payment-methods-qr-provider.md) — wallet methods are qr_code + qr_provider (not new enums); manual Pocket QR must use `pocket_pay_qr`, never `pocket_pay` (unique-index landmine).
 - [WhatsApp receipt file share](whatsapp-receipt-share.md) — wa.me link is text-only; attach files via navigator.share, probe canShare synchronously or the fallback popup gets blocked.
 - [Tailwind dynamic classes](tailwind-dynamic-classes.md) — class strings from API/DB/concatenation render unstyled (JIT can't see them); use literal class strings in source and index in.
 - [SharePoint history import + chart refresh](sharepoint-history-import.md) — re-importing the master Excel: run import script then recompute_vip_tiers; charts are live (no cache); run long imports via a temp workflow (detached procs get killed).

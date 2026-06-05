@@ -41,6 +41,7 @@ export interface OrderRow {
   status: string;
   created_at: string;
   payment_method: string;
+  qr_provider?: string | null;
   // Optional richer fields — populated by /api/customer/orders so the
   // digital receipt matches the printed one. Older callers ignore them.
   package_price_cents?: number | null;

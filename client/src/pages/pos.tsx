@@ -160,6 +160,7 @@ interface CreatedOrder {
   paid_amount_cents: number | null;
   change_cents: number;
   payment_method: PaymentMethod;
+  qr_provider: string | null;
   status: string;
 }
 
@@ -168,11 +169,48 @@ const PAYMENT_LABELS: Record<PaymentMethod, string> = {
   bank_transfer: "Bank Transfer",
   card: "Card",
   qr_code: "QR Code",
-  baiduri_pay: "Baiduri Pay",
-  quick_pay: "Quick Pay",
+  baiduri_pay: "Baiduripay",
+  quick_pay: "Quickpay",
   subscription: "Subscription",
   voucher: "Voucher",
 };
+
+// Payment options shown in the POS dropdown. These mirror the real POS
+// payment types. The "wallet" methods (Pocket / Baiduri MS) all store as
+// payment_method='qr_code' with a distinguishing qr_provider, matching how
+// synced/reported data already represents them (see paymentLabel() on the
+// server) — so no new payment_method values or DB migration are needed.
+type PaymentOption = {
+  key: string;
+  label: string;
+  method: PaymentMethod;
+  qrProvider: string | null;
+};
+const PAYMENT_OPTIONS: ReadonlyArray<PaymentOption> = [
+  { key: "cash", label: "Cash", method: "cash", qrProvider: null },
+  { key: "card", label: "Card", method: "card", qrProvider: null },
+  { key: "bank_transfer", label: "Bank Transfer", method: "bank_transfer", qrProvider: null },
+  { key: "baiduri_pay", label: "Baiduripay", method: "baiduri_pay", qrProvider: null },
+  { key: "quick_pay", label: "Quickpay", method: "quick_pay", qrProvider: null },
+  { key: "pocket_pay_qr", label: "Pocket Payment QR", method: "qr_code", qrProvider: "pocket_pay_qr" },
+  { key: "pocket_pay_invoice", label: "Pocket Payment Invoice", method: "qr_code", qrProvider: "pocket_pay_invoice" },
+  { key: "baiduri_ms", label: "Baiduri MS Payment Request", method: "qr_code", qrProvider: "baiduri_ms" },
+  { key: "subscription", label: "Subscription", method: "subscription", qrProvider: null },
+  { key: "voucher", label: "Voucher", method: "voucher", qrProvider: null },
+];
+
+// Label an order for receipts/confirmation, taking the qr_provider into
+// account so the three "wallet" methods read correctly instead of all
+// showing "QR Code".
+function paymentDisplayLabel(
+  method: PaymentMethod,
+  qrProvider: string | null,
+): string {
+  const opt = PAYMENT_OPTIONS.find(
+    (o) => o.method === method && (o.qrProvider ?? null) === (qrProvider ?? null),
+  );
+  return opt?.label ?? PAYMENT_LABELS[method] ?? method;
+}
 
 // Source of truth for branch id -> display name. Lane/cashier accounts
 // are bound to one of these via staff.branch_id; owner/manager can
@@ -231,7 +269,11 @@ export default function POS() {
   const [packageId, setPackageId] = useState<string>("");
   const [plate, setPlate] = useState<string>("");
   const [selectedAddons, setSelectedAddons] = useState<Set<string>>(new Set());
-  const [paymentMethod, setPaymentMethod] = useState<PaymentMethod>("cash");
+  const [paymentKey, setPaymentKey] = useState<string>("cash");
+  const selectedPayment =
+    PAYMENT_OPTIONS.find((o) => o.key === paymentKey) ?? PAYMENT_OPTIONS[0];
+  const paymentMethod = selectedPayment.method;
+  const qrProvider = selectedPayment.qrProvider;
   const [paymentRef, setPaymentRef] = useState<string>("");
   const [cashReceived, setCashReceived] = useState<string>("");
   const [itemNotes, setItemNotes] = useState<string>("");
@@ -649,6 +691,7 @@ export default function POS() {
         plate: plate.trim(),
         addon_ids: oneTap ? [] : Array.from(selectedAddons),
         payment_method: oneTap ? "subscription" : paymentMethod,
+        qr_provider: oneTap ? null : qrProvider,
         payment_ref: oneTap ? null : paymentRef.trim() || null,
         paid_amount_cents:
           oneTap || paymentMethod !== "cash" ? null : cashReceivedCents,
@@ -748,7 +791,7 @@ export default function POS() {
         items,
         subtotal: formatBND(lastOrder.subtotal_cents),
         total: formatBND(lastOrder.total_cents),
-        paymentLabel: PAYMENT_LABELS[lastOrder.payment_method],
+        paymentLabel: paymentDisplayLabel(lastOrder.payment_method, lastOrder.qr_provider),
         paidAmount:
           lastOrder.paid_amount_cents != null
             ? formatBND(lastOrder.paid_amount_cents)
@@ -862,7 +905,7 @@ export default function POS() {
                 <div className="flex justify-between text-gray-600">
                   <span>Paid via</span>
                   <span className="capitalize font-semibold">
-                    {PAYMENT_LABELS[lastOrder.payment_method]}
+                    {paymentDisplayLabel(lastOrder.payment_method, lastOrder.qr_provider)}
                   </span>
                 </div>
                 {lastOrder.paid_amount_cents != null && (
@@ -1452,16 +1495,16 @@ export default function POS() {
                   <div>
                     <Label htmlFor="payment-method">Method</Label>
                     <Select
-                      value={paymentMethod}
-                      onValueChange={(v) => setPaymentMethod(v as PaymentMethod)}
+                      value={paymentKey}
+                      onValueChange={(v) => setPaymentKey(v)}
                     >
                       <SelectTrigger id="payment-method" data-testid="select-payment-method">
                         <SelectValue />
                       </SelectTrigger>
                       <SelectContent>
-                        {catalog?.payment_methods.map((pm) => (
-                          <SelectItem key={pm} value={pm}>
-                            {PAYMENT_LABELS[pm]}
+                        {PAYMENT_OPTIONS.map((opt) => (
+                          <SelectItem key={opt.key} value={opt.key}>
+                            {opt.label}
                           </SelectItem>
                         ))}
                       </SelectContent>
