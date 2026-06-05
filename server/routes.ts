@@ -5448,6 +5448,10 @@ export async function registerRoutes(app: Express): Promise<Server> {
       'baiduri_pay', 'quick_pay', 'subscription', 'voucher',
     ]),
     payment_ref: z.string().trim().max(120).optional().nullable(),
+    // Cash tendered by the customer. Optional — when omitted the server
+    // treats it as exact payment (paid = total, change = 0). Used to
+    // print/show the amount paid and change due on the receipt.
+    paid_amount_cents: z.number().int().nonnegative().optional().nullable(),
     branch_id: z.number().int().positive(),
     order_notes: z.string().trim().max(500).optional().nullable(),
     item_notes: z.string().trim().max(500).optional().nullable(),
@@ -5749,6 +5753,23 @@ export async function registerRoutes(app: Express): Promise<Server> {
         `)).rows as Array<{ id: number }>;
         const shiftIdForOrder: number | null = shiftRows[0]?.id ?? null;
 
+        // 6.6 Cash reconciliation. The cashier may pass the cash tendered
+        // (`paid_amount_cents`); when omitted we record an exact payment.
+        // Change is always derived server-side and never trusted from the
+        // client. Clamped at 0 so an underpayment can't print as negative.
+        // Subscription (free) washes take no payment, so leave both null/0
+        // — receipts then omit the Paid/Change lines for those orders.
+        const paidAmountCents =
+          body.payment_method === 'subscription'
+            ? null
+            : body.paid_amount_cents != null
+              ? body.paid_amount_cents
+              : chargedTotal;
+        const changeCents =
+          paidAmountCents == null
+            ? 0
+            : Math.max(0, paidAmountCents - chargedTotal);
+
         // 7. Insert order.
         const orderId = `ord_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 8)}`;
         await tx.execute(sql`
@@ -5757,6 +5778,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
             package_id, package_name, package_price_cents,
             addons, subtotal_cents, total_cents, discount_cents,
             payment_method, payment_ref,
+            paid_amount_cents, change_cents,
             ticket_code, status,
             order_notes, item_notes,
             vehicle_id, customer_name_walkin,
@@ -5766,6 +5788,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
             ${pkg.id}, ${pkg.name}, ${pkg.price_cents},
             ${JSON.stringify(addonSnapshots)}::jsonb, ${subtotal}, ${chargedTotal}, ${discountCents},
             ${body.payment_method}, ${body.payment_ref ?? null},
+            ${paidAmountCents}, ${changeCents},
             ${ticketCode}, 'queued',
             ${body.order_notes ?? null}, ${body.item_notes ?? null},
             ${resolvedVehicleId}, ${walkinName},
@@ -5798,6 +5821,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
         return {
           orderId, ticketCode, pkg, addonSnapshots, subtotal,
           chargedTotal, discountCents, redeemMembership,
+          paidAmountCents, changeCents,
         };
       });
 
@@ -5814,6 +5838,8 @@ export async function registerRoutes(app: Express): Promise<Server> {
           subtotal_cents: result.subtotal,
           total_cents: result.chargedTotal,
           discount_cents: result.discountCents,
+          paid_amount_cents: result.paidAmountCents,
+          change_cents: result.changeCents,
           payment_method: body.payment_method,
           status: 'queued',
           membership: result.redeemMembership

@@ -144,8 +144,11 @@ export interface ReceiptData {
   plate: string;
   dateTime: string; // e.g. "04/06/2026 01:08"
   items: ReceiptLine[];
+  subtotal?: string; // formatted
   total: string; // formatted
   paymentLabel: string;
+  paidAmount?: string; // formatted — cash/amount tendered
+  change?: string; // formatted — change given back
   cashierName?: string;
 }
 
@@ -163,8 +166,11 @@ function buildReceiptBytes(r: ReceiptData): Uint8Array {
 
   for (const it of r.items) p.row(it.name, it.price);
   p.rule();
+  if (r.subtotal) p.row("Subtotal", r.subtotal);
   p.bold(true).size(true).row("TOTAL", r.total).size(false).bold(false);
-  p.row("Paid", r.paymentLabel);
+  p.row("Paid via", r.paymentLabel);
+  if (r.paidAmount) p.row("Paid", r.paidAmount);
+  if (r.change) p.row("Change", r.change);
   p.rule();
 
   p.align("center").raw([0x0a]);

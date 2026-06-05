@@ -157,6 +157,8 @@ interface CreatedOrder {
   addons: Array<{ id: string; name: string; price_cents: number }>;
   subtotal_cents: number;
   total_cents: number;
+  paid_amount_cents: number | null;
+  change_cents: number;
   payment_method: PaymentMethod;
   status: string;
 }
@@ -231,6 +233,7 @@ export default function POS() {
   const [selectedAddons, setSelectedAddons] = useState<Set<string>>(new Set());
   const [paymentMethod, setPaymentMethod] = useState<PaymentMethod>("cash");
   const [paymentRef, setPaymentRef] = useState<string>("");
+  const [cashReceived, setCashReceived] = useState<string>("");
   const [itemNotes, setItemNotes] = useState<string>("");
   const [scanOpen, setScanOpen] = useState<boolean>(false);
 
@@ -408,6 +411,20 @@ export default function POS() {
     paymentMethod === "subscription" && activeMembership !== null;
   const discount = useMembership ? subtotal : 0;
   const total = subtotal - discount;
+
+  // Cash handling — only meaningful when paying by cash. We let the
+  // cashier punch in the cash handed over so the receipt can show the
+  // amount paid and the change due. Blank = treat as exact payment.
+  const cashReceivedCents = (() => {
+    const trimmed = cashReceived.trim();
+    if (trimmed === "") return null; // blank = exact payment, not zero
+    const n = parseFloat(trimmed);
+    return Number.isFinite(n) && n >= 0 ? Math.round(n * 100) : null;
+  })();
+  const changeCents =
+    paymentMethod === "cash" && cashReceivedCents != null
+      ? Math.max(0, cashReceivedCents - total)
+      : 0;
 
   const canSubmit =
     !!activePackage &&
@@ -633,6 +650,8 @@ export default function POS() {
         addon_ids: oneTap ? [] : Array.from(selectedAddons),
         payment_method: oneTap ? "subscription" : paymentMethod,
         payment_ref: oneTap ? null : paymentRef.trim() || null,
+        paid_amount_cents:
+          oneTap || paymentMethod !== "cash" ? null : cashReceivedCents,
         branch_id: branchId,
         item_notes: oneTap ? null : itemNotes.trim() || null,
         vehicle_id: matchedVehicleId,
@@ -678,6 +697,7 @@ export default function POS() {
     setPlate("");
     setSelectedAddons(new Set());
     setPaymentRef("");
+    setCashReceived("");
     setItemNotes("");
     setMatchedVehicleId(null);
     setVehicleSuggestions([]);
@@ -726,8 +746,17 @@ export default function POS() {
           timeZone: "Asia/Brunei",
         }),
         items,
+        subtotal: formatBND(lastOrder.subtotal_cents),
         total: formatBND(lastOrder.total_cents),
         paymentLabel: PAYMENT_LABELS[lastOrder.payment_method],
+        paidAmount:
+          lastOrder.paid_amount_cents != null
+            ? formatBND(lastOrder.paid_amount_cents)
+            : undefined,
+        change:
+          lastOrder.paid_amount_cents != null
+            ? formatBND(lastOrder.change_cents ?? 0)
+            : undefined,
         cashierName: staff?.name ?? undefined,
       });
       toast({ title: "Receipt sent to printer" });
@@ -836,6 +865,22 @@ export default function POS() {
                     {PAYMENT_LABELS[lastOrder.payment_method]}
                   </span>
                 </div>
+                {lastOrder.paid_amount_cents != null && (
+                  <>
+                    <div className="flex justify-between text-gray-600">
+                      <span>Paid</span>
+                      <span className="font-semibold" data-testid="text-ticket-paid">
+                        {formatBND(lastOrder.paid_amount_cents)}
+                      </span>
+                    </div>
+                    <div className="flex justify-between text-gray-600">
+                      <span>Change</span>
+                      <span className="font-semibold" data-testid="text-ticket-change">
+                        {formatBND(lastOrder.change_cents ?? 0)}
+                      </span>
+                    </div>
+                  </>
+                )}
               </div>
 
               <button
@@ -1422,6 +1467,44 @@ export default function POS() {
                       </SelectContent>
                     </Select>
                   </div>
+                  {paymentMethod === "cash" && (
+                    <div>
+                      <Label htmlFor="cash-received">
+                        Cash received{" "}
+                        <span className="text-gray-400 text-xs">(optional)</span>
+                      </Label>
+                      <Input
+                        id="cash-received"
+                        type="number"
+                        inputMode="decimal"
+                        min="0"
+                        step="0.01"
+                        value={cashReceived}
+                        onChange={(e) => setCashReceived(e.target.value)}
+                        placeholder={`e.g. ${(total / 100).toFixed(2)}`}
+                        data-testid="input-cash-received"
+                      />
+                      {cashReceivedCents != null && (
+                        <div className="mt-1 flex justify-between text-sm">
+                          <span className="text-gray-600">
+                            {cashReceivedCents < total ? "Short by" : "Change"}
+                          </span>
+                          <span
+                            className={
+                              cashReceivedCents < total
+                                ? "font-semibold text-red-600"
+                                : "font-semibold text-gray-900"
+                            }
+                            data-testid="text-cash-change"
+                          >
+                            {cashReceivedCents < total
+                              ? formatBND(total - cashReceivedCents)
+                              : formatBND(changeCents)}
+                          </span>
+                        </div>
+                      )}
+                    </div>
+                  )}
                   <div>
                     <Label htmlFor="payment-ref">
                       Reference{" "}
