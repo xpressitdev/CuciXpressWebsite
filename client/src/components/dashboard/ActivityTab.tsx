@@ -918,7 +918,10 @@ function printReceipt(order: OrderRow) {
   }, 150);
 }
 
-function shareToWhatsApp(order: OrderRow) {
+// The plain-text version of the receipt — used as the message body that
+// accompanies the shared PDF, and as the desktop fallback when the device
+// can't share files (WhatsApp Web only accepts text via a wa.me link).
+function receiptCaption(order: OrderRow): string {
   const items = receiptItems(order).map(
     (it) =>
       `${it.kind === "addon" ? "  + " : "• "}${it.name}${
@@ -957,8 +960,196 @@ function shareToWhatsApp(order: OrderRow) {
     "",
     "— cucixpress.com",
   ];
-  const text = encodeURIComponent(lines.join("\n"));
-  window.open(`https://wa.me/?text=${text}`, "_blank", "noopener,noreferrer");
+  return lines.join("\n");
+}
+
+// Builds a printable, thermal-receipt-style PDF (80mm wide, height grows
+// to fit content) entirely with jsPDF text — no html2canvas, so it renders
+// crisply and avoids the oklch/gradient issues html snapshotting hits.
+async function buildReceiptPdfBlob(order: OrderRow): Promise<Blob> {
+  const { jsPDF } = await import("jspdf");
+
+  const W = 80; // mm — standard thermal receipt width
+  const M = 6; // side margin
+  const RIGHT = W - M;
+  const USABLE = W - 2 * M;
+  const CENTER = W / 2;
+
+  // Lay the receipt out once (draw=false) just to measure the final height,
+  // then create the real, exactly-sized document and draw it (draw=true).
+  const layout = (doc: any, draw: boolean): number => {
+    let y = 9;
+
+    const setF = (style: "normal" | "bold", size: number) => {
+      doc.setFont("helvetica", style);
+      doc.setFontSize(size);
+    };
+    const gray = (on: boolean) => doc.setTextColor(on ? 130 : 30);
+    const centered = (s: string, gap: number) => {
+      if (draw) doc.text(s, CENTER, y, { align: "center" });
+      y += gap;
+    };
+    const lr = (label: string, value: string, gap = 5) => {
+      if (draw) {
+        doc.text(label, M, y);
+        doc.text(value, RIGHT, y, { align: "right" });
+      }
+      y += gap;
+    };
+    const divider = () => {
+      if (draw) {
+        doc.setDrawColor(210);
+        doc.line(M, y, RIGHT, y);
+      }
+      y += 4;
+    };
+    const wrapped = (s: string, size: number, gap: number) => {
+      setF("normal", size);
+      const rows: string[] = doc.splitTextToSize(s, USABLE);
+      for (const r of rows) centered(r, gap);
+    };
+
+    // Header
+    gray(false);
+    setF("bold", 17);
+    centered("CuciXpress", 6);
+    gray(true);
+    setF("normal", 7.5);
+    centered("DRIVE-THRU CAR WASH · BRUNEI", 4);
+    centered(BUSINESS_PHONE, 6);
+
+    // Receipt number + date
+    setF("normal", 6.5);
+    gray(true);
+    centered("RECEIPT NO.", 4);
+    gray(false);
+    setF("bold", 13);
+    centered(shortReceiptId(order.id), 5.5);
+    gray(true);
+    setF("normal", 8);
+    centered(formatDateTime(order.created_at), 6);
+
+    divider();
+
+    // Details
+    gray(false);
+    setF("normal", 9);
+    lr("Branch", order.branch_name ?? "—");
+    lr("Vehicle", order.plate);
+    if (order.cashier_name) lr("Cashier", order.cashier_name);
+    lr("Payment", payLabel(order.payment_method));
+
+    divider();
+
+    // Items
+    gray(true);
+    setF("bold", 6.5);
+    lr("ITEM", "AMOUNT", 5);
+    gray(false);
+    setF("normal", 9);
+    for (const it of receiptItems(order)) {
+      const name = (it.kind === "addon" ? "+ " : "") + it.name;
+      lr(name, it.price_cents != null ? formatBNDFull(it.price_cents) : "");
+    }
+    if (order.item_notes?.trim()) {
+      gray(true);
+      wrapped(`Note: ${order.item_notes.trim()}`, 8, 4);
+      gray(false);
+    }
+
+    divider();
+
+    // Totals
+    setF("normal", 9);
+    if (order.subtotal_cents != null)
+      lr("Subtotal", formatBNDFull(order.subtotal_cents));
+    const disc = totalDiscount(order);
+    if (disc > 0) lr("Discount", `− ${formatBNDFull(disc)}`);
+    setF("bold", 12);
+    lr("TOTAL", formatBNDFull(order.total_cents), 6);
+    if (order.paid_amount_cents != null) {
+      setF("normal", 9);
+      lr("Paid", formatBNDFull(order.paid_amount_cents));
+      lr("Change", formatBNDFull(order.change_cents ?? 0));
+    }
+
+    divider();
+
+    // Footer
+    gray(true);
+    wrapped(
+      `Thank you for choosing CuciXpress · ${formatBND(order.total_cents)} earned in loyalty`,
+      7.5,
+      4,
+    );
+    y += 1;
+    wrapped(LOYALTY_PROMO, 6.5, 3.5);
+    y += 1;
+    gray(false);
+    setF("bold", 7.5);
+    centered("cucixpress.com", 4);
+
+    return y;
+  };
+
+  const measure = new jsPDF({ unit: "mm", format: [W, 1000] });
+  const height = Math.ceil(layout(measure, false)) + 4;
+  const doc = new jsPDF({ unit: "mm", format: [W, height] });
+  layout(doc, true);
+  return doc.output("blob");
+}
+
+function openWhatsAppText(caption: string) {
+  window.open(
+    `https://wa.me/?text=${encodeURIComponent(caption)}`,
+    "_blank",
+    "noopener,noreferrer",
+  );
+}
+
+async function shareToWhatsApp(order: OrderRow) {
+  const caption = receiptCaption(order);
+  const nav = navigator as any;
+
+  // Probe file-share support synchronously (with a tiny dummy file) BEFORE
+  // any await. On desktop / unsupported browsers we open the wa.me text link
+  // straight from the click gesture — opening it after an await would get it
+  // blocked as a non-user-initiated popup.
+  let canShareFiles = false;
+  try {
+    canShareFiles =
+      !!nav.canShare &&
+      nav.canShare({
+        files: [new File(["x"], "probe.pdf", { type: "application/pdf" })],
+      });
+  } catch {
+    canShareFiles = false;
+  }
+
+  if (!canShareFiles) {
+    openWhatsAppText(caption);
+    return;
+  }
+
+  try {
+    const blob = await buildReceiptPdfBlob(order);
+    const file = new File(
+      [blob],
+      `CuciXpress-${shortReceiptId(order.id)}.pdf`,
+      { type: "application/pdf" },
+    );
+    await nav.share({
+      files: [file],
+      title: "CuciXpress receipt",
+      text: caption,
+    });
+  } catch (err: any) {
+    // User dismissed the native share sheet — respect that, don't reopen.
+    if (err?.name === "AbortError") return;
+    // Share was reported supported but failed (or the PDF build failed) —
+    // last-resort text link so the cashier can still send something.
+    openWhatsAppText(caption);
+  }
 }
 
 function Row({

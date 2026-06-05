@@ -69,6 +69,7 @@
     "html5-qrcode": "^2.3.8",
     "input-otp": "^1.4.2",
     "jsonwebtoken": "^9.0.2",
+    "jspdf": "^4.2.1",
     "lucia": "^3.2.2",
     "lucide-react": "^0.453.0",
     "memoizee": "^0.4.17",

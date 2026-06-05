@@ -1,4 +1,5 @@
 - [Auth session cookies](auth-session-cookies.md) — customer login dropping on mobile? Check Lucia `sessionCookie.expires` (true=persistent, false=dies on tab close), not session-expiry bugs.
+- [WhatsApp receipt file share](whatsapp-receipt-share.md) — wa.me link is text-only; attach files via navigator.share, probe canShare synchronously or the fallback popup gets blocked.
 - [Tailwind dynamic classes](tailwind-dynamic-classes.md) — class strings from API/DB/concatenation render unstyled (JIT can't see them); use literal class strings in source and index in.
 - [SharePoint history import + chart refresh](sharepoint-history-import.md) — re-importing the master Excel: run import script then recompute_vip_tiers; charts are live (no cache); run long imports via a temp workflow (detached procs get killed).
 - [Staging DB schema drift](staging-db-schema-drift.md) — STAGING_DATABASE_URL is an older snapshot; apply migrations/manual/*.sql (idempotent) before running DB-backed tests, never patch dev/prod.
