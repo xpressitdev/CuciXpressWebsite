@@ -15,6 +15,7 @@ import {
   List,
   Printer,
   Search,
+  X,
 } from "lucide-react";
 import { SiWhatsapp } from "react-icons/si";
 import { Button } from "@/components/ui/button";
@@ -22,6 +23,7 @@ import { Input } from "@/components/ui/input";
 import {
   Dialog,
   DialogContent,
+  DialogClose,
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog";
@@ -552,11 +554,24 @@ export function ActivityTab({ orders }: Props) {
 
       {/* Shared receipt dialog (used by both timeline and receipts view) */}
       <Dialog open={!!openReceipt} onOpenChange={(v) => !v && setOpenReceipt(null)}>
-        <DialogContent className="max-w-sm p-0 overflow-hidden bg-transparent border-none shadow-none">
+        <DialogContent className="max-w-sm p-0 overflow-visible bg-transparent border-none shadow-none [&>button]:hidden">
           <DialogHeader>
             <DialogTitle className="sr-only">Receipt</DialogTitle>
           </DialogHeader>
-          {openReceipt && <ReceiptView order={openReceipt} />}
+          {openReceipt && (
+            <div className="relative">
+              <DialogClose
+                className="absolute -right-2 -top-2 z-30 rounded-full bg-gray-900 text-white p-2 shadow-lg border-2 border-white hover:bg-gray-700 focus:outline-none focus:ring-2 focus:ring-purple-500 focus:ring-offset-2"
+                data-testid="button-receipt-close"
+              >
+                <X className="h-5 w-5" />
+                <span className="sr-only">Close receipt</span>
+              </DialogClose>
+              <div className="overflow-hidden rounded-md">
+                <ReceiptView order={openReceipt} />
+              </div>
+            </div>
+          )}
         </DialogContent>
       </Dialog>
     </div>
@@ -564,7 +579,6 @@ export function ActivityTab({ orders }: Props) {
 }
 
 function ReceiptView({ order }: { order: OrderRow }) {
-  const print = () => window.print();
   const PIcon = payIcon(order.payment_method);
   const grad = packageGradient(order.package_name);
   return (
@@ -643,7 +657,7 @@ function ReceiptView({ order }: { order: OrderRow }) {
         <Button
           variant="outline"
           className="flex-1 bg-white"
-          onClick={print}
+          onClick={() => printReceipt(order)}
           data-testid="button-receipt-print"
         >
           <Printer className="w-4 h-4 mr-1.5" /> Print
@@ -658,7 +672,7 @@ function ReceiptView({ order }: { order: OrderRow }) {
         </Button>
         <Button
           className="flex-1 bg-gradient-to-r from-purple-600 to-orange-500 text-white"
-          onClick={print}
+          onClick={() => printReceipt(order)}
           data-testid="button-receipt-download"
         >
           <Download className="w-4 h-4 mr-1.5" /> Save PDF
@@ -666,6 +680,107 @@ function ReceiptView({ order }: { order: OrderRow }) {
       </div>
     </div>
   );
+}
+
+// Prints a clean, single-page receipt via a hidden iframe. We render a
+// self-contained HTML document instead of window.print() so (a) only the
+// receipt prints — not the whole dashboard, which previously spilled onto 3
+// pages — and (b) the title/total show as solid colours rather than the
+// gradient "clip-text" that disappears when browsers drop background graphics.
+let printing = false;
+function printReceipt(order: OrderRow) {
+  if (printing) return; // ignore rapid double-clicks while a print is in flight
+  printing = true;
+  const esc = (s: string) =>
+    s.replace(/[&<>"']/g, (c) =>
+      c === "&" ? "&amp;"
+        : c === "<" ? "&lt;"
+        : c === ">" ? "&gt;"
+        : c === '"' ? "&quot;"
+        : "&#39;",
+    );
+  const row = (label: string, value: string) =>
+    `<div class="row"><span class="lbl">${esc(label)}</span><span class="val">${esc(value)}</span></div>`;
+
+  const html = `<!doctype html><html><head><meta charset="utf-8"><title>Receipt ${esc(shortReceiptId(order.id))}</title>
+<style>
+  @page { margin: 12mm; }
+  * { box-sizing: border-box; }
+  body { margin: 0; font-family: -apple-system, Segoe UI, Roboto, Helvetica, Arial, sans-serif; color: #111; }
+  .receipt { width: 300px; margin: 0 auto; padding: 8px 0; }
+  .bar { height: 6px; background: #7c3aed; border-radius: 3px; }
+  .center { text-align: center; }
+  .brand { font-size: 22px; font-weight: 800; color: #7c3aed; margin: 10px 0 2px; }
+  .sub { font-size: 9px; letter-spacing: 2px; text-transform: uppercase; color: #888; }
+  .hr { border-top: 2px dashed #d4d4d8; margin: 12px 0; }
+  .small { font-size: 9px; text-transform: uppercase; color: #999; letter-spacing: 1px; }
+  .rid { font-family: ui-monospace, Menlo, Consolas, monospace; font-size: 17px; font-weight: 800; }
+  .date { font-size: 11px; color: #666; margin-top: 2px; }
+  .row { display: flex; justify-content: space-between; font-size: 13px; margin: 6px 0; }
+  .lbl { color: #666; }
+  .val { font-weight: 700; }
+  .total { display: flex; justify-content: space-between; align-items: center; margin: 4px 0; }
+  .total .t-lbl { font-size: 11px; letter-spacing: 2px; text-transform: uppercase; font-weight: 800; color: #555; }
+  .total .t-val { font-size: 20px; font-weight: 800; color: #7c3aed; }
+  .foot { font-size: 10px; color: #999; text-align: center; margin-top: 6px; }
+</style></head><body>
+<div class="receipt">
+  <div class="bar"></div>
+  <div class="center">
+    <div class="brand">CuciXpress</div>
+    <div class="sub">Drive-thru car wash · Brunei</div>
+  </div>
+  <div class="hr"></div>
+  <div class="center">
+    <div class="small">Receipt no.</div>
+    <div class="rid">${esc(shortReceiptId(order.id))}</div>
+    <div class="date">${esc(formatDateTime(order.created_at))}</div>
+  </div>
+  <div class="hr"></div>
+  ${row("Branch", order.branch_name ?? "—")}
+  ${row("Vehicle", order.plate)}
+  ${row("Package", order.package_name)}
+  ${row("Payment", payLabel(order.payment_method))}
+  ${row("Status", order.status)}
+  <div class="hr"></div>
+  <div class="total"><span class="t-lbl">Total</span><span class="t-val">${esc(formatBNDFull(order.total_cents))}</span></div>
+  <div class="hr"></div>
+  <div class="foot">Thank you for choosing CuciXpress · ${esc(formatBND(order.total_cents))} earned in loyalty</div>
+</div>
+</body></html>`;
+
+  const iframe = document.createElement("iframe");
+  iframe.style.position = "fixed";
+  iframe.style.right = "0";
+  iframe.style.bottom = "0";
+  iframe.style.width = "0";
+  iframe.style.height = "0";
+  iframe.style.border = "0";
+  document.body.appendChild(iframe);
+
+  const doc = iframe.contentWindow?.document;
+  if (!doc) {
+    iframe.remove();
+    printing = false;
+    return;
+  }
+  doc.open();
+  doc.write(html);
+  doc.close();
+
+  const win = iframe.contentWindow!;
+  const cleanup = () =>
+    setTimeout(() => {
+      iframe.remove();
+      printing = false;
+    }, 500);
+  win.onafterprint = cleanup;
+  // Give the iframe a tick to lay out before printing.
+  setTimeout(() => {
+    win.focus();
+    win.print();
+    cleanup();
+  }, 150);
 }
 
 function shareToWhatsApp(order: OrderRow) {
