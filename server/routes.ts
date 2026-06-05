@@ -6009,7 +6009,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
       const packagesRows = (await db.execute(
         useBranchFilter
           ? sql`
-              SELECT p.id, p.name, p.description, p.duration_minutes, p.price_cents, p.sort_order
+              SELECT p.id, p.name, p.description, p.duration_minutes, p.price_cents, p.sort_order, p.category_id
                 FROM packages p
                WHERE p.is_active = true
                  AND (
@@ -6022,7 +6022,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
                ORDER BY p.sort_order ASC, p.name ASC
             `
           : sql`
-              SELECT id, name, description, duration_minutes, price_cents, sort_order
+              SELECT id, name, description, duration_minutes, price_cents, sort_order, category_id
                 FROM packages
                WHERE is_active = true
                ORDER BY sort_order ASC, name ASC
@@ -6034,6 +6034,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
         duration_minutes: number | null;
         price_cents: number;
         sort_order: number;
+        category_id: string | null;
       }>;
 
       // Same branch-restriction rule as packages above (added 2026-05-08_02):
