@@ -97,7 +97,7 @@ export default function CategoriesSection() {
               <span className="text-cuci-primary">Categories</span>
             </CardTitle>
             <p className="text-sm text-gray-600">
-              Group POS products. Packages keep working if a category is removed.
+              Group POS products. A category with packages can only be deactivated — delete it after moving its packages elsewhere.
             </p>
           </div>
           <Button
@@ -161,20 +161,25 @@ export default function CategoriesSection() {
                       <EyeOff className="w-3 h-3 mr-1" /> Deactivate
                     </Button>
                   )}
-                  <Button
-                    size="sm"
-                    variant="outline"
-                    className="border-2 border-black text-red-600 hover:text-red-700"
-                    disabled={remove.isPending}
-                    onClick={() => {
-                      if (window.confirm(`Permanently delete "${c.name}"? Packages will fall back to Uncategorised.`)) {
-                        remove.mutate({ id: c.id, force: true });
-                      }
-                    }}
-                    data-testid={`button-delete-category-${c.id}`}
-                  >
-                    <Trash2 className="w-3 h-3 mr-1" /> Delete
-                  </Button>
+                  {/* Hard delete is only offered when no packages reference this
+                      category — matches the server's in-use protection. While
+                      packages are assigned, the owner must deactivate instead. */}
+                  {c.package_count === 0 && (
+                    <Button
+                      size="sm"
+                      variant="outline"
+                      className="border-2 border-black text-red-600 hover:text-red-700"
+                      disabled={remove.isPending}
+                      onClick={() => {
+                        if (window.confirm(`Permanently delete "${c.name}"?`)) {
+                          remove.mutate({ id: c.id, force: true });
+                        }
+                      }}
+                      data-testid={`button-delete-category-${c.id}`}
+                    >
+                      <Trash2 className="w-3 h-3 mr-1" /> Delete
+                    </Button>
+                  )}
                 </div>
               </div>
             ))}

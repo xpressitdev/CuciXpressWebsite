@@ -2583,6 +2583,20 @@ export async function registerRoutes(app: Express): Promise<Server> {
     if (!id) return res.status(400).json({ error: 'missing_id' });
     try {
       if (force) {
+        // Same rule as packages/add-ons/discounts/etc: hard-delete only
+        // when nothing references it. A category still assigned to packages
+        // is soft-deactivated instead, so we never silently strip the
+        // category off live packages via FK ON DELETE SET NULL.
+        const inUse = (await db.execute(sql`
+          SELECT 1 FROM packages WHERE category_id = ${id} LIMIT 1
+        `)).rows.length > 0;
+        if (inUse) {
+          const updated = (await db.execute(sql`
+            UPDATE categories SET is_active = false WHERE id = ${id} RETURNING id
+          `)).rows[0];
+          if (!updated) return res.status(404).json({ error: 'not_found' });
+          return res.status(409).json({ error: 'in_use', deactivated: true });
+        }
         const deleted = (await db.execute(sql`DELETE FROM categories WHERE id = ${id} RETURNING id`)).rows[0];
         if (!deleted) return res.status(404).json({ error: 'not_found' });
         return res.json({ ok: true, deleted: true });
@@ -2881,13 +2895,28 @@ export async function registerRoutes(app: Express): Promise<Server> {
     const p = parsed.data;
     try {
       const existing = (await db.execute(
-        sql`SELECT is_system FROM payment_methods WHERE id = ${id} LIMIT 1`,
-      )).rows[0] as { is_system: boolean } | undefined;
+        sql`SELECT is_system, method, qr_provider FROM payment_methods WHERE id = ${id} LIMIT 1`,
+      )).rows[0] as { is_system: boolean; method: string; qr_provider: string | null } | undefined;
       if (!existing) return res.status(404).json({ error: 'not_found' });
       // System rows: ignore any method/provider change (locked to code).
       const allowCode = !existing.is_system;
-      const provider =
-        p.method !== undefined && p.method !== 'qr_code' ? null : (p.qr_provider ?? null);
+      // Re-apply the same method↔provider invariant POST enforces, but against
+      // the EFFECTIVE final state (partial PATCH may touch only one of the two).
+      // For system rows the code is locked, so validate against the stored method.
+      const effectiveMethod = allowCode && p.method !== undefined ? p.method : existing.method;
+      const effectiveProvider =
+        effectiveMethod !== 'qr_code'
+          ? null
+          : p.qr_provider !== undefined
+            ? (p.qr_provider ?? null)
+            : existing.qr_provider;
+      if (effectiveMethod === 'qr_code' && !effectiveProvider) {
+        return res.status(400).json({ error: 'provider_required_for_qr' });
+      }
+      if (effectiveMethod !== 'qr_code' && effectiveProvider) {
+        return res.status(400).json({ error: 'provider_not_allowed' });
+      }
+      const provider = effectiveProvider;
       const row = (await db.execute(sql`
         UPDATE payment_methods
            SET label       = COALESCE(${p.label ?? null}, label),
