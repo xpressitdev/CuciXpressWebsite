@@ -1589,8 +1589,17 @@ interface CatalogPackage {
   is_active: boolean;
   sort_order: number;
   order_count: number;
+  // null = "Uncategorised" (groups under the catch-all in POS).
+  category_id: string | null;
   // Empty array = available at all branches (server convention).
   branch_ids: number[];
+}
+interface CategoryRow {
+  id: string;
+  name: string;
+  is_active: boolean;
+  sort_order: number;
+  package_count: number;
 }
 interface BranchRow {
   id: number;
@@ -1640,6 +1649,8 @@ function PackagesSection({ canEdit }: { canEdit: boolean }) {
     queryKey: ["/api/admin/catalog/packages"],
   });
   const rows = data?.rows ?? [];
+  const { data: categoriesData } = useCategories();
+  const categoryName = new Map((categoriesData?.rows ?? []).map((c) => [c.id, c.name]));
   const [editing, setEditing] = useState<CatalogPackage | null>(null);
   const [creating, setCreating] = useState(false);
 
@@ -1711,6 +1722,7 @@ function PackagesSection({ canEdit }: { canEdit: boolean }) {
               <TableHeader>
                 <TableRow>
                   <TableHead>Name</TableHead>
+                  <TableHead>Category</TableHead>
                   <TableHead>Description</TableHead>
                   <TableHead>Branches</TableHead>
                   <TableHead className="text-right">Price</TableHead>
@@ -1723,6 +1735,15 @@ function PackagesSection({ canEdit }: { canEdit: boolean }) {
                 {rows.map((r) => (
                   <TableRow key={r.id} className={!r.is_active ? "opacity-60" : ""} data-testid={`row-pkg-${r.id}`}>
                     <TableCell className="font-medium text-sm">{r.name}</TableCell>
+                    <TableCell className="text-xs">
+                      {r.category_id && categoryName.get(r.category_id) ? (
+                        <Badge variant="outline" className="border-indigo-200 text-indigo-700 bg-indigo-50">
+                          {categoryName.get(r.category_id)}
+                        </Badge>
+                      ) : (
+                        <span className="text-gray-400">Uncategorised</span>
+                      )}
+                    </TableCell>
                     <TableCell className="text-xs text-gray-600 max-w-[240px] truncate">{r.description ?? "—"}</TableCell>
                     <TableCell className="text-xs">
                       {r.branch_ids.length === 0 ? (
@@ -1776,6 +1797,12 @@ function useBranches() {
   return useQuery<{ rows: BranchRow[] }>({ queryKey: ["/api/admin/branches"] });
 }
 
+// Categories for the package editor's "Category" selector. Owner-only
+// endpoint, same one CategoriesSection manages.
+function useCategories() {
+  return useQuery<{ rows: CategoryRow[] }>({ queryKey: ["/api/admin/catalog/categories"] });
+}
+
 function BranchBadges({ ids }: { ids: number[] }) {
   const { data } = useBranches();
   const map = new Map((data?.rows ?? []).map((b) => [b.id, b.name]));
@@ -1807,6 +1834,10 @@ function PackageEditDialog({
   const [price, setPrice] = useState(initial ? formatBndInput(initial.price_cents) : "");
   const [isActive, setIsActive] = useState(initial?.is_active ?? true);
   const [sortOrder, setSortOrder] = useState(initial?.sort_order != null ? String(initial.sort_order) : "0");
+  // "none" is the sentinel for Uncategorised (Select can't hold an empty value).
+  const [categoryId, setCategoryId] = useState<string>(initial?.category_id ?? "none");
+  const { data: categoriesData } = useCategories();
+  const categories = (categoriesData?.rows ?? []).filter((c) => c.is_active || c.id === initial?.category_id);
   // "All branches" mode is the default and what an empty branch_ids
   // means on the server. The owner ticks specific branches only when
   // a package is branch-restricted (e.g. Tungku-only Interior Cleaning).
@@ -1847,6 +1878,7 @@ function PackageEditDialog({
       price_cents: cents,
       is_active: isActive,
       sort_order: so,
+      category_id: categoryId === "none" ? null : categoryId,
       branch_ids: allBranches ? [] : Array.from(selectedBranches).sort((a, b) => a - b),
     });
   };
@@ -1868,6 +1900,20 @@ function PackageEditDialog({
           <div className="space-y-1">
             <label className="text-xs text-gray-600">Description (optional)</label>
             <Input value={description} onChange={(e) => setDescription(e.target.value)} placeholder="Exterior wash + interior wipe-down" data-testid="input-pkg-description" />
+          </div>
+          <div className="space-y-1">
+            <label className="text-xs text-gray-600">Category (groups this package in the POS)</label>
+            <Select value={categoryId} onValueChange={setCategoryId}>
+              <SelectTrigger data-testid="select-pkg-category"><SelectValue /></SelectTrigger>
+              <SelectContent>
+                <SelectItem value="none">Uncategorised</SelectItem>
+                {categories.map((c) => (
+                  <SelectItem key={c.id} value={c.id}>
+                    {c.name}{!c.is_active ? " (inactive)" : ""}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
           </div>
           <div className="grid grid-cols-3 gap-3">
             <div className="space-y-1">

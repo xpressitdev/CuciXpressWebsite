@@ -2914,11 +2914,22 @@ export async function registerRoutes(app: Express): Promise<Server> {
     if (!id) return res.status(400).json({ error: 'missing_id' });
     try {
       const existing = (await db.execute(
-        sql`SELECT is_system FROM payment_methods WHERE id = ${id} LIMIT 1`,
-      )).rows[0] as { is_system: boolean } | undefined;
+        sql`SELECT is_system, method, qr_provider FROM payment_methods WHERE id = ${id} LIMIT 1`,
+      )).rows[0] as { is_system: boolean; method: string; qr_provider: string | null } | undefined;
       if (!existing) return res.status(404).json({ error: 'not_found' });
       if (force) {
         if (existing.is_system) return res.status(409).json({ error: 'system_locked' });
+        // Protect historical reporting: never hard-delete a method/provider
+        // mapping that real orders were recorded against. Deactivate instead.
+        const used = (await db.execute(sql`
+          SELECT COUNT(*)::int AS n FROM orders
+           WHERE payment_method = ${existing.method}
+             AND qr_provider IS NOT DISTINCT FROM ${existing.qr_provider}
+        `)).rows[0] as { n: number };
+        if (used.n > 0) {
+          await db.execute(sql`UPDATE payment_methods SET is_active = false WHERE id = ${id}`);
+          return res.status(409).json({ error: 'in_use', order_count: used.n, deactivated: true });
+        }
         await db.execute(sql`DELETE FROM payment_methods WHERE id = ${id}`);
         return res.json({ ok: true, deleted: true });
       }
