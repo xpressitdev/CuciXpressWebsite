@@ -2,7 +2,6 @@ import { useEffect, useRef, useState } from "react";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
-import { Textarea } from "@/components/ui/textarea";
 import {
   QrCode,
   Camera,
@@ -64,8 +63,6 @@ export default function ScanInTab({
   const inFlightRef = useRef(false);
   const [cameraOn, setCameraOn] = useState(false);
   const [cameraError, setCameraError] = useState<string | null>(null);
-  const [manualText, setManualText] = useState("");
-  const [verifying, setVerifying] = useState(false);
   const [result, setResult] = useState<VerifyResult | null>(null);
 
   const stopCamera = async () => {
@@ -95,7 +92,6 @@ export default function ScanInTab({
   const verify = async (qrData: string) => {
     if (inFlightRef.current) return;
     inFlightRef.current = true;
-    setVerifying(true);
     try {
       const res = await fetch("/api/verify-qr", {
         method: "POST",
@@ -141,7 +137,6 @@ export default function ScanInTab({
         message: e?.message ?? "Network error",
       });
     } finally {
-      setVerifying(false);
       // Allow another scan after a short cool-down so the camera doesn't
       // hammer the API on every frame match.
       setTimeout(() => {
@@ -171,30 +166,15 @@ export default function ScanInTab({
     } catch (e: any) {
       const msg =
         e?.message ??
-        "Could not start camera. Use the manual paste box below instead.";
+        "Could not start camera. Check camera permissions and try again.";
       setCameraError(msg);
       setCameraOn(false);
       scannerRef.current = null;
     }
   };
 
-  const handleManualVerify = () => {
-    const text = manualText.trim();
-    if (!text) {
-      toast({
-        title: "Paste a QR payload",
-        description: "Copy the QR contents from the customer receipt first.",
-        variant: "destructive",
-      });
-      return;
-    }
-    setResult(null);
-    verify(text);
-  };
-
   const reset = () => {
     setResult(null);
-    setManualText("");
   };
 
   // ─── Result rendering helpers ─────────────────────────────────────────
@@ -259,8 +239,9 @@ export default function ScanInTab({
         </CardHeader>
       </Card>
 
-      {/* Camera + manual paste — side by side on lg, stacked on mobile */}
-      <div className="grid lg:grid-cols-2 gap-6">
+      {/* Camera scan only. Manual paste was removed so cashiers can't key in
+          arbitrary QR payloads — the camera is the single check-in path. */}
+      <div className="max-w-md mx-auto">
         {/* Camera */}
         <Card>
           <CardHeader className="pb-3">
@@ -307,44 +288,6 @@ export default function ScanInTab({
                 Aim at the QR on the customer's screen. Hold steady ~10cm away.
               </p>
             )}
-          </CardContent>
-        </Card>
-
-        {/* Manual paste */}
-        <Card>
-          <CardHeader className="pb-3">
-            <CardTitle className="text-base flex items-center gap-2">
-              <QrCode className="w-4 h-4" />
-              Manual paste
-            </CardTitle>
-          </CardHeader>
-          <CardContent className="space-y-3">
-            <Textarea
-              value={manualText}
-              onChange={(e) => setManualText(e.target.value)}
-              placeholder='Paste the QR payload here, e.g. {"type":"CUCI_XPRESS_PAYMENT","order_id":"..."}'
-              className="font-mono text-xs h-40 resize-none"
-              data-testid="input-manual-qr"
-            />
-            <div className="flex gap-2">
-              <Button
-                onClick={handleManualVerify}
-                disabled={verifying || !manualText.trim()}
-                className="flex-1"
-                data-testid="button-manual-verify"
-              >
-                {verifying ? "Verifying…" : "Verify"}
-              </Button>
-              {manualText && (
-                <Button variant="outline" onClick={() => setManualText("")}>
-                  Clear
-                </Button>
-              )}
-            </div>
-            <p className="text-xs text-gray-500">
-              Use this if the camera won't open or the screen is too dim to
-              scan.
-            </p>
           </CardContent>
         </Card>
       </div>
