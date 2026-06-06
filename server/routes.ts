@@ -6996,6 +6996,16 @@ export async function registerRoutes(app: Express): Promise<Server> {
     if (!Number.isFinite(branchId) || branchId <= 0) {
       return res.status(400).json({ error: 'branch_id required' });
     }
+    // Branch lock: lane/cashier may only read their own branch's orders;
+    // owner/manager can read any branch. Mirrors the status/reorder routes.
+    const staffUser = req.staff!.user as any;
+    const staffRole = staffUser.role as 'owner' | 'manager' | 'lane' | 'cashier';
+    const staffBranchId = staffUser.branchId as number | null;
+    if (staffRole !== 'owner' && staffRole !== 'manager') {
+      if (staffBranchId == null || branchId !== staffBranchId) {
+        return res.status(403).json({ error: 'branch_mismatch' });
+      }
+    }
     try {
       const rows = (await db.execute(sql`
         SELECT id, ticket_code, plate, package_name,
