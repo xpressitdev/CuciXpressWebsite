@@ -557,6 +557,10 @@ export const orders = pgTable("orders", {
     .notNull()
     .default(sql`((now() AT TIME ZONE 'UTC')::date)`),
   status: text("status").default("paid").notNull(),
+  // Lane-control manual ordering (2026-06-06): cashiers can reorder the
+  // "Up next" queue. NULL = no manual position → falls back to created_at
+  // (FIFO). Lower number = earlier in the queue.
+  queue_position: integer("queue_position"),
   // Phase 4 — refund audit. Populated together when status='refunded'.
   refunded_at: timestamp("refunded_at", { withTimezone: true }),
   refunded_by_staff_id: text("refunded_by_staff_id").references(() => staff.id),

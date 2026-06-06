@@ -34,6 +34,9 @@ import {
   Play,
   CheckCheck,
   Activity,
+  ChevronUp,
+  ChevronDown,
+  Undo2,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -139,6 +142,8 @@ interface TodayOrder {
   payment_method: PaymentMethod;
   status: string;
   created_at: string;
+  // Lane-control manual ordering. NULL = FIFO by created_at.
+  queue_position?: number | null;
   // Phase 4 — populated when status='refunded'.
   refunded_at?: string | null;
   refund_reason?: string | null;
@@ -2161,11 +2166,23 @@ function LaneControl({
 }) {
   const { toast } = useToast();
   const [pendingId, setPendingId] = useState<string | null>(null);
+  const [reordering, setReordering] = useState(false);
 
-  const queued = orders.filter((o) => o.status === "queued");
   const washing = orders.filter((o) => o.status === "washing");
+  // "Up next", front-first: manual queue_position wins, then FIFO by created_at.
+  const queued = orders
+    .filter((o) => o.status === "queued")
+    .sort((a, b) => {
+      const pa = a.queue_position ?? Number.POSITIVE_INFINITY;
+      const pb = b.queue_position ?? Number.POSITIVE_INFINITY;
+      if (pa !== pb) return pa - pb;
+      return a.created_at.localeCompare(b.created_at);
+    });
 
-  const advance = async (orderId: string, to: "washing" | "done") => {
+  const advance = async (
+    orderId: string,
+    to: "washing" | "done" | "queued",
+  ) => {
     setPendingId(orderId);
     try {
       const r = await apiRequest("PATCH", `/api/pos/orders/${orderId}/status`, { to });
@@ -2175,10 +2192,18 @@ function LaneControl({
       }
       onChanged();
       toast({
-        title: to === "washing" ? "Wash started" : "Marked done",
-        description: to === "washing"
-          ? "Car moved to the washing lane."
-          : "Car checked out — counted in today's total.",
+        title:
+          to === "washing"
+            ? "Wash started"
+            : to === "done"
+              ? "Marked done"
+              : "Sent back to queue",
+        description:
+          to === "washing"
+            ? "Car moved to the washing lane."
+            : to === "done"
+              ? "Car checked out — counted in today's total."
+              : "Car moved to the front of Up next.",
       });
     } catch (e: any) {
       toast({
@@ -2188,6 +2213,39 @@ function LaneControl({
       });
     } finally {
       setPendingId(null);
+    }
+  };
+
+  // Move a queued car up/down by one slot, then persist the whole order.
+  const move = async (index: number, dir: -1 | 1) => {
+    const target = index + dir;
+    if (target < 0 || target >= queued.length) return;
+    const next = [...queued];
+    [next[index], next[target]] = [next[target], next[index]];
+    setReordering(true);
+    try {
+      const r = await apiRequest("PATCH", `/api/pos/queue/reorder`, {
+        branch_id: branchId,
+        order_ids: next.map((o) => o.id),
+      });
+      if (!r.ok) {
+        const body = await r.json().catch(() => ({}));
+        throw new Error(body?.error ?? `${r.status}`);
+      }
+      onChanged();
+    } catch (e: any) {
+      const stale = String(e?.message ?? "").includes("queue_changed");
+      toast({
+        title: "Couldn't reorder",
+        description: stale
+          ? "The queue changed on another device — refreshed it."
+          : e?.message ?? "Try again.",
+        variant: "destructive",
+      });
+      // Snap the list back to server truth (esp. on a stale 409).
+      onChanged();
+    } finally {
+      setReordering(false);
     }
   };
 
@@ -2224,23 +2282,36 @@ function LaneControl({
                       {o.plate} · {o.package_name}
                     </p>
                   </div>
-                  <Button
-                    size="sm"
-                    variant="default"
-                    disabled={pendingId === o.id}
-                    onClick={() => advance(o.id, "done")}
-                    data-testid={`button-mark-done-${o.id}`}
-                    className="bg-emerald-600 hover:bg-emerald-700 text-white"
-                  >
-                    {pendingId === o.id ? (
-                      <Loader2 className="w-3.5 h-3.5 animate-spin" />
-                    ) : (
-                      <>
-                        <CheckCheck className="w-3.5 h-3.5 mr-1" />
-                        Mark done
-                      </>
-                    )}
-                  </Button>
+                  <div className="flex items-center gap-1.5 shrink-0">
+                    <Button
+                      size="sm"
+                      variant="outline"
+                      disabled={pendingId === o.id}
+                      onClick={() => advance(o.id, "queued")}
+                      data-testid={`button-send-back-${o.id}`}
+                      title="Send this car back to Up next"
+                    >
+                      <Undo2 className="w-3.5 h-3.5 mr-1" />
+                      Send back
+                    </Button>
+                    <Button
+                      size="sm"
+                      variant="default"
+                      disabled={pendingId === o.id}
+                      onClick={() => advance(o.id, "done")}
+                      data-testid={`button-mark-done-${o.id}`}
+                      className="bg-emerald-600 hover:bg-emerald-700 text-white"
+                    >
+                      {pendingId === o.id ? (
+                        <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                      ) : (
+                        <>
+                          <CheckCheck className="w-3.5 h-3.5 mr-1" />
+                          Mark done
+                        </>
+                      )}
+                    </Button>
+                  </div>
                 </div>
               ))}
             </div>
@@ -2256,15 +2327,36 @@ function LaneControl({
             <p className="text-sm text-gray-400 italic">Queue is empty.</p>
           ) : (
             <div className="space-y-2">
-              {[...queued]
-                .sort((a, b) => a.created_at.localeCompare(b.created_at))
-                .map((o, i) => (
+              {queued.map((o, i) => (
                   <div
                     key={o.id}
                     className="flex items-center justify-between gap-2 border border-gray-200 rounded-lg px-3 py-2"
                     data-testid={`row-queued-${o.id}`}
                   >
                     <div className="flex items-center gap-2 min-w-0">
+                      {/* Reorder controls — move this car up/down the queue. */}
+                      <div className="flex flex-col">
+                        <button
+                          type="button"
+                          disabled={reordering || i === 0}
+                          onClick={() => move(i, -1)}
+                          data-testid={`button-move-up-${o.id}`}
+                          aria-label="Move up"
+                          className="text-gray-500 hover:text-gray-900 disabled:opacity-30 disabled:cursor-not-allowed"
+                        >
+                          <ChevronUp className="w-4 h-4" />
+                        </button>
+                        <button
+                          type="button"
+                          disabled={reordering || i === queued.length - 1}
+                          onClick={() => move(i, 1)}
+                          data-testid={`button-move-down-${o.id}`}
+                          aria-label="Move down"
+                          className="text-gray-500 hover:text-gray-900 disabled:opacity-30 disabled:cursor-not-allowed"
+                        >
+                          <ChevronDown className="w-4 h-4" />
+                        </button>
+                      </div>
                       <span className="inline-flex items-center justify-center w-6 h-6 rounded-full bg-gray-900 text-white text-xs font-bold">
                         {i + 1}
                       </span>

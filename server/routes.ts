@@ -231,17 +231,19 @@ export async function registerRoutes(app: Express): Promise<Server> {
       }>;
 
       const activeRes = await db.execute(sql`
-        SELECT branch_id, plate, package_name, status, created_at
+        SELECT branch_id, plate, package_name, status, created_at, queue_position
         FROM orders
         WHERE status IN ('paid','queued','washing')
           AND date(created_at AT TIME ZONE 'Asia/Brunei')
             = (now() AT TIME ZONE 'Asia/Brunei')::date
         ORDER BY branch_id ASC,
           CASE status WHEN 'washing' THEN 0 ELSE 1 END,
+          queue_position ASC NULLS LAST,
           created_at ASC
       `);
       const active = activeRes.rows as Array<{
         branch_id: number; plate: string; package_name: string; status: string; created_at: string;
+        queue_position: number | null;
       }>;
 
       const totalsRes = await db.execute(sql`
@@ -6838,7 +6840,9 @@ export async function registerRoutes(app: Express): Promise<Server> {
   app.patch('/api/pos/orders/:id/status', requireStaff, async (req, res) => {
     const orderId = String(req.params.id);
     const to = String(req.body?.to ?? '');
-    if (to !== 'washing' && to !== 'done') {
+    // queued: send a car already washing back into the queue (lane-control
+    // fix for a mid-wash refund + re-entry). queued <-> washing -> done.
+    if (to !== 'washing' && to !== 'done' && to !== 'queued') {
       return res.status(400).json({ error: 'invalid_target_status' });
     }
     const requiredFrom = to === 'washing' ? 'queued' : 'washing';
@@ -6881,13 +6885,28 @@ export async function registerRoutes(app: Express): Promise<Server> {
           );
         }
 
-        const r = (await tx.execute(sql`
-          UPDATE orders
-             SET status = ${to}
-           WHERE id = ${orderId}
-             AND status = ${requiredFrom}
-          RETURNING id, branch_id, status, ticket_code, plate, package_name
-        `)).rows as any[];
+        // When pulling a washing car back into the queue, slot it at the
+        // front (it was already being served), ahead of every other queued
+        // car at this branch. Otherwise leave queue_position untouched.
+        const r = (to === 'queued'
+          ? (await tx.execute(sql`
+              UPDATE orders
+                 SET status = ${to},
+                     queue_position = COALESCE((
+                       SELECT MIN(queue_position) FROM orders
+                        WHERE branch_id = ${o.branch_id} AND status = 'queued'
+                     ), 0) - 1
+               WHERE id = ${orderId}
+                 AND status = ${requiredFrom}
+              RETURNING id, branch_id, status, ticket_code, plate, package_name
+            `)).rows
+          : (await tx.execute(sql`
+              UPDATE orders
+                 SET status = ${to}
+               WHERE id = ${orderId}
+                 AND status = ${requiredFrom}
+              RETURNING id, branch_id, status, ticket_code, plate, package_name
+            `)).rows) as any[];
 
         if (r.length === 0) {
           // Lost the race. Re-read for a clean error.
@@ -6905,6 +6924,70 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
+  // ==========================================================================
+  // PATCH /api/pos/queue/reorder — Lane control manual ordering.
+  //
+  // Body: { branch_id, order_ids: [...] } — the FULL desired order of the
+  // branch's currently-queued cars, front-first. Writes queue_position =
+  // index so the "Up next" list (and public snapshot) follow it. Lane/cashier
+  // are LOCKED to their own branch; owner/manager can reorder any branch.
+  // ==========================================================================
+  app.patch('/api/pos/queue/reorder', requireStaff, async (req, res) => {
+    const branchId = Number(req.body?.branch_id);
+    const orderIds = Array.isArray(req.body?.order_ids)
+      ? req.body.order_ids.map((x: unknown) => String(x))
+      : null;
+    if (!Number.isFinite(branchId) || branchId <= 0 || !orderIds || orderIds.length === 0) {
+      return res.status(400).json({ error: 'branch_id and order_ids required' });
+    }
+
+    const staffUser = req.staff!.user as any;
+    const staffRole = staffUser.role as 'owner' | 'manager' | 'lane' | 'cashier';
+    const staffBranchId = staffUser.branchId as number | null;
+    if (staffRole !== 'owner' && staffRole !== 'manager') {
+      if (staffBranchId == null || branchId !== staffBranchId) {
+        return res.status(403).json({ error: 'branch_mismatch' });
+      }
+    }
+
+    try {
+      await db.transaction(async (tx) => {
+        const rows = (await tx.execute(sql`
+          SELECT id FROM orders
+           WHERE branch_id = ${branchId} AND status = 'queued'
+           FOR UPDATE
+        `)).rows as Array<{ id: string }>;
+        const current = new Set(rows.map((r) => r.id));
+        const incoming = new Set(orderIds);
+
+        // Strict: order_ids must be an EXACT permutation of what's queued
+        // right now (no duplicates, no extras, none missing). A stale list
+        // (another device added/moved a car since the page loaded) is
+        // rejected so the client refetches instead of committing a mixed
+        // ordering where some cars keep old positions.
+        const isPermutation =
+          orderIds.length === current.size &&
+          incoming.size === orderIds.length &&
+          orderIds.every((id: string) => current.has(id));
+        if (!isPermutation) {
+          throw Object.assign(new Error('queue_changed'), { httpStatus: 409 });
+        }
+
+        for (let i = 0; i < orderIds.length; i += 1) {
+          await tx.execute(sql`
+            UPDATE orders SET queue_position = ${i}
+             WHERE id = ${orderIds[i]} AND branch_id = ${branchId} AND status = 'queued'
+          `);
+        }
+      });
+      res.json({ ok: true });
+    } catch (err: any) {
+      const status = err?.httpStatus ?? 500;
+      if (status === 500) console.error('[pos.queue.reorder] failed:', err);
+      res.status(status).json({ error: err?.message ?? 'reorder_failed' });
+    }
+  });
+
   // GET /api/pos/orders/today?branch_id=N
   // Today's orders for a branch, newest first. Used by the right-rail of
   // the POS page so the cashier sees what's been booked.
@@ -6917,7 +7000,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
       const rows = (await db.execute(sql`
         SELECT id, ticket_code, plate, package_name,
                total_cents, payment_method, status, created_at,
-               refunded_at, refund_reason
+               refunded_at, refund_reason, queue_position
           FROM orders
          WHERE branch_id = ${branchId}
            AND ticket_day = (now() AT TIME ZONE 'UTC')::date
