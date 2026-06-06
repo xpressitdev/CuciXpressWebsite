@@ -2132,26 +2132,10 @@ export default function POS() {
                 </CardContent>
               </Card>
 
-              {/* Phase 12d: Lane control. Shows the queued + washing
-                  cars for this branch with two buttons each so lane
-                  staff can advance them through the wash lifecycle.
-                  Reads from the same /api/pos/orders/today query the
-                  Today panel below uses, then filters client-side. */}
-              <LaneControl
-                orders={(todayData?.orders ?? []).filter(
-                  (o) => o.status === "queued" || o.status === "washing",
-                )}
-                branchId={branchId}
-                onChanged={() => {
-                  queryClient.invalidateQueries({
-                    queryKey: ["/api/pos/orders/today", branchId],
-                  });
-                  queryClient.invalidateQueries({
-                    queryKey: ["/api/queue/snapshot"],
-                  });
-                }}
-              />
+            </div>
 
+            {/* --- Right: Today's orders -------------------------------- */}
+            <div className="space-y-4">
               {/* Today's orders */}
               <Card>
                 <CardHeader>
@@ -2229,6 +2213,26 @@ export default function POS() {
               </Card>
             </div>
           </div>
+
+          {/* Phase 12d: Lane control. Full-width below the builder so lane
+              staff get a wide view of the wash + queue on desktop. Shows
+              the queued + washing cars for this branch with buttons to
+              advance them through the wash lifecycle. Reads from the same
+              /api/pos/orders/today query and filters client-side. */}
+          <LaneControl
+            orders={(todayData?.orders ?? []).filter(
+              (o) => o.status === "queued" || o.status === "washing",
+            )}
+            branchId={branchId}
+            onChanged={() => {
+              queryClient.invalidateQueries({
+                queryKey: ["/api/pos/orders/today", branchId],
+              });
+              queryClient.invalidateQueries({
+                queryKey: ["/api/queue/snapshot"],
+              });
+            }}
+          />
         </div>
       </main>
 
@@ -2372,7 +2376,10 @@ function LaneControl({
           </span>
         </CardTitle>
       </CardHeader>
-      <CardContent className="space-y-4">
+      <CardContent>
+        {/* Side-by-side on desktop so the wide lane view uses the full
+            width; stacks on mobile. */}
+        <div className="grid lg:grid-cols-2 gap-6">
         {/* Currently washing */}
         <div>
           <p className="cuci-eyebrow mb-2 text-cuci-secondary">Washing now</p>
@@ -2427,8 +2434,6 @@ function LaneControl({
             </div>
           )}
         </div>
-
-        <Separator />
 
         {/* In the queue, oldest first */}
         <div>
@@ -2498,6 +2503,7 @@ function LaneControl({
                 ))}
             </div>
           )}
+        </div>
         </div>
       </CardContent>
     </Card>
