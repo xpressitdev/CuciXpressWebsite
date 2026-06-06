@@ -37,6 +37,7 @@ import {
   ChevronUp,
   ChevronDown,
   Undo2,
+  Pencil,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -328,6 +329,13 @@ export default function POS() {
   const [showCustomerForm, setShowCustomerForm] = useState<boolean>(false);
   const [customerPhone, setCustomerPhone] = useState<string>("");
   const [customerName, setCustomerName] = useState<string>("");
+  // Inline edit of the matched car's brand/model when the cashier spots
+  // wrong details on a plate lookup. Saving updates the single cars row,
+  // which is reflected everywhere the car appears (customer dashboard,
+  // admin profile, future POS lookups).
+  const [editingVehicle, setEditingVehicle] = useState<boolean>(false);
+  const [editBrand, setEditBrand] = useState<string>("");
+  const [editModel, setEditModel] = useState<string>("");
   const plateInputRef = useRef<HTMLInputElement | null>(null);
 
   // Confirmation state
@@ -652,6 +660,7 @@ export default function POS() {
   const pickVehicle = (v: VehicleSuggestion) => {
     setPlate(v.license_plate);
     setMatchedVehicleId(v.id);
+    setEditingVehicle(false);
     setShowSuggestions(false);
     setVehicleSuggestions([]);
     if (v.customer) {
@@ -663,6 +672,41 @@ export default function POS() {
 
   const clearMatchedVehicle = () => {
     setMatchedVehicleId(null);
+    setEditingVehicle(false);
+  };
+
+  // ----- Edit a matched car's brand/model -----
+  // Brand/model are stored only on the cars row, so this single PATCH fixes
+  // the details everywhere the car shows up. We invalidate the vehicle
+  // history query so the card refreshes with the corrected values.
+  const editVehicle = useMutation({
+    mutationFn: async (vars: { id: number; brand: string; model: string }) => {
+      const res = await apiRequest("PATCH", `/api/pos/vehicles/${vars.id}`, {
+        brand: vars.brand.trim(),
+        model: vars.model.trim(),
+      });
+      return (await res.json()) as { vehicle: VehicleSuggestion };
+    },
+    onSuccess: (_data, vars) => {
+      queryClient.invalidateQueries({
+        queryKey: ["/api/pos/vehicles", vars.id, "history"],
+      });
+      setEditingVehicle(false);
+      toast({ title: "Vehicle details updated" });
+    },
+    onError: () => {
+      toast({
+        title: "Couldn't update vehicle",
+        description: "Please try again.",
+        variant: "destructive",
+      });
+    },
+  });
+
+  const startEditVehicle = () => {
+    setEditBrand(vehicleHistory?.vehicle.brand ?? "");
+    setEditModel(vehicleHistory?.vehicle.model ?? "");
+    setEditingVehicle(true);
   };
 
   // ----- Phase 4: full-order refund -----
@@ -1521,6 +1565,17 @@ export default function POS() {
                                 </span>
                               )}
                             </span>
+                            {!editingVehicle && (
+                              <button
+                                type="button"
+                                onClick={startEditVehicle}
+                                className="inline-flex items-center gap-1 text-xs font-medium text-cuci-primary hover:underline"
+                                data-testid="button-edit-vehicle"
+                              >
+                                <Pencil className="w-3 h-3" />
+                                Edit
+                              </button>
+                            )}
                             {vehicleHistory.vehicle.vip_tier && (
                               <span
                                 className={
@@ -1547,6 +1602,61 @@ export default function POS() {
                               </span>
                             )}
                           </div>
+                          {editingVehicle && (
+                            <div
+                              className="mt-2 flex flex-wrap items-end gap-2"
+                              data-testid="form-edit-vehicle"
+                            >
+                              <div className="flex flex-col gap-0.5">
+                                <Label className="text-[11px] text-gray-600">Brand</Label>
+                                <Input
+                                  value={editBrand}
+                                  onChange={(e) => setEditBrand(e.target.value)}
+                                  placeholder="e.g. Toyota"
+                                  className="h-8 w-32 text-sm"
+                                  data-testid="input-edit-brand"
+                                />
+                              </div>
+                              <div className="flex flex-col gap-0.5">
+                                <Label className="text-[11px] text-gray-600">Model</Label>
+                                <Input
+                                  value={editModel}
+                                  onChange={(e) => setEditModel(e.target.value)}
+                                  placeholder="e.g. Vios"
+                                  className="h-8 w-32 text-sm"
+                                  data-testid="input-edit-model"
+                                />
+                              </div>
+                              <Button
+                                type="button"
+                                size="sm"
+                                className="h-8"
+                                disabled={editVehicle.isPending}
+                                onClick={() =>
+                                  matchedVehicleId !== null &&
+                                  editVehicle.mutate({
+                                    id: matchedVehicleId,
+                                    brand: editBrand,
+                                    model: editModel,
+                                  })
+                                }
+                                data-testid="button-save-vehicle"
+                              >
+                                {editVehicle.isPending ? "Saving…" : "Save"}
+                              </Button>
+                              <Button
+                                type="button"
+                                size="sm"
+                                variant="ghost"
+                                className="h-8"
+                                disabled={editVehicle.isPending}
+                                onClick={() => setEditingVehicle(false)}
+                                data-testid="button-cancel-edit-vehicle"
+                              >
+                                Cancel
+                              </Button>
+                            </div>
+                          )}
                           <div className="text-xs text-gray-600 mt-1 flex flex-wrap gap-x-3 gap-y-1">
                             <span className="inline-flex items-center gap-1">
                               <History className="w-3 h-3" />

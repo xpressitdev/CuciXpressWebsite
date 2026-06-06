@@ -7832,6 +7832,64 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
+  // PATCH /api/pos/vehicles/:id — correct a car's brand/model (and
+  // optionally colour/type) from the POS when the cashier spots wrong
+  // details on a plate lookup.
+  //
+  // "Update all datasets" is satisfied by writing this ONE row: brand and
+  // model live only on `cars`. Orders store the plate as text; the customer
+  // dashboard's vehicle tab, the admin customer profile, the POS plate
+  // suggestions and the vehicle-history card all JOIN to `cars` and read
+  // brand/model from it. So a single UPDATE here is reflected everywhere
+  // the car appears.
+  app.patch('/api/pos/vehicles/:id', requireStaff, async (req, res) => {
+    const id = Number(req.params.id);
+    if (!Number.isFinite(id)) return res.status(400).json({ error: 'bad_id' });
+    const schema = z.object({
+      brand: z.string().trim().max(80).optional().nullable(),
+      model: z.string().trim().max(80).optional().nullable(),
+      color: z.string().trim().max(40).optional().nullable(),
+      type: z.string().trim().max(40).optional().nullable(),
+    });
+    const parsed = schema.safeParse(req.body);
+    if (!parsed.success) {
+      return res.status(400).json({ error: 'invalid_request', details: parsed.error.flatten() });
+    }
+    // Key-presence semantics: only overwrite the fields the client actually
+    // sent, so editing just the brand never wipes the model. An explicit
+    // empty string clears the field (-> NULL).
+    const body = (req.body ?? {}) as Record<string, unknown>;
+    const has = (k: string) => Object.prototype.hasOwnProperty.call(body, k);
+    const blank = (v: string | null | undefined) => {
+      const s = (v ?? '').toString().trim();
+      return s === '' ? null : s;
+    };
+    const brandTouched = has('brand');
+    const modelTouched = has('model');
+    const colorTouched = has('color');
+    const typeTouched = has('type');
+    if (!brandTouched && !modelTouched && !colorTouched && !typeTouched) {
+      return res.status(400).json({ error: 'no_fields' });
+    }
+    try {
+      const updated = (await db.execute(sql`
+        UPDATE cars SET
+          brand  = CASE WHEN ${brandTouched}::boolean THEN ${blank(parsed.data.brand)} ELSE brand END,
+          model  = CASE WHEN ${modelTouched}::boolean THEN ${blank(parsed.data.model)} ELSE model END,
+          color  = CASE WHEN ${colorTouched}::boolean THEN ${blank(parsed.data.color)} ELSE color END,
+          "type" = CASE WHEN ${typeTouched}::boolean  THEN ${blank(parsed.data.type)}  ELSE "type" END
+        WHERE id = ${id}
+        RETURNING id, license_plate, brand, model, color, "type",
+                  customer_id, user_id, last_seen_at
+      `)).rows[0];
+      if (!updated) return res.status(404).json({ error: 'not_found' });
+      res.json({ vehicle: updated });
+    } catch (err) {
+      console.error('[pos.vehicles.patch] failed:', err);
+      res.status(500).json({ error: 'update_failed' });
+    }
+  });
+
   // POST /api/pos/vehicles — upsert by normalised plate.
   // Trunk-owned cars (cars.user_id IS NOT NULL) are NEVER re-bound to a
   // different user from the POS surface; we only ever attach a POS
