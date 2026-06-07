@@ -148,6 +148,7 @@ interface TodayOrder {
   package_name: string;
   total_cents: number;
   payment_method: PaymentMethod;
+  qr_provider?: string | null;
   status: string;
   created_at: string;
   // Lane-control manual ordering. NULL = FIFO by created_at.
@@ -488,6 +489,39 @@ export default function POS() {
   }, [catalog, selectedAddons]);
 
   const subtotal = (packagePrice ?? 0) + addonsTotal;
+
+  // Today's sales summary for the right-rail: net sales (excluding refunds),
+  // refund total, and a per-payment-method breakdown so the cashier can see
+  // how much came in via Cash / Bank Transfer / each wallet at a glance.
+  const todaySummary = useMemo(() => {
+    const orders = todayData?.orders ?? [];
+    let salesCents = 0;
+    let salesCount = 0;
+    let refundCents = 0;
+    let refundCount = 0;
+    const byMethod = new Map<
+      string,
+      { label: string; cents: number; count: number }
+    >();
+    for (const o of orders) {
+      if (o.status === "refunded") {
+        refundCents += o.total_cents;
+        refundCount += 1;
+        continue;
+      }
+      salesCents += o.total_cents;
+      salesCount += 1;
+      const label = paymentDisplayLabel(o.payment_method, o.qr_provider ?? null);
+      const prev = byMethod.get(label) ?? { label, cents: 0, count: 0 };
+      prev.cents += o.total_cents;
+      prev.count += 1;
+      byMethod.set(label, prev);
+    }
+    const methods = Array.from(byMethod.values()).sort(
+      (a, b) => b.cents - a.cents,
+    );
+    return { salesCents, salesCount, refundCents, refundCount, methods };
+  }, [todayData]);
 
   // Debounced plate autocomplete. Hits /api/pos/vehicles/search 200ms after
   // the user pauses typing. Skipped when a suggestion is already matched.
@@ -2047,8 +2081,51 @@ export default function POS() {
               {/* Today's orders */}
               <Card>
                 <CardHeader>
-                  <CardTitle className="text-base">Today</CardTitle>
+                  <CardTitle className="text-base flex items-center justify-between flex-wrap gap-2">
+                    <span>Today</span>
+                    <span
+                      className="inline-flex items-center rounded-full border-2 border-black bg-emerald-50 px-3 py-1 text-sm font-extrabold text-emerald-700"
+                      data-testid="text-today-total-sales"
+                    >
+                      Total Sales: {formatBND(todaySummary.salesCents)}
+                    </span>
+                  </CardTitle>
                 </CardHeader>
+                {(todaySummary.methods.length > 0 ||
+                  todaySummary.refundCount > 0) && (
+                  <CardContent className="pt-0">
+                    {todaySummary.methods.length > 0 && (
+                      <div className="grid gap-2 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
+                        {todaySummary.methods.map((m) => (
+                          <div
+                            key={m.label}
+                            className="flex items-center justify-between rounded-md border-2 border-black bg-gray-50 px-3 py-2 text-sm"
+                            data-testid={`tile-payment-${m.label}`}
+                          >
+                            <span className="min-w-0 truncate font-medium text-gray-700">
+                              {m.label}
+                              <span className="ml-1 text-xs text-gray-400">
+                                ×{m.count}
+                              </span>
+                            </span>
+                            <span className="ml-2 shrink-0 font-extrabold">
+                              {formatBND(m.cents)}
+                            </span>
+                          </div>
+                        ))}
+                      </div>
+                    )}
+                    {todaySummary.refundCount > 0 && (
+                      <p
+                        className="mt-2 text-xs font-medium text-red-600"
+                        data-testid="text-today-refunds"
+                      >
+                        Refunds: {todaySummary.refundCount} (−
+                        {formatBND(todaySummary.refundCents)})
+                      </p>
+                    )}
+                  </CardContent>
+                )}
                 <CardContent className="max-h-96 overflow-y-auto">
                   {!todayData || todayData.orders.length === 0 ? (
                     <p className="text-sm text-gray-500 text-center py-4">

@@ -7329,7 +7329,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
     try {
       const rows = (await db.execute(sql`
         SELECT id, ticket_code, plate, package_name,
-               total_cents, payment_method, status, created_at,
+               total_cents, payment_method, qr_provider, status, created_at,
                refunded_at, refund_reason, queue_position
           FROM orders
          WHERE branch_id = ${branchId}
