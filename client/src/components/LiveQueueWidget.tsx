@@ -107,12 +107,22 @@ export default function LiveQueueWidget({ embedded = false }: { embedded?: boole
               return (
                 <div
                   key={b.id}
-                  className="grid grid-cols-[100px_1fr_60px] md:grid-cols-[140px_1fr_70px] items-center gap-x-3 gap-y-0.5"
+                  className="grid grid-cols-[100px_1fr_60px] md:grid-cols-[140px_1fr_70px] items-center gap-x-3"
                   data-testid={`row-widget-branch-${b.id}`}
                 >
-                  <span className="text-sm font-medium text-gray-800 truncate">
-                    {shortBranchName(b.name)}
-                  </span>
+                  <div className="min-w-0">
+                    <span className="block text-sm font-medium text-gray-800 truncate">
+                      {shortBranchName(b.name)}
+                    </span>
+                    {b.status_note && (
+                      <span
+                        className="block text-[11px] text-amber-700 italic truncate"
+                        data-testid={`text-widget-note-${b.id}`}
+                      >
+                        {b.status_note}
+                      </span>
+                    )}
+                  </div>
                   <div className="h-2 bg-gray-100 rounded-full overflow-hidden">
                     <div
                       className={`h-full ${color} transition-all`}
@@ -120,14 +130,6 @@ export default function LiveQueueWidget({ embedded = false }: { embedded?: boole
                     />
                   </div>
                   <span className={`text-sm font-bold text-right ${labelColor}`}>{label}</span>
-                  {b.status_note && (
-                    <span
-                      className="col-span-3 text-[11px] text-amber-700 italic truncate -mt-0.5"
-                      data-testid={`text-widget-note-${b.id}`}
-                    >
-                      {b.status_note}
-                    </span>
-                  )}
                 </div>
               );
             })}
