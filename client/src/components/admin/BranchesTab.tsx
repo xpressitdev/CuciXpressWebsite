@@ -39,7 +39,7 @@ const STATUS_OPTIONS: Array<{ value: BranchStatus; label: string }> = [
   { value: "open", label: "Open" },
   { value: "busy", label: "Busy / extra-long wait" },
   { value: "maintenance", label: "Under maintenance" },
-  { value: "closed", label: "Closed (temporary)" },
+  { value: "closed", label: "Closed" },
 ];
 const STATUS_BADGE: Record<BranchStatus, { label: string; cls: string }> = {
   open: { label: "Open", cls: "bg-green-600 text-white" },

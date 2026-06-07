@@ -2285,7 +2285,7 @@ const BRANCH_STATUS_OPTIONS: Array<{
   { value: "open", label: "Open", hint: "Taking cars as normal." },
   { value: "busy", label: "Busy / extra-long wait", hint: "Open, but warn customers of a long wait." },
   { value: "maintenance", label: "Under maintenance", hint: "Closed for maintenance — not taking cars." },
-  { value: "closed", label: "Closed (temporary)", hint: "Temporarily closed — not taking cars." },
+  { value: "closed", label: "Closed", hint: "Closed — not taking cars." },
 ];
 
 function BranchStatusControl({ branchId }: { branchId: number }) {
