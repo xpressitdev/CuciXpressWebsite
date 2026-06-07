@@ -6,3 +6,9 @@ id = "_56_Mg7frYQB2QrrrmcDW"
 uri = "file://exports/merge_candidates_2026-05-06.csv"
 type = "table"
 title = "Phone duplicate merge candidates — 2026-05-06"
+
+[[outputs]]
+id = "XyuV6gEH4NU_pX7uciGa7"
+uri = "file://Cuci_Xpress_POS_Cashier_Guide.md"
+type = "text"
+title = "Cuci Xpress — Cashier Guide (POS System)"
