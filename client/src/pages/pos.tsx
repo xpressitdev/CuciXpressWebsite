@@ -664,15 +664,27 @@ export default function POS() {
     setShowSuggestions(false);
     setVehicleSuggestions([]);
     if (v.customer) {
+      // Keep the name + phone in state so they still ride along on the order
+      // (receipt + customer link), but don't pop open the manual form — the
+      // matched-vehicle card already shows this customer, so the form would
+      // just duplicate it.
       setCustomerPhone(v.customer.phone);
       setCustomerName(v.customer.name);
-      setShowCustomerForm(true);
+      setShowCustomerForm(false);
+    } else {
+      // Picked a car with no customer on file — clear any leftover entry so
+      // we don't accidentally tag the wrong person.
+      setCustomerPhone("");
+      setCustomerName("");
     }
   };
 
   const clearMatchedVehicle = () => {
     setMatchedVehicleId(null);
     setEditingVehicle(false);
+    setShowCustomerForm(false);
+    setCustomerPhone("");
+    setCustomerName("");
   };
 
   // ----- Edit a matched car's brand/model -----
@@ -1323,9 +1335,10 @@ export default function POS() {
                       value={plate}
                       onChange={(e) => {
                         setPlate(e.target.value.toUpperCase());
-                        // Editing the plate clears any prior match so the
-                        // order won't accidentally tag the wrong vehicle.
-                        if (matchedVehicleId !== null) setMatchedVehicleId(null);
+                        // Editing the plate clears any prior match AND its
+                        // prefilled customer so the order won't accidentally
+                        // tag the wrong vehicle or person.
+                        if (matchedVehicleId !== null) clearMatchedVehicle();
                         setShowSuggestions(true);
                       }}
                       onFocus={() => setShowSuggestions(true)}
@@ -1592,7 +1605,7 @@ export default function POS() {
                     </div>
                   )}
 
-                  {!showCustomerForm && (
+                  {!vehicleHistory?.customer && !showCustomerForm && (
                     <button
                       type="button"
                       onClick={() => setShowCustomerForm(true)}
@@ -1604,7 +1617,7 @@ export default function POS() {
                     </button>
                   )}
 
-                  {showCustomerForm && (
+                  {!vehicleHistory?.customer && showCustomerForm && (
                     <div className="space-y-2 pt-1 border-t border-gray-100">
                       <div className="flex items-center justify-between">
                         <Label className="text-xs text-gray-600">
@@ -1640,12 +1653,6 @@ export default function POS() {
                           data-testid="input-customer-name"
                         />
                       </div>
-                      {vehicleHistory?.customer && (
-                        <p className="text-xs text-gray-500">
-                          {vehicleHistory.total_visits ?? 0} previous visit{vehicleHistory.total_visits === 1 ? "" : "s"}
-                          {vehicleHistory.total_spent_cents ? ` · B$${(vehicleHistory.total_spent_cents / 100).toFixed(2)} lifetime` : ""}
-                        </p>
-                      )}
                     </div>
                   )}
                 </CardContent>
