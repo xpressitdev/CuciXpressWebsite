@@ -410,6 +410,10 @@ export const addonsCatalog = pgTable("addons_catalog", {
   price_cents: integer("price_cents").notNull(),
   sort_order: integer("sort_order").default(0).notNull(),
   is_active: boolean("is_active").default(true).notNull(),
+  // Optional grouping for the POS add-on list (e.g. "Vouchers",
+  // "Accessories"). NULL = "Uncategorised". FK is lazy (categories declared
+  // later in this file). Mirrors packages.category_id.
+  category_id: text("category_id").references(() => categories.id, { onDelete: "set null" }),
 });
 
 export const insertAddonCatalogSchema = createInsertSchema(addonsCatalog);
@@ -560,6 +564,10 @@ export type OrderAddonSnapshot = {
   id: string;
   name: string;
   price_cents: number;
+  // Per-line quantity (e.g. 3 vouchers in one sale). Optional for
+  // backward-compat with orders snapshotted before add-on quantities
+  // existed — treat a missing value as 1.
+  quantity?: number;
 };
 
 export const orders = pgTable("orders", {
@@ -579,9 +587,6 @@ export const orders = pgTable("orders", {
   package_name: text("package_name").notNull(),
   package_price_cents: integer("package_price_cents").notNull(),
   addons: jsonb("addons").$type<OrderAddonSnapshot[]>().default([]).notNull(),
-  // How many units of this package were sold in one transaction (e.g. a
-  // bulk voucher sale). Defaults to 1 — subtotal = (package + addons) * qty.
-  quantity: integer("quantity").default(1).notNull(),
   subtotal_cents: integer("subtotal_cents").notNull(),
   total_cents: integer("total_cents").notNull(),
   payment_method: text("payment_method").notNull(),

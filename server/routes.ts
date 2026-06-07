@@ -2570,6 +2570,9 @@ export async function registerRoutes(app: Express): Promise<Server> {
     price_cents: z.number().int().min(0).max(1_000_00),
     is_active: z.boolean().optional(),
     sort_order: z.number().int().min(0).max(999).optional(),
+    // Optional category for grouping in the POS. NULL = Uncategorised.
+    // Mirrors packageBodySchema.category_id. Added 2026-06-07_07.
+    category_id: z.string().trim().min(1).max(60).nullable().optional(),
     // Same empty-set semantics as package_branches: [] = available at
     // every branch. Added 2026-05-08_02 (addon_branches migration).
     branch_ids: z.array(z.number().int().positive()).max(50).optional(),
@@ -2593,7 +2596,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
   app.get('/api/admin/catalog/addons', requireStaff, requireStaffRole('owner'), async (_req, res) => {
     try {
       const rows = (await db.execute(sql`
-        SELECT id, name, price_cents, is_active, sort_order
+        SELECT id, name, price_cents, is_active, sort_order, category_id
           FROM addons_catalog
          ORDER BY is_active DESC, sort_order ASC, name ASC
       `)).rows;
@@ -2634,13 +2637,13 @@ export async function registerRoutes(app: Express): Promise<Server> {
     if (!parsed.success) {
       return res.status(400).json({ error: 'invalid_body', details: parsed.error.flatten() });
     }
-    const { name, price_cents, is_active, sort_order, branch_ids } = parsed.data;
+    const { name, price_cents, is_active, sort_order, category_id, branch_ids } = parsed.data;
     const id = `addon_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 8)}`;
     try {
       const inserted = (await db.execute(sql`
-        INSERT INTO addons_catalog (id, name, price_cents, is_active, sort_order)
-        VALUES (${id}, ${name}, ${price_cents}, ${is_active ?? true}, ${sort_order ?? 0})
-        RETURNING id, name, price_cents, is_active, sort_order
+        INSERT INTO addons_catalog (id, name, price_cents, is_active, sort_order, category_id)
+        VALUES (${id}, ${name}, ${price_cents}, ${is_active ?? true}, ${sort_order ?? 0}, ${category_id ?? null})
+        RETURNING id, name, price_cents, is_active, sort_order, category_id
       `)).rows[0];
       if (branch_ids && branch_ids.length > 0) {
         await rewriteAddonBranches(id, branch_ids);
@@ -2669,9 +2672,10 @@ export async function registerRoutes(app: Express): Promise<Server> {
            SET name        = COALESCE(${p.name        ?? null}, name),
                price_cents = COALESCE(${p.price_cents ?? null}, price_cents),
                is_active   = COALESCE(${p.is_active   ?? null}, is_active),
-               sort_order  = COALESCE(${p.sort_order  ?? null}, sort_order)
+               sort_order  = COALESCE(${p.sort_order  ?? null}, sort_order),
+               category_id = CASE WHEN ${p.category_id !== undefined} THEN ${p.category_id ?? null} ELSE category_id END
          WHERE id = ${id}
-         RETURNING id, name, price_cents, is_active, sort_order
+         RETURNING id, name, price_cents, is_active, sort_order, category_id
       `)).rows[0];
       if (!updated) return res.status(404).json({ error: 'not_found' });
       // Only rewrite the join when the caller actually sent the field.
@@ -2810,7 +2814,10 @@ export async function registerRoutes(app: Express): Promise<Server> {
         // is soft-deactivated instead, so we never silently strip the
         // category off live packages via FK ON DELETE SET NULL.
         const inUse = (await db.execute(sql`
-          SELECT 1 FROM packages WHERE category_id = ${id} LIMIT 1
+          SELECT 1 FROM packages WHERE category_id = ${id}
+          UNION ALL
+          SELECT 1 FROM addons_catalog WHERE category_id = ${id}
+          LIMIT 1
         `)).rows.length > 0;
         if (inUse) {
           const updated = (await db.execute(sql`
@@ -6436,7 +6443,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
       const addonsRows = (await db.execute(
         useBranchFilter
           ? sql`
-              SELECT a.id, a.name, a.price_cents, a.sort_order
+              SELECT a.id, a.name, a.price_cents, a.sort_order, a.category_id
                 FROM addons_catalog a
                WHERE a.is_active = true
                  AND (
@@ -6449,7 +6456,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
                ORDER BY a.sort_order ASC, a.name ASC
             `
           : sql`
-              SELECT id, name, price_cents, sort_order
+              SELECT id, name, price_cents, sort_order, category_id
                 FROM addons_catalog
                WHERE is_active = true
                ORDER BY sort_order ASC, name ASC
@@ -6459,6 +6466,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
         name: string;
         price_cents: number;
         sort_order: number;
+        category_id: string | null;
       }>;
 
       // POS Control Room: active categories so the grid can group packages.
@@ -6603,6 +6611,10 @@ export async function registerRoutes(app: Express): Promise<Server> {
     package_id: z.string().min(1).optional().nullable(),
     plate: z.string().trim().min(1).max(20),
     addon_ids: z.array(z.string().min(1)).default([]),
+    // Per-add-on quantity (e.g. 3 vouchers), keyed by add-on id. Any add-on
+    // in addon_ids without an entry here defaults to qty 1. Backward
+    // compatible — older clients that omit this still send qty-1 lines.
+    addon_quantities: z.record(z.string(), z.number().int().min(1).max(999)).optional(),
     payment_method: z.enum([
       'cash', 'bank_transfer', 'card', 'qr_code',
       'baiduri_pay', 'quick_pay', 'subscription', 'voucher',
@@ -6630,10 +6642,6 @@ export async function registerRoutes(app: Express): Promise<Server> {
     // print/show the amount paid and change due on the receipt.
     paid_amount_cents: z.number().int().nonnegative().optional().nullable(),
     branch_id: z.number().int().positive(),
-    // How many units of the package are being bought in one go (e.g. a bulk
-    // voucher sale). Defaults to 1; the server multiplies the line into the
-    // subtotal. Ignored (forced to 1) for free/subscription washes.
-    quantity: z.number().int().min(1).max(999).default(1),
     order_notes: z.string().trim().max(500).optional().nullable(),
     item_notes: z.string().trim().max(500).optional().nullable(),
     // Phase 1 (2026-05-04): vehicle/customer linking. All optional —
@@ -6767,8 +6775,8 @@ export async function registerRoutes(app: Express): Promise<Server> {
           pkg = pkgRows[0];
         }
 
-        // 2. Look up + snapshot the requested addons.
-        let addonSnapshots: Array<{ id: string; name: string; price_cents: number }> = [];
+        // 2. Look up + snapshot the requested addons, each with its quantity.
+        let addonSnapshots: Array<{ id: string; name: string; price_cents: number; quantity: number }> = [];
         if (body.addon_ids.length > 0) {
           // Match each addon id as an individual parameter via an IN-list.
           // (A raw `= ANY(${jsArray})` fails under the neon driver — the JS
@@ -6783,16 +6791,28 @@ export async function registerRoutes(app: Express): Promise<Server> {
           if (addonRows.length !== body.addon_ids.length) {
             throw new PosOrderError(400, 'addon_not_available');
           }
-          addonSnapshots = addonRows;
+          // Stamp the per-line quantity (default 1) onto each snapshot so the
+          // subtotal and the receipt itemisation both reflect bulk add-on
+          // sales (e.g. 3 vouchers). A subscription/free wash is a single car,
+          // so its add-ons stay at qty 1.
+          const qtyMap = body.addon_quantities ?? {};
+          addonSnapshots = addonRows.map((a) => ({
+            ...a,
+            quantity:
+              body.payment_method === 'subscription'
+                ? 1
+                : Math.max(1, qtyMap[a.id] ?? 1),
+          }));
         }
 
         // 3. Compute totals server-side. Never trust client amounts.
-        // Quantity multiplies the whole line (package + add-ons). Free /
-        // subscription washes are always a single car, so force qty = 1.
-        const quantity =
-          body.payment_method === 'subscription' ? 1 : body.quantity;
-        const addonsTotal = addonSnapshots.reduce((s, a) => s + a.price_cents, 0);
-        const subtotal = (pkg.price_cents + addonsTotal) * quantity;
+        // Add-ons can be sold in bulk (qty per line); the package is always a
+        // single wash.
+        const addonsTotal = addonSnapshots.reduce(
+          (s, a) => s + a.price_cents * a.quantity,
+          0,
+        );
+        const subtotal = pkg.price_cents + addonsTotal;
 
         // 4. Allocate the next ticket code for this branch + day.
         const seqRow = (await tx.execute(sql`
@@ -7044,7 +7064,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
           INSERT INTO orders (
             id, branch_id, staff_id, plate,
             package_id, package_name, package_price_cents,
-            addons, quantity, subtotal_cents, total_cents,
+            addons, subtotal_cents, total_cents,
             discount_cents, promo_discount_cents, discount_id, promo_code_id,
             payment_method, qr_provider, payment_ref,
             paid_amount_cents, change_cents,
@@ -7055,7 +7075,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
           ) VALUES (
             ${orderId}, ${effectiveBranchId}, ${staffId}, ${plateUpper},
             ${pkg.id}, ${pkg.name}, ${pkg.price_cents},
-            ${JSON.stringify(addonSnapshots)}::jsonb, ${quantity}, ${subtotal}, ${chargedTotal},
+            ${JSON.stringify(addonSnapshots)}::jsonb, ${subtotal}, ${chargedTotal},
             ${discountCents}, ${promoDiscountCents}, ${appliedDiscountId}, ${appliedPromoId},
             ${body.payment_method}, ${body.payment_method === 'qr_code' ? (body.qr_provider ?? null) : null}, ${body.payment_method === 'cash' ? null : (body.payment_ref ?? null)},
             ${paidAmountCents}, ${changeCents},
@@ -7089,7 +7109,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
         }
 
         return {
-          orderId, ticketCode, pkg, addonSnapshots, quantity, subtotal,
+          orderId, ticketCode, pkg, addonSnapshots, subtotal,
           chargedTotal, discountCents, promoDiscountCents, redeemMembership,
           paidAmountCents, changeCents,
         };
@@ -7105,7 +7125,6 @@ export async function registerRoutes(app: Express): Promise<Server> {
           package_name: result.pkg.name,
           package_price_cents: result.pkg.price_cents,
           addons: result.addonSnapshots,
-          quantity: result.quantity,
           subtotal_cents: result.subtotal,
           total_cents: result.chargedTotal,
           discount_cents: result.discountCents,

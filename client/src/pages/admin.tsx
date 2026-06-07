@@ -1846,6 +1846,8 @@ interface CatalogAddon {
   is_active: boolean;
   sort_order: number;
   order_count: number;
+  // NULL = Uncategorised. Mirrors CatalogPackage.category_id.
+  category_id: string | null;
   // Empty array = available at every branch (matches the package
   // semantics in 2026-05-08_02_addon_branches.sql).
   branch_ids: number[];
@@ -2230,6 +2232,8 @@ function AddonsSection({ canEdit }: { canEdit: boolean }) {
     queryKey: ["/api/admin/catalog/addons"],
   });
   const rows = data?.rows ?? [];
+  const { data: categoriesData } = useCategories();
+  const categoryName = new Map((categoriesData?.rows ?? []).map((c) => [c.id, c.name]));
   const [editing, setEditing] = useState<CatalogAddon | null>(null);
   const [creating, setCreating] = useState(false);
 
@@ -2301,6 +2305,7 @@ function AddonsSection({ canEdit }: { canEdit: boolean }) {
               <TableHeader>
                 <TableRow>
                   <TableHead>Name</TableHead>
+                  <TableHead>Category</TableHead>
                   <TableHead>Branches</TableHead>
                   <TableHead className="text-right">Price</TableHead>
                   <TableHead className="text-right">Sort</TableHead>
@@ -2313,6 +2318,15 @@ function AddonsSection({ canEdit }: { canEdit: boolean }) {
                 {rows.map((r) => (
                   <TableRow key={r.id} className={!r.is_active ? "opacity-60" : ""} data-testid={`row-addon-${r.id}`}>
                     <TableCell className="font-medium text-sm">{r.name}</TableCell>
+                    <TableCell className="text-xs">
+                      {r.category_id && categoryName.get(r.category_id) ? (
+                        <Badge variant="outline" className="border-indigo-200 text-indigo-700 bg-indigo-50">
+                          {categoryName.get(r.category_id)}
+                        </Badge>
+                      ) : (
+                        <span className="text-gray-400">Uncategorised</span>
+                      )}
+                    </TableCell>
                     <TableCell>
                       {r.branch_ids.length === 0 ? (
                         <Badge variant="outline" className="border-blue-200 text-blue-700 bg-blue-50">
@@ -2377,6 +2391,10 @@ function AddonEditDialog({
   const [price, setPrice] = useState(initial ? formatBndInput(initial.price_cents) : "");
   const [isActive, setIsActive] = useState(initial?.is_active ?? true);
   const [sortOrder, setSortOrder] = useState(initial?.sort_order != null ? String(initial.sort_order) : "0");
+  // "none" is the sentinel for Uncategorised (Select can't hold an empty value).
+  const [categoryId, setCategoryId] = useState<string>(initial?.category_id ?? "none");
+  const { data: categoriesData } = useCategories();
+  const categories = (categoriesData?.rows ?? []).filter((c) => c.is_active || c.id === initial?.category_id);
   // Branch availability — mirrors the PackageEditDialog pattern. Empty
   // assignment ⇒ available at every branch (the safe default).
   const [allBranches, setAllBranches] = useState<boolean>(
@@ -2412,6 +2430,7 @@ function AddonEditDialog({
       price_cents: cents,
       is_active: isActive,
       sort_order: so,
+      category_id: categoryId === "none" ? null : categoryId,
       branch_ids: allBranches ? [] : Array.from(selectedBranches).sort((a, b) => a - b),
     });
   };
@@ -2429,6 +2448,20 @@ function AddonEditDialog({
           <div className="space-y-1">
             <label className="text-xs text-gray-600">Name</label>
             <Input value={name} onChange={(e) => setName(e.target.value)} placeholder="Tire Shine" data-testid="input-addon-name" />
+          </div>
+          <div className="space-y-1">
+            <label className="text-xs text-gray-600">Category (groups this add-on in the POS)</label>
+            <Select value={categoryId} onValueChange={setCategoryId}>
+              <SelectTrigger data-testid="select-addon-category"><SelectValue /></SelectTrigger>
+              <SelectContent>
+                <SelectItem value="none">Uncategorised</SelectItem>
+                {categories.map((c) => (
+                  <SelectItem key={c.id} value={c.id}>
+                    {c.name}{!c.is_active ? " (inactive)" : ""}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
           </div>
           <div className="grid grid-cols-2 gap-3">
             <div className="space-y-1">

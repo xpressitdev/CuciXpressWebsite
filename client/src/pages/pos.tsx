@@ -100,6 +100,7 @@ interface CatalogAddon {
   name: string;
   price_cents: number;
   sort_order: number;
+  category_id: string | null;
 }
 interface CatalogCategory {
   id: string;
@@ -194,8 +195,7 @@ interface CreatedOrder {
   plate: string;
   package_name: string;
   package_price_cents: number;
-  addons: Array<{ id: string; name: string; price_cents: number }>;
-  quantity: number;
+  addons: Array<{ id: string; name: string; price_cents: number; quantity?: number }>;
   subtotal_cents: number;
   total_cents: number;
   paid_amount_cents: number | null;
@@ -316,11 +316,12 @@ export default function POS() {
   // Form state
   const [packageId, setPackageId] = useState<string>("");
   const [plate, setPlate] = useState<string>("");
-  const [selectedAddons, setSelectedAddons] = useState<Set<string>>(new Set());
+  // Add-on id → per-line quantity (e.g. 3 vouchers). Presence in the map
+  // means selected; the value is the quantity (always ≥ 1).
+  const [selectedAddons, setSelectedAddons] = useState<Map<string, number>>(new Map());
   const [paymentKey, setPaymentKey] = useState<string>("cash");
   const [paymentRef, setPaymentRef] = useState<string>("");
   const [cashReceived, setCashReceived] = useState<string>("");
-  const [quantity, setQuantity] = useState<number>(1);
   const [itemNotes, setItemNotes] = useState<string>("");
   const [scanOpen, setScanOpen] = useState<boolean>(false);
   // Phase 7 refund: styled confirm modal (replaces native confirm/prompt).
@@ -483,20 +484,22 @@ export default function POS() {
 
   const packagePrice = activePackage?.price_cents ?? null;
 
+  // Add-ons can be sold in bulk via a per-line quantity (e.g. several wash
+  // vouchers), so each contributes price × its quantity. The package itself
+  // is always a single wash.
   const addonsTotal = useMemo(() => {
     if (!catalog) return 0;
+    // Mirror the server: a subscription/free wash is a single car, so its
+    // add-ons stay at qty 1 regardless of the stepper value.
     return catalog.addons
       .filter((a) => selectedAddons.has(a.id))
-      .reduce((s, a) => s + a.price_cents, 0);
-  }, [catalog, selectedAddons]);
+      .reduce((s, a) => {
+        const qty = paymentMethod === "subscription" ? 1 : (selectedAddons.get(a.id) ?? 1);
+        return s + a.price_cents * qty;
+      }, 0);
+  }, [catalog, selectedAddons, paymentMethod]);
 
-  // Quantity multiplies the whole line (package + add-ons) into the subtotal —
-  // e.g. selling several wash vouchers in one transaction. Free/subscription
-  // washes are always a single car, so the multiplier is forced to 1 there.
-  const unitPrice = (packagePrice ?? 0) + addonsTotal;
-  const effectiveQty =
-    paymentMethod === "subscription" ? 1 : Math.max(1, quantity);
-  const subtotal = unitPrice * effectiveQty;
+  const subtotal = (packagePrice ?? 0) + addonsTotal;
 
   // Today's sales summary for the right-rail: net sales (excluding refunds),
   // refund total, and a per-payment-method breakdown so the cashier can see
@@ -865,7 +868,8 @@ export default function POS() {
       const res = await apiRequest("POST", "/api/pos/orders", {
         package_id: oneTap ? null : packageId,
         plate: plate.trim(),
-        addon_ids: oneTap ? [] : Array.from(selectedAddons),
+        addon_ids: oneTap ? [] : Array.from(selectedAddons.keys()),
+        addon_quantities: oneTap ? undefined : Object.fromEntries(selectedAddons),
         payment_method: oneTap ? "subscription" : paymentMethod,
         // Wallets are owner-defined in Admin → Payment Setup; whatever
         // qr_provider slug the selected method carries flows straight through
@@ -876,7 +880,6 @@ export default function POS() {
         paid_amount_cents:
           oneTap || paymentMethod !== "cash" ? null : cashReceivedCents,
         branch_id: branchId,
-        quantity: oneTap || paymentMethod === "subscription" ? 1 : Math.max(1, quantity),
         item_notes: oneTap ? null : itemNotes.trim() || null,
         vehicle_id: matchedVehicleId,
         customer_phone: oneTap ? null : customerPhone.trim() || null,
@@ -929,10 +932,9 @@ export default function POS() {
   const resetForNew = () => {
     setLastOrder(null);
     setPlate("");
-    setSelectedAddons(new Set());
+    setSelectedAddons(new Map());
     setPaymentRef("");
     setCashReceived("");
-    setQuantity(1);
     setItemNotes("");
     setMatchedVehicleId(null);
     setVehicleSuggestions([]);
@@ -962,16 +964,18 @@ export default function POS() {
     }
     setPrinting(true);
     try {
-      const qty = lastOrder.quantity ?? 1;
       const items = [
         {
-          name: qty > 1 ? `${lastOrder.package_name} × ${qty}` : lastOrder.package_name,
-          price: formatBND(lastOrder.package_price_cents * qty),
+          name: lastOrder.package_name,
+          price: formatBND(lastOrder.package_price_cents),
         },
-        ...lastOrder.addons.map((a) => ({
-          name: qty > 1 ? `+ ${a.name} × ${qty}` : `+ ${a.name}`,
-          price: formatBND(a.price_cents * qty),
-        })),
+        ...lastOrder.addons.map((a) => {
+          const q = a.quantity ?? 1;
+          return {
+            name: q > 1 ? `+ ${a.name} × ${q}` : `+ ${a.name}`,
+            price: formatBND(a.price_cents * q),
+          };
+        }),
       ];
       await printReceipt({
         branchName: BRANCH_NAME_BY_ID[lastOrder.branch_id] ?? "Cuci Xpress",
@@ -1018,9 +1022,19 @@ export default function POS() {
 
   const toggleAddon = (id: string) => {
     setSelectedAddons((prev) => {
-      const next = new Set(prev);
+      const next = new Map(prev);
       if (next.has(id)) next.delete(id);
-      else next.add(id);
+      else next.set(id, 1);
+      return next;
+    });
+  };
+
+  // Set an add-on's per-line quantity (e.g. 3 vouchers). Clamps to ≥ 1 — use
+  // toggleAddon to remove an add-on entirely.
+  const setAddonQty = (id: string, qty: number) => {
+    setSelectedAddons((prev) => {
+      const next = new Map(prev);
+      next.set(id, Math.max(1, qty));
       return next;
     });
   };
@@ -1083,27 +1097,23 @@ export default function POS() {
 
               <div className="space-y-2 text-sm">
                 <div className="flex justify-between">
-                  <span className="text-gray-700">
-                    {lastOrder.package_name}
-                    {(lastOrder.quantity ?? 1) > 1 && (
-                      <span className="text-gray-500"> × {lastOrder.quantity}</span>
-                    )}
-                  </span>
+                  <span className="text-gray-700">{lastOrder.package_name}</span>
                   <span className="font-semibold">
-                    {formatBND(lastOrder.package_price_cents * (lastOrder.quantity ?? 1))}
+                    {formatBND(lastOrder.package_price_cents)}
                   </span>
                 </div>
-                {lastOrder.addons.map((a) => (
-                  <div key={a.id} className="flex justify-between text-gray-600">
-                    <span>
-                      + {a.name}
-                      {(lastOrder.quantity ?? 1) > 1 && (
-                        <span className="text-gray-500"> × {lastOrder.quantity}</span>
-                      )}
-                    </span>
-                    <span>{formatBND(a.price_cents * (lastOrder.quantity ?? 1))}</span>
-                  </div>
-                ))}
+                {lastOrder.addons.map((a) => {
+                  const q = a.quantity ?? 1;
+                  return (
+                    <div key={a.id} className="flex justify-between text-gray-600">
+                      <span>
+                        + {a.name}
+                        {q > 1 && <span className="text-gray-500"> × {q}</span>}
+                      </span>
+                      <span>{formatBND(a.price_cents * q)}</span>
+                    </div>
+                  );
+                })}
                 <div className="border-t-2 border-dashed border-gray-300 my-3" />
                 <div className="flex justify-between text-lg font-extrabold">
                   <span>Total</span>
@@ -1765,29 +1775,102 @@ export default function POS() {
                       <CardTitle className="text-base">Add-ons</CardTitle>
                     </div>
                   </CardHeader>
-                  <CardContent>
-                    <div className="grid sm:grid-cols-2 gap-2">
-                      {catalog?.addons.map((a) => {
-                        const isSelected = selectedAddons.has(a.id);
-                        return (
-                          <button
-                            key={a.id}
-                            type="button"
-                            onClick={() => toggleAddon(a.id)}
-                            data-testid={`button-addon-${a.id}`}
-                            className={`flex items-center justify-between rounded-md border p-3 transition-all
-                              ${isSelected
-                                ? "border-cuci-primary bg-cuci-primary/10 ring-2 ring-cuci-primary"
-                                : "border-gray-200 hover:border-gray-300"}`}
-                          >
-                            <span className="font-medium">{a.name}</span>
-                            <span className="text-sm text-gray-700">
-                              +{formatBND(a.price_cents)}
-                            </span>
-                          </button>
-                        );
-                      })}
-                    </div>
+                  <CardContent className="space-y-4">
+                    {(() => {
+                      const addons = catalog?.addons ?? [];
+                      const cats = [...(catalog?.categories ?? [])].sort(
+                        (a, b) => a.sort_order - b.sort_order,
+                      );
+                      // Same grouping rule as the package picker: ordered
+                      // category groups, then an "Other" bucket for add-ons
+                      // with no (or an unknown) category.
+                      const groups: Array<{ id: string; name: string | null; items: CatalogAddon[] }> = [];
+                      for (const c of cats) {
+                        const items = addons.filter((a) => a.category_id === c.id);
+                        if (items.length > 0) groups.push({ id: c.id, name: c.name, items });
+                      }
+                      const known = new Set(cats.map((c) => c.id));
+                      const uncategorised = addons.filter(
+                        (a) => !a.category_id || !known.has(a.category_id),
+                      );
+                      if (uncategorised.length > 0) {
+                        groups.push({
+                          id: "__uncat",
+                          name: groups.length > 0 ? "Other" : null,
+                          items: uncategorised,
+                        });
+                      }
+                      return groups.map((g) => (
+                        <div key={g.id} className="space-y-2">
+                          {g.name && (
+                            <p
+                              className="text-xs font-semibold uppercase tracking-wide text-gray-500"
+                              data-testid={`label-addon-category-${g.id}`}
+                            >
+                              {g.name}
+                            </p>
+                          )}
+                          <div className="grid sm:grid-cols-2 gap-2">
+                            {g.items.map((a) => {
+                              const qty = selectedAddons.get(a.id);
+                              const isSelected = qty !== undefined;
+                              return (
+                                <div
+                                  key={a.id}
+                                  className={`flex items-center justify-between rounded-md border p-3 transition-all
+                                    ${isSelected
+                                      ? "border-cuci-primary bg-cuci-primary/10 ring-2 ring-cuci-primary"
+                                      : "border-gray-200 hover:border-gray-300"}`}
+                                >
+                                  <button
+                                    type="button"
+                                    onClick={() => toggleAddon(a.id)}
+                                    data-testid={`button-addon-${a.id}`}
+                                    className="flex flex-1 items-center justify-between gap-2 text-left"
+                                  >
+                                    <span className="font-medium">{a.name}</span>
+                                    <span className="text-sm text-gray-700">
+                                      +{formatBND(a.price_cents)}
+                                    </span>
+                                  </button>
+                                  {isSelected && paymentMethod !== "subscription" && (
+                                    <div className="ml-3 flex items-center gap-1">
+                                      <Button
+                                        type="button"
+                                        variant="outline"
+                                        size="icon"
+                                        className="h-7 w-7"
+                                        onClick={() => setAddonQty(a.id, (qty ?? 1) - 1)}
+                                        disabled={(qty ?? 1) <= 1}
+                                        data-testid={`button-addon-qty-dec-${a.id}`}
+                                      >
+                                        −
+                                      </Button>
+                                      <span
+                                        className="w-6 text-center text-sm font-semibold"
+                                        data-testid={`text-addon-qty-${a.id}`}
+                                      >
+                                        {qty}
+                                      </span>
+                                      <Button
+                                        type="button"
+                                        variant="outline"
+                                        size="icon"
+                                        className="h-7 w-7"
+                                        onClick={() => setAddonQty(a.id, (qty ?? 1) + 1)}
+                                        data-testid={`button-addon-qty-inc-${a.id}`}
+                                      >
+                                        +
+                                      </Button>
+                                    </div>
+                                  )}
+                                </div>
+                              );
+                            })}
+                          </div>
+                        </div>
+                      ));
+                    })()}
                   </CardContent>
                 </Card>
               )}
@@ -2005,75 +2088,21 @@ export default function POS() {
                           : "—"}
                       </span>
                     </div>
-                    {Array.from(selectedAddons).map((id) => {
+                    {Array.from(selectedAddons).map(([id, rawQty]) => {
                       const a = catalog?.addons.find((x) => x.id === id);
                       if (!a) return null;
+                      const qty = paymentMethod === "subscription" ? 1 : rawQty;
                       return (
                         <div key={id} className="flex justify-between text-gray-600">
-                          <span>+ {a.name}</span>
-                          <span>{formatBND(a.price_cents)}</span>
+                          <span>
+                            + {a.name}
+                            {qty > 1 && <span className="text-gray-500"> × {qty}</span>}
+                          </span>
+                          <span>{formatBND(a.price_cents * qty)}</span>
                         </div>
                       );
                     })}
                   </div>
-                  {/* Quantity — multiply the line for bulk sales (e.g.
-                      vouchers). Hidden on a free/subscription wash, which is
-                      always a single car. */}
-                  {paymentMethod !== "subscription" && (
-                    <div className="flex items-center justify-between">
-                      <Label htmlFor="quantity" className="text-sm text-gray-600">
-                        Quantity
-                      </Label>
-                      <div className="flex items-center gap-2">
-                        <Button
-                          type="button"
-                          variant="outline"
-                          size="icon"
-                          className="h-8 w-8"
-                          onClick={() => setQuantity((q) => Math.max(1, q - 1))}
-                          disabled={effectiveQty <= 1}
-                          data-testid="button-quantity-decrement"
-                        >
-                          −
-                        </Button>
-                        <Input
-                          id="quantity"
-                          type="number"
-                          inputMode="numeric"
-                          min="1"
-                          step="1"
-                          className="h-8 w-16 text-center"
-                          value={quantity}
-                          onChange={(e) => {
-                            const n = parseInt(e.target.value, 10);
-                            setQuantity(Number.isFinite(n) && n >= 1 ? n : 1);
-                          }}
-                          data-testid="input-quantity"
-                        />
-                        <Button
-                          type="button"
-                          variant="outline"
-                          size="icon"
-                          className="h-8 w-8"
-                          onClick={() => setQuantity((q) => Math.max(1, q + 1))}
-                          data-testid="button-quantity-increment"
-                        >
-                          +
-                        </Button>
-                      </div>
-                    </div>
-                  )}
-                  {effectiveQty > 1 && (
-                    <div
-                      className="flex justify-between text-sm text-gray-600"
-                      data-testid="row-summary-subtotal"
-                    >
-                      <span>
-                        Subtotal ({formatBND(unitPrice)} × {effectiveQty})
-                      </span>
-                      <span>{formatBND(subtotal)}</span>
-                    </div>
-                  )}
                   {useMembership && (
                     <div
                       className="flex justify-between text-sm text-emerald-700 font-medium"
