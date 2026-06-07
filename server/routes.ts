@@ -7480,12 +7480,25 @@ export async function registerRoutes(app: Express): Promise<Server> {
   app.get('/api/pos/shifts/current', requireStaff, async (req, res) => {
     const staffUser = req.staff!.user as any;
     const staffId = staffUser.id as string;
+    const staffRole = staffUser.role as 'owner' | 'manager' | 'lane' | 'cashier';
+    // Owner/manager oversee any branch they pick: resolve the SELECTED branch's
+    // currently-open shift (whoever opened it) instead of their own. This lets
+    // them read the live shift + Daily Report without opening a personal shift.
+    // Cashier/lane stay scoped to their own open shift.
+    const branchQ = req.query.branch_id ? Number(req.query.branch_id) : null;
+    const byBranch =
+      (staffRole === 'owner' || staffRole === 'manager') &&
+      branchQ !== null && [1, 2, 3, 4, 5].includes(branchQ);
     try {
       const rows = (await db.execute(sql`
         SELECT id, branch_id, opened_by_staff_id, opening_float_cents,
                opening_note, status, opened_at
           FROM cashier_shifts
-         WHERE opened_by_staff_id = ${staffId} AND status = 'open'
+         WHERE status = 'open'
+           AND ${byBranch
+             ? sql`branch_id = ${branchQ}`
+             : sql`opened_by_staff_id = ${staffId}`}
+         ORDER BY opened_at ASC
          LIMIT 1
       `)).rows as Array<{
         id: number; branch_id: number; opened_by_staff_id: string;
@@ -7515,6 +7528,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
     const schema = z.object({
       counted_cents: z.number().int().min(0).max(100_000_00),
       closing_note: z.string().trim().max(500).optional().nullable(),
+      branch_id: z.number().int().positive().optional(),
     });
     const parsed = schema.safeParse(req.body);
     if (!parsed.success) {
@@ -7523,13 +7537,25 @@ export async function registerRoutes(app: Express): Promise<Server> {
     const body = parsed.data;
     const staffUser = req.staff!.user as any;
     const staffId = staffUser.id as string;
+    const staffRole = staffUser.role as 'owner' | 'manager' | 'lane' | 'cashier';
+    // Owner/manager can close the SELECTED branch's open shift (whoever opened
+    // it) — i.e. do the end-of-day cash count on a cashier's behalf. The closer
+    // is still recorded as the owner for audit. Cashier/lane close their own.
+    const byBranch =
+      (staffRole === 'owner' || staffRole === 'manager') &&
+      body.branch_id != null && [1, 2, 3, 4, 5].includes(body.branch_id);
 
     try {
       const result = await db.transaction(async (tx) => {
         const rows = (await tx.execute(sql`
           SELECT id, branch_id, opening_float_cents
             FROM cashier_shifts
-           WHERE opened_by_staff_id = ${staffId} AND status = 'open'
+           WHERE status = 'open'
+             AND ${byBranch
+               ? sql`branch_id = ${body.branch_id}`
+               : sql`opened_by_staff_id = ${staffId}`}
+           ORDER BY opened_at ASC
+           LIMIT 1
            FOR UPDATE
         `)).rows as Array<{ id: number; branch_id: number; opening_float_cents: number }>;
         if (rows.length === 0) {

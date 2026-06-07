@@ -25,3 +25,11 @@ reintroduce shift_id-based totals. Orders still carry `shift_id` for audit only.
 against the same full-day totals (duplicate close records). No one-open-shift-
 per-branch / single-close-authority rule exists yet. Stale never-closed shifts
 are the usual cause; closing them is a manual DB/owner action.
+
+**Owner/manager oversight:** owner/manager resolve+close the SELECTED branch's
+open shift (any opener), NOT their own. `/api/pos/shifts/current?branch_id=` and
+`/close` (body `branch_id`) switch to branch scoping for those roles only;
+cashier/lane always stay scoped to their own shift (spoofed branch_id ignored,
+role-gated server-side). This stops owners from having to open a phantom
+personal shift just to read the live shift + Daily Report. Frontend gates this
+with a `canManage` prop on ShiftBar/DailyReport.

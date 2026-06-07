@@ -92,9 +92,13 @@ const fmtDateTime = (iso: string) =>
 interface DailyReportProps {
   branchName: string | null;
   staffName: string | null;
+  branchId?: number | null;
+  // Owner/manager: read the SELECTED branch's open shift (any opener), so the
+  // report follows whichever branch they pick rather than their own shift.
+  canManage?: boolean;
 }
 
-export default function DailyReport({ branchName, staffName }: DailyReportProps) {
+export default function DailyReport({ branchName, staffName, branchId = null, canManage = false }: DailyReportProps) {
   const { toast } = useToast();
   const [open, setOpen] = useState(false);
   const [paidInStr, setPaidInStr] = useState("");
@@ -104,9 +108,18 @@ export default function DailyReport({ branchName, staffName }: DailyReportProps)
   // Reuse the same endpoint ShiftBar polls — server already aggregates
   // sales/refunds per payment method for the current open shift.
   const { data, isLoading, isFetching } = useQuery<CurrentResponse>({
-    queryKey: ["/api/pos/shifts/current"],
+    queryKey: ["/api/pos/shifts/current", canManage ? branchId : null],
     enabled: open,
     refetchInterval: open ? 30_000 : false,
+    queryFn: async () => {
+      const url =
+        canManage && branchId !== null
+          ? `/api/pos/shifts/current?branch_id=${branchId}`
+          : "/api/pos/shifts/current";
+      const res = await fetch(url, { credentials: "include" });
+      if (!res.ok) throw new Error(`${res.status}: ${await res.text()}`);
+      return res.json();
+    },
   });
   const shift = data?.shift ?? null;
   const totals = data?.totals;

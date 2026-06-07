@@ -83,9 +83,12 @@ interface ShiftBarProps {
   branchId: number | null;
   branchName: string | null;
   enabled: boolean;
+  // Owner/manager: resolve + close the SELECTED branch's shift (any opener),
+  // not just the logged-in user's own shift.
+  canManage?: boolean;
 }
 
-export default function ShiftBar({ branchId, branchName, enabled }: ShiftBarProps) {
+export default function ShiftBar({ branchId, branchName, enabled, canManage = false }: ShiftBarProps) {
   const queryClient = useQueryClient();
   const { toast } = useToast();
 
@@ -100,9 +103,18 @@ export default function ShiftBar({ branchId, branchName, enabled }: ShiftBarProp
   // Poll the running shift every 30s so the expected-cash preview stays
   // fresh while the cashier rings up orders.
   const { data, isLoading } = useQuery<CurrentResponse>({
-    queryKey: ["/api/pos/shifts/current"],
+    queryKey: ["/api/pos/shifts/current", canManage ? branchId : null],
     enabled,
     refetchInterval: 30_000,
+    queryFn: async () => {
+      const url =
+        canManage && branchId !== null
+          ? `/api/pos/shifts/current?branch_id=${branchId}`
+          : "/api/pos/shifts/current";
+      const res = await fetch(url, { credentials: "include" });
+      if (!res.ok) throw new Error(`${res.status}: ${await res.text()}`);
+      return res.json();
+    },
   });
   const shift = data?.shift ?? null;
   const totals = data?.totals;
@@ -131,7 +143,9 @@ export default function ShiftBar({ branchId, branchName, enabled }: ShiftBarProp
   });
 
   const closeMutation = useMutation({
-    mutationFn: async (vars: { counted_cents: number; closing_note: string | null }) => {
+    mutationFn: async (vars: {
+      counted_cents: number; closing_note: string | null; branch_id?: number;
+    }) => {
       const res = await apiRequest("POST", "/api/pos/shifts/close", vars);
       return await res.json();
     },
@@ -192,6 +206,7 @@ export default function ShiftBar({ branchId, branchName, enabled }: ShiftBarProp
     closeMutation.mutate({
       counted_cents: counted,
       closing_note: closeNote.trim() || null,
+      ...(canManage && branchId !== null ? { branch_id: branchId } : {}),
     });
   };
 

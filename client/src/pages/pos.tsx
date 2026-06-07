@@ -1217,6 +1217,7 @@ export default function POS() {
                 branchId={branchId}
                 branchName={branchId !== null ? BRANCH_NAME_BY_ID[branchId] ?? null : null}
                 enabled={isAuthenticated}
+                canManage={canSwitchBranch}
               />
               {/* End-of-shift sales report. Self-contained modal that
                   reads the cashier's open shift and renders totals in the
@@ -1225,6 +1226,8 @@ export default function POS() {
               <DailyReport
                 branchName={branchId !== null ? BRANCH_NAME_BY_ID[branchId] ?? null : null}
                 staffName={staff?.name ?? null}
+                branchId={branchId}
+                canManage={canSwitchBranch}
               />
               <button
                 onClick={logout}
