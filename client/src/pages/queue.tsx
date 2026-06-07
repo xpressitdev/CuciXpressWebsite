@@ -249,7 +249,7 @@ function BranchDetail({ branch }: { branch: QueueBranch }) {
     : "text-gray-400";
 
   return (
-    <div className="cuci-card p-5 md:p-7 space-y-5">
+    <div className="cuci-card p-5 md:p-7 space-y-5 min-w-0">
       <div className="flex items-start justify-between gap-3 flex-wrap">
         <div>
           <p className={`cuci-eyebrow ${headerColor}`}>{headerText}</p>
@@ -317,16 +317,16 @@ function BranchDetail({ branch }: { branch: QueueBranch }) {
             )}
           </div>
         ) : (
-          <div className="rounded-xl border-2 border-black bg-gradient-to-br from-gray-900 to-gray-800 p-4 overflow-x-auto shadow-[3px_3px_0px_0px_rgba(0,0,0,0.9)]">
+          <div className="rounded-xl border-2 border-black bg-gradient-to-br from-gray-900 to-gray-800 p-4 overflow-x-auto [-webkit-overflow-scrolling:touch] shadow-[3px_3px_0px_0px_rgba(0,0,0,0.9)]">
             <div className="flex gap-3 min-w-max items-stretch text-xs">
-              <div className="flex items-center text-gray-400 px-2 font-bold tracking-wider">
+              <div className="flex items-center text-gray-400 px-2 font-bold tracking-wider whitespace-nowrap">
                 ENTRY →
               </div>
               {lane.map((car, i) => (
                 <div
                   key={i}
                   data-testid={`lane-car-${i}`}
-                  className={`px-3 py-2 rounded-md border-2 min-w-[150px] ${
+                  className={`px-3 py-2 rounded-md border-2 min-w-[140px] sm:min-w-[150px] ${
                     car.kind === "washing"
                       ? "border-cuci-secondary bg-cuci-primary/40 text-white shadow-[2px_2px_0px_0px_rgba(255,255,255,0.15)]"
                       : "border-gray-700 bg-gray-800 text-gray-200"
