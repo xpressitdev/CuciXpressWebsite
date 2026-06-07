@@ -1163,17 +1163,6 @@ export default function POS() {
                 branchName={branchId !== null ? BRANCH_NAME_BY_ID[branchId] ?? null : null}
                 enabled={isAuthenticated}
               />
-              {/* Phase 12c-ui: prepaid scan-in. Opens a modal containing
-                  the ScanInTab component so cashiers don't have to leave
-                  POS to allocate a ticket for a customer who paid online. */}
-              <button
-                onClick={() => setScanOpen(true)}
-                className="cuci-cta bg-cuci-primary text-white px-4 py-2 rounded-full inline-flex items-center gap-2 text-sm"
-                data-testid="button-pos-scan-qr"
-              >
-                <QrCode className="w-4 h-4" />
-                Scan QR
-              </button>
               {/* End-of-shift sales report. Self-contained modal that
                   reads the cashier's open shift and renders totals in the
                   same format as the paper report owner reviews — no
@@ -1259,10 +1248,28 @@ export default function POS() {
                 <BranchStatusControl branchId={branchId} />
               )}
 
-              {/* Plate + customer */}
+              {/* Plate + customer — Step 1: identify the customer. The Scan
+                  QR shortcut lives here as the alternate to typing the plate;
+                  both resolve who the customer is (walk-in / subscriber /
+                  paid online) before a package is picked. */}
               <Card>
                 <CardHeader>
-                  <CardTitle className="text-base">License Plate</CardTitle>
+                  <div className="flex items-center gap-2">
+                    <StepNo n={1} />
+                    <CardTitle className="text-base">License Plate</CardTitle>
+                    <button
+                      onClick={() => setScanOpen(true)}
+                      className="ml-auto cuci-cta bg-cuci-primary text-white px-3 py-1.5 rounded-full inline-flex items-center gap-1.5 text-xs"
+                      data-testid="button-pos-scan-qr"
+                    >
+                      <QrCode className="w-3.5 h-3.5" />
+                      Scan QR
+                    </button>
+                  </div>
+                  <p className="text-xs text-gray-500 mt-1.5">
+                    Type the plate to identify the customer — walk-in,
+                    subscriber, or paid online — or scan their QR.
+                  </p>
                 </CardHeader>
                 <CardContent className="space-y-3">
                   <div className="relative">
@@ -1594,10 +1601,13 @@ export default function POS() {
                 </CardContent>
               </Card>
 
-              {/* Package picker */}
+              {/* Package picker — Step 2 */}
               <Card>
                 <CardHeader>
-                  <CardTitle className="text-base">Package</CardTitle>
+                  <div className="flex items-center gap-2">
+                    <StepNo n={2} />
+                    <CardTitle className="text-base">Package</CardTitle>
+                  </div>
                 </CardHeader>
                 <CardContent className="space-y-4">
                   {(() => {
@@ -1662,7 +1672,10 @@ export default function POS() {
               {catalog && catalog.addons.length > 0 && (
                 <Card>
                   <CardHeader>
-                    <CardTitle className="text-base">Addons</CardTitle>
+                    <div className="flex items-center gap-2">
+                      <StepNo n={3} />
+                      <CardTitle className="text-base">Add-ons</CardTitle>
+                    </div>
                   </CardHeader>
                   <CardContent>
                     <div className="grid sm:grid-cols-2 gap-2">
@@ -1691,10 +1704,15 @@ export default function POS() {
                 </Card>
               )}
 
-              {/* Payment + notes */}
+              {/* Payment + notes — last step. Numbered 4 when the Add-ons
+                  card is shown, else 3 (Add-ons is hidden for branches with
+                  no add-ons), so the cashier never sees a skipped step. */}
               <Card>
                 <CardHeader>
-                  <CardTitle className="text-base">Payment</CardTitle>
+                  <div className="flex items-center gap-2">
+                    <StepNo n={catalog && catalog.addons.length > 0 ? 4 : 3} />
+                    <CardTitle className="text-base">Payment</CardTitle>
+                  </div>
                 </CardHeader>
                 <CardContent className="space-y-3">
                   <div>
@@ -2151,6 +2169,19 @@ const BRANCH_STATUS_OPTIONS: Array<{
   { value: "maintenance", label: "Under maintenance", hint: "Closed for maintenance — not taking cars." },
   { value: "closed", label: "Closed", hint: "Closed — not taking cars." },
 ];
+
+// Small numbered step badge used to guide the cashier through the lean
+// order flow: 1 License Plate → 2 Package → 3 Add-ons → 4 Payment.
+function StepNo({ n }: { n: number }) {
+  return (
+    <span
+      className="flex h-6 w-6 shrink-0 items-center justify-center rounded-full bg-cuci-primary text-white text-xs font-bold"
+      aria-hidden="true"
+    >
+      {n}
+    </span>
+  );
+}
 
 function BranchStatusControl({ branchId }: { branchId: number }) {
   const { toast } = useToast();
