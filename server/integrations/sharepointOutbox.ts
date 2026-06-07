@@ -32,6 +32,11 @@ import {
 const BATCH_SIZE = 20;
 const POLL_INTERVAL_MS = 30_000;
 const MAX_ATTEMPTS = 8;
+// How long a claimed ("leased") row is hidden from other drainers while it
+// is being sent. If the process dies mid-send, the lease expires and the row
+// becomes eligible again so it is never lost. Must comfortably exceed the
+// time to send one BATCH_SIZE worth of Graph appends.
+const LEASE_SECONDS = 300;
 
 // Backoff: 30s, 1m, 2m, 5m, 15m, 30m, 1h, 2h
 const BACKOFF_SECONDS = [30, 60, 120, 300, 900, 1800, 3600, 7200];
@@ -190,26 +195,49 @@ function buildExcelRow(r: JoinedRow): (string | number | null)[] {
 export async function drainOnce(): Promise<{ picked: number; sent: number; failed: number }> {
   if (!isSharePointConfigured()) return { picked: 0, sent: 0, failed: 0 };
 
-  // Pull a batch of pending rows. SKIP LOCKED so two workers (or a manual
-  // drain firing while the timer also fires) never fight over the same row.
-  // We intentionally do NOT mutate inside the SELECT txn — each row gets
-  // its own short transaction below so a single Graph failure doesn't
-  // roll back successful rows.
-  const pickRes = await db.execute(sql`
-    SELECT id FROM sharepoint_outbox
-     WHERE status = 'pending'
-       AND next_attempt_at <= now()
-     ORDER BY id ASC
-     LIMIT ${BATCH_SIZE}
-     FOR UPDATE SKIP LOCKED
+  // Atomically CLAIM a batch of pending rows in a single statement.
+  //
+  // Why a single UPDATE...RETURNING (not SELECT...FOR UPDATE then process):
+  // under Neon's HTTP driver every db.execute() auto-commits on its own, so a
+  // bare `SELECT ... FOR UPDATE SKIP LOCKED` releases its row locks the instant
+  // the SELECT returns — long before we append to Excel. Two drainers running
+  // at once (the 30s timer overlapping a manual "drain now", or two deployment
+  // instances) would then both pick the same rows and append each order twice.
+  //
+  // Folding the lock + the claim into one statement closes that race: the
+  // SKIP LOCKED inside the sub-select hides rows another drainer is claiming in
+  // its own concurrent statement, and pushing next_attempt_at into the future
+  // (a "lease") hides the claimed rows from any later pass until the lease
+  // expires. On success the row flips to 'sent'; on failure the catch block
+  // overwrites next_attempt_at with the proper backoff. If the process dies
+  // mid-send, the lease lapses after LEASE_SECONDS and the row retries.
+  const claimRes = await db.execute(sql`
+    UPDATE sharepoint_outbox
+       SET next_attempt_at = now() + (${LEASE_SECONDS}::int * interval '1 second')
+     WHERE id IN (
+       SELECT id FROM sharepoint_outbox
+        WHERE status = 'pending'
+          AND next_attempt_at <= now()
+        ORDER BY id ASC
+        LIMIT ${BATCH_SIZE}
+        FOR UPDATE SKIP LOCKED
+     )
+    RETURNING id, next_attempt_at AS lease
   `);
-  const ids = (pickRes.rows as Array<{ id: string }>).map(r => r.id);
-  if (ids.length === 0) return { picked: 0, sent: 0, failed: 0 };
+  // `lease` is the next_attempt_at value this drainer stamped onto the row.
+  // We carry it into every write-back below as an ownership token: a stale
+  // drainer whose lease has since been overwritten (because the lease lapsed
+  // and another worker re-claimed the row) will match zero rows and quietly
+  // no-op instead of clobbering the newer worker's state.
+  const claimed = (claimRes.rows as Array<{ id: string; lease: string }>).map(
+    r => ({ id: r.id, lease: r.lease }),
+  );
+  if (claimed.length === 0) return { picked: 0, sent: 0, failed: 0 };
 
   let sent = 0;
   let failed = 0;
 
-  for (const id of ids) {
+  for (const { id, lease } of claimed) {
     // Hydrate the joined row.
     const rowRes = await db.execute(sql`
       SELECT
@@ -279,6 +307,7 @@ export async function drainOnce(): Promise<{ picked: number; sent: number; faile
                  excel_row_id = 'dry-run',
                  last_error = NULL
            WHERE id = ${id}
+             AND next_attempt_at = ${lease}
         `);
         sent++;
         continue;
@@ -292,6 +321,7 @@ export async function drainOnce(): Promise<{ picked: number; sent: number; faile
                excel_row_id = ${result.excelRowId},
                last_error = NULL
          WHERE id = ${id}
+           AND next_attempt_at = ${lease}
       `);
       sent++;
     } catch (err: any) {
@@ -312,6 +342,7 @@ export async function drainOnce(): Promise<{ picked: number; sent: number; faile
                last_error      = ${msg},
                next_attempt_at = now() + (${backoff}::int * interval '1 second')
          WHERE id = ${id}
+           AND next_attempt_at = ${lease}
       `);
       failed++;
       if (terminal) {
@@ -322,7 +353,7 @@ export async function drainOnce(): Promise<{ picked: number; sent: number; faile
     }
   }
 
-  return { picked: ids.length, sent, failed };
+  return { picked: claimed.length, sent, failed };
 }
 
 // ---------------------------------------------------------------------------
@@ -412,13 +443,17 @@ export async function getOutboxSnapshot(): Promise<OutboxSnapshot> {
 
 // Manual retry: flip a 'failed' (or otherwise stuck) row back to 'pending'.
 export async function retryOutboxRow(id: number): Promise<boolean> {
+  // Only retry rows that are not currently leased to a live drainer: a
+  // terminally 'failed' row, or a 'pending' row whose lease has already
+  // lapsed (next_attempt_at <= now()). Forcing a row that another worker is
+  // mid-send on would reintroduce the concurrent-reprocessing race.
   const res = await db.execute(sql`
     UPDATE sharepoint_outbox
        SET status = 'pending',
            next_attempt_at = now(),
            last_error = NULL
      WHERE id = ${id}
-       AND status IN ('pending','failed')
+       AND (status = 'failed' OR (status = 'pending' AND next_attempt_at <= now()))
    RETURNING id
   `);
   return res.rows.length > 0;
