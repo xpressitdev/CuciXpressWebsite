@@ -222,12 +222,13 @@ export async function registerRoutes(app: Express): Promise<Server> {
       const PER_CAR_MIN = 8;
 
       const branchesRes = await db.execute(sql`
-        SELECT id, name, location, is_open
+        SELECT id, name, location, is_open, status, status_note
         FROM branches
         ORDER BY id ASC
       `);
       const branches = branchesRes.rows as Array<{
         id: number; name: string; location: string | null; is_open: boolean;
+        status: string | null; status_note: string | null;
       }>;
 
       const activeRes = await db.execute(sql`
@@ -286,6 +287,8 @@ export async function registerRoutes(app: Express): Promise<Server> {
           name: b.name,
           location: b.location,
           is_open: b.is_open,
+          status: b.status ?? (b.is_open ? 'open' : 'closed'),
+          status_note: b.status_note ?? null,
           washing_count: washing.length,
           queued_count: queued.length,
           today_total: todayMap.get(b.id) ?? 0,
@@ -2109,7 +2112,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
     try {
       const rows = (await db.execute(sql`
         SELECT b.id, b.name, b.location, b.google_maps_url, b.google_maps_embed_url,
-               b.review_url, b.is_open, b.queue_count, b.last_queue_update,
+               b.review_url, b.is_open, b.status, b.status_note, b.queue_count, b.last_queue_update,
                (SELECT COUNT(*)::int FROM staff  s WHERE s.branch_id  = b.id AND s.is_active = true) AS staff_count,
                (SELECT COUNT(*)::int FROM orders o WHERE o.branch_id = b.id) AS order_count
           FROM branches b
@@ -2122,6 +2125,10 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
+  const BRANCH_STATUSES = ['open', 'closed', 'maintenance', 'busy'] as const;
+  // open/busy => branch keeps taking cars; closed/maintenance => it doesn't.
+  const isOpenForStatus = (s: string) => s === 'open' || s === 'busy';
+
   const branchBodySchema = z.object({
     name: z.string().trim().min(1).max(120),
     location: z.string().trim().min(1).max(255),
@@ -2129,17 +2136,23 @@ export async function registerRoutes(app: Express): Promise<Server> {
     google_maps_embed_url: z.string().trim().url().max(2000),
     review_url: z.string().trim().url().max(1000),
     is_open: z.boolean().optional(),
+    status: z.enum(BRANCH_STATUSES).optional(),
+    status_note: z.string().trim().max(160).nullable().optional(),
   });
 
   app.post('/api/admin/branches', requireStaff, requireStaffRole('owner'), async (req, res) => {
     const parsed = branchBodySchema.safeParse(req.body);
     if (!parsed.success) return res.status(400).json({ error: 'invalid_request', details: parsed.error.flatten() });
     const b = parsed.data;
+    // status is the source of truth; fall back to the legacy is_open flag.
+    const status = b.status ?? (b.is_open === false ? 'closed' : 'open');
+    const isOpen = isOpenForStatus(status);
+    const note = b.status_note ?? null;
     try {
       const rows = (await db.execute(sql`
-        INSERT INTO branches (name, location, google_maps_url, google_maps_embed_url, review_url, is_open)
-        VALUES (${b.name}, ${b.location}, ${b.google_maps_url}, ${b.google_maps_embed_url}, ${b.review_url}, ${b.is_open ?? true})
-        RETURNING id, name, location, google_maps_url, google_maps_embed_url, review_url, is_open
+        INSERT INTO branches (name, location, google_maps_url, google_maps_embed_url, review_url, is_open, status, status_note)
+        VALUES (${b.name}, ${b.location}, ${b.google_maps_url}, ${b.google_maps_embed_url}, ${b.review_url}, ${isOpen}, ${status}, ${note})
+        RETURNING id, name, location, google_maps_url, google_maps_embed_url, review_url, is_open, status, status_note
       `)).rows;
       res.status(201).json({ branch: rows[0] });
     } catch (err) {
@@ -2155,6 +2168,18 @@ export async function registerRoutes(app: Express): Promise<Server> {
     const parsed = schema.safeParse(req.body);
     if (!parsed.success) return res.status(400).json({ error: 'invalid_request', details: parsed.error.flatten() });
     const b = parsed.data;
+    // status drives is_open. If status is provided, derive is_open from it.
+    // Otherwise, a bare is_open toggle (legacy) maps to open/closed.
+    let status: string | null = b.status ?? null;
+    let isOpen: boolean | null = b.is_open ?? null;
+    if (status != null) {
+      isOpen = isOpenForStatus(status);
+    } else if (isOpen != null) {
+      status = isOpen ? 'open' : 'closed';
+    }
+    // status_note: undefined = leave as-is; null/'' = clear.
+    const noteProvided = b.status_note !== undefined;
+    const note = b.status_note && b.status_note.length > 0 ? b.status_note : null;
     try {
       const rows = (await db.execute(sql`
         UPDATE branches SET
@@ -2163,9 +2188,11 @@ export async function registerRoutes(app: Express): Promise<Server> {
           google_maps_url       = COALESCE(${b.google_maps_url ?? null}, google_maps_url),
           google_maps_embed_url = COALESCE(${b.google_maps_embed_url ?? null}, google_maps_embed_url),
           review_url            = COALESCE(${b.review_url ?? null}, review_url),
-          is_open               = COALESCE(${b.is_open ?? null}, is_open)
+          is_open               = COALESCE(${isOpen}, is_open),
+          status                = COALESCE(${status}, status),
+          status_note           = CASE WHEN ${noteProvided} THEN ${note} ELSE status_note END
          WHERE id = ${id}
-        RETURNING id, name, location, google_maps_url, google_maps_embed_url, review_url, is_open
+        RETURNING id, name, location, google_maps_url, google_maps_embed_url, review_url, is_open, status, status_note
       `)).rows;
       if (rows.length === 0) return res.status(404).json({ error: 'not_found' });
       res.json({ branch: rows[0] });
@@ -6921,6 +6948,65 @@ export async function registerRoutes(app: Express): Promise<Server> {
       const code = err?.message ?? 'status_update_failed';
       if (status === 500) console.error('[pos.orders.status] failed:', err);
       res.status(status).json({ error: code });
+    }
+  });
+
+  // ==========================================================================
+  // PATCH /api/pos/branch/status — cashier-controlled branch availability.
+  //
+  // Body: { status: 'open'|'closed'|'maintenance'|'busy', note?: string,
+  //         branch_id?: number }
+  // Lane/cashier are LOCKED to their own branch (branch_id is ignored for
+  // them). Owner/manager may target any branch via branch_id, defaulting to
+  // their own. is_open is kept in sync (open/busy => true, else false).
+  // The optional note is a short, customer-facing reason shown on the live
+  // queue (empty/omitted clears it).
+  // ==========================================================================
+  app.patch('/api/pos/branch/status', requireStaff, async (req, res) => {
+    const staffUser = req.staff!.user as any;
+    const staffRole = staffUser.role as 'owner' | 'manager' | 'lane' | 'cashier';
+    const staffBranchId = staffUser.branchId as number | null;
+
+    const status = String(req.body?.status ?? '');
+    if (!(BRANCH_STATUSES as readonly string[]).includes(status)) {
+      return res.status(400).json({ error: 'invalid_status' });
+    }
+    const rawNote = req.body?.note;
+    if (rawNote != null && typeof rawNote !== 'string') {
+      return res.status(400).json({ error: 'invalid_note' });
+    }
+    const note = typeof rawNote === 'string' && rawNote.trim().length > 0
+      ? rawNote.trim().slice(0, 160)
+      : null;
+
+    // Resolve the target branch with the lane/cashier lock.
+    const isPrivileged = staffRole === 'owner' || staffRole === 'manager';
+    const bodyBranchId = Number(req.body?.branch_id);
+    let targetBranchId: number | null;
+    if (isPrivileged) {
+      targetBranchId = Number.isFinite(bodyBranchId) && bodyBranchId > 0
+        ? bodyBranchId
+        : staffBranchId;
+    } else {
+      targetBranchId = staffBranchId;
+    }
+    if (targetBranchId == null) {
+      return res.status(400).json({ error: 'no_branch' });
+    }
+
+    const isOpen = isOpenForStatus(status);
+    try {
+      const rows = (await db.execute(sql`
+        UPDATE branches
+           SET status = ${status}, status_note = ${note}, is_open = ${isOpen}
+         WHERE id = ${targetBranchId}
+        RETURNING id, name, is_open, status, status_note
+      `)).rows;
+      if (rows.length === 0) return res.status(404).json({ error: 'not_found' });
+      res.json({ ok: true, branch: rows[0] });
+    } catch (err) {
+      console.error('[pos.branch.status] failed:', err);
+      res.status(500).json({ error: 'status_update_failed' });
     }
   });
 

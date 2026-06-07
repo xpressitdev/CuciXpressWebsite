@@ -6,6 +6,8 @@ interface QueueBranch {
   id: number;
   name: string;
   is_open: boolean;
+  status?: string | null;
+  status_note?: string | null;
   queued_count: number;
   washing_count: number;
   today_total: number;
@@ -18,6 +20,17 @@ interface Snap {
 
 const shortBranchName = (name: string) => name.replace(/^Cuci Xpress\s+/i, "");
 
+type BranchStatus = "open" | "closed" | "maintenance" | "busy";
+const branchStatusOf = (b: QueueBranch): BranchStatus => {
+  const s = (b.status ?? "") as BranchStatus;
+  if (s === "open" || s === "closed" || s === "maintenance" || s === "busy") return s;
+  return b.is_open ? "open" : "closed";
+};
+const isBranchOpen = (b: QueueBranch) => {
+  const s = branchStatusOf(b);
+  return s === "open" || s === "busy";
+};
+
 export default function LiveQueueWidget({ embedded = false }: { embedded?: boolean }) {
   const { data, isLoading } = useQuery<Snap>({
     queryKey: ["/api/queue/snapshot"],
@@ -25,7 +38,7 @@ export default function LiveQueueWidget({ embedded = false }: { embedded?: boole
   });
   const branches = data?.branches ?? [];
   const totalToday = branches.reduce((s, b) => s + b.today_total, 0);
-  const openOnly = branches.filter((b) => b.is_open);
+  const openOnly = branches.filter((b) => isBranchOpen(b));
   const shortest = [...openOnly].sort((a, b) => a.est_wait_minutes - b.est_wait_minutes)[0];
   const maxWait = Math.max(20, ...branches.map((b) => b.est_wait_minutes));
   const time = new Date(data?.server_time ?? Date.now()).toLocaleTimeString([], {
@@ -67,28 +80,34 @@ export default function LiveQueueWidget({ embedded = false }: { embedded?: boole
         ) : (
           <div className="space-y-2">
             {branches.map((b) => {
+              const st = branchStatusOf(b);
+              const open = st === "open" || st === "busy";
               const pct = Math.min(100, (b.est_wait_minutes / maxWait) * 100);
               const quiet = b.queued_count === 0;
-              const busy = b.est_wait_minutes >= 20;
-              const color = quiet
-                ? "bg-emerald-500"
-                : busy
+              const busy = st === "busy" || b.est_wait_minutes >= 20;
+              const color = busy
                 ? "bg-red-500"
                 : b.est_wait_minutes >= 10
                 ? "bg-amber-500"
                 : "bg-emerald-500";
-              const label = !b.is_open ? "Closed" : quiet ? "Open" : `~${b.est_wait_minutes}m`;
-              const labelColor = !b.is_open
-                ? "text-gray-400"
+              const label = !open
+                ? st === "maintenance" ? "Maintenance" : "Closed"
+                : st === "busy"
+                ? "Busy"
                 : quiet
-                ? "text-emerald-600"
+                ? "Open"
+                : `~${b.est_wait_minutes}m`;
+              const labelColor = !open
+                ? "text-gray-400"
                 : busy
                 ? "text-red-500"
+                : quiet
+                ? "text-emerald-600"
                 : "text-gray-700";
               return (
                 <div
                   key={b.id}
-                  className="grid grid-cols-[100px_1fr_60px] md:grid-cols-[140px_1fr_70px] items-center gap-3"
+                  className="grid grid-cols-[100px_1fr_60px] md:grid-cols-[140px_1fr_70px] items-center gap-x-3 gap-y-0.5"
                   data-testid={`row-widget-branch-${b.id}`}
                 >
                   <span className="text-sm font-medium text-gray-800 truncate">
@@ -97,10 +116,18 @@ export default function LiveQueueWidget({ embedded = false }: { embedded?: boole
                   <div className="h-2 bg-gray-100 rounded-full overflow-hidden">
                     <div
                       className={`h-full ${color} transition-all`}
-                      style={{ width: b.is_open ? `${Math.max(pct, 6)}%` : "0%" }}
+                      style={{ width: open ? `${Math.max(pct, 6)}%` : "0%" }}
                     />
                   </div>
                   <span className={`text-sm font-bold text-right ${labelColor}`}>{label}</span>
+                  {b.status_note && (
+                    <span
+                      className="col-span-3 text-[11px] text-amber-700 italic truncate -mt-0.5"
+                      data-testid={`text-widget-note-${b.id}`}
+                    >
+                      {b.status_note}
+                    </span>
+                  )}
                 </div>
               );
             })}

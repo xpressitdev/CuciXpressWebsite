@@ -142,6 +142,12 @@ export const branches = pgTable("branches", {
   review_url: text("review_url").notNull(),
   last_queue_update: timestamp("last_queue_update"),
   is_open: boolean("is_open").default(true),
+  // Live availability state controlled by cashiers/owner.
+  // 'open' | 'closed' | 'maintenance' | 'busy'. is_open is kept in sync
+  // (open/busy => true, closed/maintenance => false) for back-compat.
+  status: text("status").default("open"),
+  // Optional short, customer-facing reason shown on the live queue.
+  status_note: text("status_note"),
 });
 
 // ============================================================

@@ -15,6 +15,8 @@ interface QueueBranch {
   name: string;
   location: string | null;
   is_open: boolean;
+  status?: string | null;
+  status_note?: string | null;
   washing_count: number;
   queued_count: number;
   today_total: number;
@@ -31,6 +33,21 @@ interface QueueSnapshot {
 const shortBranchName = (name: string) => name.replace(/^Cuci Xpress\s+/i, "");
 const fmtWait = (m: number) =>
   m === 0 ? "Open" : m < 60 ? `~${m}m` : `~${Math.round(m / 60)}h`;
+
+// Resolve a branch's effective live status. Falls back to the legacy is_open
+// flag for older snapshots that don't carry an explicit status.
+type BranchStatus = "open" | "closed" | "maintenance" | "busy";
+const branchStatusOf = (b: { is_open: boolean; status?: string | null }): BranchStatus => {
+  const s = (b.status ?? "") as BranchStatus;
+  if (s === "open" || s === "closed" || s === "maintenance" || s === "busy") return s;
+  return b.is_open ? "open" : "closed";
+};
+const STATUS_LABEL: Record<BranchStatus, string> = {
+  open: "Open",
+  busy: "Busy",
+  maintenance: "Maintenance",
+  closed: "Closed",
+};
 
 export default function QueuePage() {
   const { data, isLoading } = useQuery<QueueSnapshot>({
@@ -125,15 +142,22 @@ export default function QueuePage() {
               <p className="cuci-eyebrow mb-1">Choose a branch</p>
               {branches.map((b) => {
                 const active = selected?.id === b.id;
+                const st = branchStatusOf(b);
+                const open = st === "open" || st === "busy";
                 const quiet = b.queued_count === 0;
-                const busy = b.est_wait_minutes >= 20;
-                const waitColor = !b.is_open
+                const busy = st === "busy" || b.est_wait_minutes >= 20;
+                const waitColor = !open
                   ? "text-gray-400"
-                  : quiet
-                  ? "text-emerald-600"
                   : busy
                   ? "text-red-500"
+                  : quiet
+                  ? "text-emerald-600"
                   : "text-amber-600";
+                const waitLabel = !open
+                  ? STATUS_LABEL[st]
+                  : st === "busy"
+                  ? "Busy"
+                  : fmtWait(b.est_wait_minutes);
                 return (
                   <button
                     key={b.id}
@@ -154,12 +178,17 @@ export default function QueuePage() {
                         {shortBranchName(b.name)}
                       </span>
                       <span className={`text-sm font-black ${waitColor}`}>
-                        {b.is_open ? fmtWait(b.est_wait_minutes) : "Closed"}
+                        {waitLabel}
                       </span>
                     </div>
                     <p className="text-xs text-gray-500 mt-1">
                       {b.queued_count} in queue · {b.washing_count} washing
                     </p>
+                    {b.status_note && (
+                      <p className="text-[11px] text-amber-700 mt-1 italic truncate" data-testid={`text-branch-note-${b.id}`}>
+                        {b.status_note}
+                      </p>
+                    )}
                   </button>
                 );
               })}
@@ -207,29 +236,43 @@ function BranchDetail({ branch }: { branch: QueueBranch }) {
     })),
   ];
 
+  const st = branchStatusOf(branch);
+  const open = st === "open" || st === "busy";
+  const headerText =
+    st === "open" ? "● Open now"
+    : st === "busy" ? "● Open · busy"
+    : st === "maintenance" ? "Under maintenance"
+    : "Closed";
+  const headerColor =
+    st === "open" ? "text-cuci-primary"
+    : st === "busy" ? "text-amber-600"
+    : "text-gray-400";
+
   return (
     <div className="cuci-card p-5 md:p-7 space-y-5">
       <div className="flex items-start justify-between gap-3 flex-wrap">
         <div>
-          <p
-            className={`cuci-eyebrow ${
-              branch.is_open ? "text-cuci-primary" : "text-gray-400"
-            }`}
-          >
-            {branch.is_open ? "● Open now" : "Closed"}
-          </p>
+          <p className={`cuci-eyebrow ${headerColor}`}>{headerText}</p>
           <h2 className="text-2xl md:text-3xl font-black text-gray-900 mt-1">
             {branch.name}
           </h2>
           {branch.location && (
             <p className="text-sm text-gray-500 mt-1">{branch.location}</p>
           )}
+          {branch.status_note && (
+            <p
+              className="text-sm text-amber-700 mt-2 italic border-l-2 border-amber-400 pl-2"
+              data-testid={`text-branch-detail-note-${branch.id}`}
+            >
+              {branch.status_note}
+            </p>
+          )}
         </div>
-        {branch.is_open && (
+        {open && (
           <div className="text-right">
             <p className="cuci-eyebrow">Est. wait</p>
             <p className="text-3xl md:text-4xl font-black text-cuci-secondary">
-              {fmtWait(branch.est_wait_minutes)}
+              {st === "busy" ? "Long" : fmtWait(branch.est_wait_minutes)}
             </p>
           </div>
         )}
@@ -259,13 +302,17 @@ function BranchDetail({ branch }: { branch: QueueBranch }) {
           <div className="rounded-xl bg-emerald-50 border-2 border-emerald-200 p-6 text-center">
             <Sparkles className="w-7 h-7 text-emerald-600 mx-auto mb-2" />
             <p className="font-bold text-emerald-800">
-              {branch.is_open
-                ? "This branch is quiet right now."
-                : "This branch is currently closed."}
+              {st === "maintenance"
+                ? "This branch is under maintenance."
+                : st === "closed"
+                ? "This branch is currently closed."
+                : "This branch is quiet right now."}
             </p>
-            {branch.is_open && (
+            {open && (
               <p className="text-sm text-emerald-700 mt-1">
-                Drive straight in — no waiting.
+                {st === "busy"
+                  ? "Open, but expect a longer wait."
+                  : "Drive straight in — no waiting."}
               </p>
             )}
           </div>

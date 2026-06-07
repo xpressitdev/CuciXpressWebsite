@@ -5,7 +5,9 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Badge } from "@/components/ui/badge";
 import { Label } from "@/components/ui/label";
-import { Switch } from "@/components/ui/switch";
+import {
+  Select, SelectContent, SelectItem, SelectTrigger, SelectValue,
+} from "@/components/ui/select";
 import {
   Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter, DialogTrigger,
 } from "@/components/ui/dialog";
@@ -15,6 +17,8 @@ import {
 import { apiRequest } from "@/lib/queryClient";
 import { useToast } from "@/hooks/use-toast";
 
+type BranchStatus = "open" | "closed" | "maintenance" | "busy";
+
 interface BranchRow {
   id: number;
   name: string;
@@ -23,11 +27,28 @@ interface BranchRow {
   google_maps_embed_url: string;
   review_url: string;
   is_open: boolean;
+  status: BranchStatus | null;
+  status_note: string | null;
   queue_count: number;
   last_queue_update: string | null;
   staff_count: number;
   order_count: number;
 }
+
+const STATUS_OPTIONS: Array<{ value: BranchStatus; label: string }> = [
+  { value: "open", label: "Open" },
+  { value: "busy", label: "Busy / extra-long wait" },
+  { value: "maintenance", label: "Under maintenance" },
+  { value: "closed", label: "Closed (temporary)" },
+];
+const STATUS_BADGE: Record<BranchStatus, { label: string; cls: string }> = {
+  open: { label: "Open", cls: "bg-green-600 text-white" },
+  busy: { label: "Busy", cls: "bg-amber-500 text-white" },
+  maintenance: { label: "Maintenance", cls: "bg-blue-600 text-white" },
+  closed: { label: "Closed", cls: "bg-gray-400 text-white" },
+};
+const statusOf = (b: { is_open: boolean; status: BranchStatus | null }): BranchStatus =>
+  b.status ?? (b.is_open ? "open" : "closed");
 
 interface BranchListResp {
   rows: BranchRow[];
@@ -39,7 +60,8 @@ interface BranchForm {
   google_maps_url: string;
   google_maps_embed_url: string;
   review_url: string;
-  is_open: boolean;
+  status: BranchStatus;
+  status_note: string;
 }
 
 const EMPTY_FORM: BranchForm = {
@@ -48,7 +70,8 @@ const EMPTY_FORM: BranchForm = {
   google_maps_url: "",
   google_maps_embed_url: "",
   review_url: "",
-  is_open: true,
+  status: "open",
+  status_note: "",
 };
 
 export default function BranchesTab() {
@@ -110,8 +133,8 @@ export default function BranchesTab() {
                         <span className="truncate">{b.location}</span>
                       </div>
                     </div>
-                    <Badge className={b.is_open ? "bg-green-600 text-white" : "bg-gray-400 text-white"}>
-                      {b.is_open ? "Open" : "Closed"}
+                    <Badge className={STATUS_BADGE[statusOf(b)].cls}>
+                      {STATUS_BADGE[statusOf(b)].label}
                     </Badge>
                   </div>
 
@@ -196,7 +219,8 @@ function BranchEditDialog({
           google_maps_url: branch.google_maps_url,
           google_maps_embed_url: branch.google_maps_embed_url,
           review_url: branch.review_url,
-          is_open: branch.is_open,
+          status: statusOf(branch),
+          status_note: branch.status_note ?? "",
         }
       : EMPTY_FORM,
   );
@@ -288,16 +312,39 @@ function BranchEditDialog({
               data-testid="input-branch-review"
             />
           </div>
-          <div className="flex items-center justify-between border-2 border-black rounded p-3">
+          <div className="border-2 border-black rounded p-3 space-y-2">
             <div>
-              <Label className="text-base">Open today</Label>
-              <p className="text-xs text-gray-500">Closed branches still keep their data; they just won't accept new orders.</p>
+              <Label className="text-base">Availability</Label>
+              <p className="text-xs text-gray-500">
+                Closed / maintenance branches keep their data; they just won't take new cars on the live queue.
+              </p>
             </div>
-            <Switch
-              checked={form.is_open}
-              onCheckedChange={(v) => set("is_open", v)}
-              data-testid="switch-branch-open"
-            />
+            <Select
+              value={form.status}
+              onValueChange={(v) => set("status", v as BranchStatus)}
+            >
+              <SelectTrigger data-testid="select-branch-status">
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                {STATUS_OPTIONS.map((o) => (
+                  <SelectItem key={o.value} value={o.value}>
+                    {o.label}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+            <div>
+              <Label className="text-xs">Reason note (optional)</Label>
+              <Input
+                value={form.status_note}
+                maxLength={160}
+                placeholder="e.g. water supply issue, back by 3pm"
+                onChange={(e) => set("status_note", e.target.value)}
+                data-testid="input-branch-status-note"
+              />
+              <p className="text-[11px] text-gray-400 mt-1">Shown to customers on the live queue.</p>
+            </div>
           </div>
         </div>
         <DialogFooter>

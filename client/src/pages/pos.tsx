@@ -1361,6 +1361,13 @@ export default function POS() {
                 </CardContent>
               </Card>
 
+              {/* Branch availability — cashiers control their own branch's
+                  live status (open / closed / maintenance / busy) plus a
+                  short reason note shown to customers on the live queue. */}
+              {branchId !== null && (
+                <BranchStatusControl branchId={branchId} />
+              )}
+
               {/* Package picker */}
               <Card>
                 <CardHeader>
@@ -2257,6 +2264,152 @@ export default function POS() {
         </DialogContent>
       </Dialog>
     </div>
+  );
+}
+
+// ============================================================
+// BranchStatusControl — cashier-controlled branch availability.
+//
+// Lets the on-site cashier flag their branch as Open / Closed /
+// Under maintenance / Busy (extra-long wait) and add a short reason
+// note shown to customers on the live queue. Reads the current state
+// from the public snapshot, writes via PATCH /api/pos/branch/status,
+// then invalidates the snapshot so the public widget updates within
+// one tick. The server locks lane/cashier to their own branch.
+// ============================================================
+const BRANCH_STATUS_OPTIONS: Array<{
+  value: "open" | "closed" | "maintenance" | "busy";
+  label: string;
+  hint: string;
+}> = [
+  { value: "open", label: "Open", hint: "Taking cars as normal." },
+  { value: "busy", label: "Busy / extra-long wait", hint: "Open, but warn customers of a long wait." },
+  { value: "maintenance", label: "Under maintenance", hint: "Closed for maintenance — not taking cars." },
+  { value: "closed", label: "Closed (temporary)", hint: "Temporarily closed — not taking cars." },
+];
+
+function BranchStatusControl({ branchId }: { branchId: number }) {
+  const { toast } = useToast();
+  const queryClient = useQueryClient();
+
+  const { data: snapshot } = useQuery<{
+    branches: Array<{ id: number; status?: string | null; status_note?: string | null }>;
+  }>({
+    queryKey: ["/api/queue/snapshot"],
+  });
+
+  const current = (snapshot?.branches ?? []).find((b) => b.id === branchId);
+  const currentStatus = (current?.status ?? "open") as
+    | "open" | "closed" | "maintenance" | "busy";
+  const currentNote = current?.status_note ?? "";
+
+  const [status, setStatus] = useState<"open" | "closed" | "maintenance" | "busy">(currentStatus);
+  const [note, setNote] = useState<string>(currentNote);
+  const [touched, setTouched] = useState(false);
+
+  // Re-sync local edits to the server value until the cashier starts editing.
+  useEffect(() => {
+    if (!touched) {
+      setStatus(currentStatus);
+      setNote(currentNote);
+    }
+  }, [currentStatus, currentNote, touched]);
+
+  const save = useMutation({
+    mutationFn: async () =>
+      apiRequest("PATCH", "/api/pos/branch/status", {
+        status,
+        note: note.trim() || null,
+        branch_id: branchId,
+      }),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["/api/queue/snapshot"] });
+      setTouched(false);
+      toast({ title: "Branch status updated" });
+    },
+    onError: (err: any) => {
+      toast({
+        title: "Couldn't update status",
+        description: err?.message ?? "Please try again.",
+        variant: "destructive",
+      });
+    },
+  });
+
+  const dirty = status !== currentStatus || note.trim() !== currentNote.trim();
+  const selected = BRANCH_STATUS_OPTIONS.find((o) => o.value === status);
+  const accent =
+    status === "open" ? "bg-green-600"
+    : status === "busy" ? "bg-amber-500"
+    : status === "maintenance" ? "bg-blue-600"
+    : "bg-gray-500";
+
+  return (
+    <Card data-testid="card-branch-status">
+      <CardHeader>
+        <CardTitle className="text-base flex items-center gap-2">
+          <Activity className="w-4 h-4" />
+          Branch availability
+          <Badge className={`${accent} text-white ml-auto`}>
+            {BRANCH_STATUS_OPTIONS.find((o) => o.value === currentStatus)?.label ?? "Open"}
+          </Badge>
+        </CardTitle>
+      </CardHeader>
+      <CardContent className="space-y-3">
+        <p className="text-xs text-gray-500">
+          Tell customers what's happening at your branch right now. This shows on
+          the public live queue.
+        </p>
+        <div>
+          <Label className="text-xs">Status</Label>
+          <Select
+            value={status}
+            onValueChange={(v) => {
+              setTouched(true);
+              setStatus(v as typeof status);
+            }}
+          >
+            <SelectTrigger data-testid="select-branch-status">
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent>
+              {BRANCH_STATUS_OPTIONS.map((o) => (
+                <SelectItem key={o.value} value={o.value}>
+                  {o.label}
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+          {selected && (
+            <p className="text-[11px] text-gray-500 mt-1">{selected.hint}</p>
+          )}
+        </div>
+        <div>
+          <Label className="text-xs">Reason note (optional)</Label>
+          <Input
+            value={note}
+            maxLength={160}
+            placeholder="e.g. water supply issue, back by 3pm"
+            onChange={(e) => {
+              setTouched(true);
+              setNote(e.target.value);
+            }}
+            data-testid="input-branch-status-note"
+          />
+          <p className="text-[11px] text-gray-400 mt-1">
+            Shown to customers under your branch on the live queue.
+          </p>
+        </div>
+        <Button
+          className="w-full cuci-cta border-2 border-black"
+          disabled={!dirty || save.isPending}
+          onClick={() => save.mutate()}
+          data-testid="button-save-branch-status"
+        >
+          {save.isPending ? "Saving…" : "Update status"}
+        </Button>
+      </CardContent>
+    </Card>
   );
 }
 
