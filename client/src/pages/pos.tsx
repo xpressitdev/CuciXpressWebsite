@@ -422,13 +422,14 @@ export default function POS() {
 
   // Map configured payment methods onto the existing PaymentOption shape so
   // the qr_provider special-handling downstream keeps working. Key is the
-  // provider (for wallet methods) or the method code — unique by the
-  // (method, qr_provider) DB constraint and stable across reloads.
+  // config row id — unique per row and stable across reloads. (Using method
+  // or qr_provider would collide when two rows share a method, e.g. two
+  // "Bank Transfer" accounts, making the second unselectable.)
   const paymentOptions: ReadonlyArray<PaymentOption> = useMemo(() => {
     const rows = paymentMethodsData?.rows ?? [];
     if (rows.length === 0) return PAYMENT_OPTIONS;
     return rows.map((r) => ({
-      key: r.qr_provider ?? r.method,
+      key: r.id,
       label: r.label,
       method: r.method,
       qrProvider: r.qr_provider,

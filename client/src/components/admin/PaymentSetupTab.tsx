@@ -196,7 +196,7 @@ export default function PaymentSetupTab() {
 function describeError(err: any): string {
   const msg: string = err?.message ?? "";
   if (msg.includes("provider_required_for_qr")) return "A QR provider is required when the method is QR code.";
-  if (msg.includes("method_provider_taken")) return "That method + provider combination already exists.";
+  if (msg.includes("method_provider_taken")) return "A payment method with that exact label already exists. Give this one a different label (e.g. \"Bank Transfer Baiduri\").";
   if (msg.includes("invalid_method")) return "That payment method type is not allowed.";
   if (msg.includes("pocket_pay")) return "The provider value 'pocket_pay' is reserved. Try pocket_pay_qr or pocket_pay_invoice.";
   return msg || "Check the form values";
