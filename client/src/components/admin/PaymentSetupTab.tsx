@@ -45,7 +45,7 @@ const METHOD_OPTIONS: { value: string; label: string }[] = [
   { value: "cash", label: "Cash" },
   { value: "bank_transfer", label: "Bank transfer" },
   { value: "card", label: "Card" },
-  { value: "qr_code", label: "QR code" },
+  { value: "qr_code", label: "Digital wallet / QR" },
   { value: "baiduri_pay", label: "Baiduri Pay" },
   { value: "quick_pay", label: "Quick Pay" },
   { value: "subscription", label: "Subscription" },
@@ -57,6 +57,16 @@ const METHOD_LABELS: Record<string, string> = Object.fromEntries(
 );
 
 const RESERVED_PROVIDER = "pocket_pay";
+
+// Turn a wallet label like "Progresif Ding!" into a stable internal code
+// ("progresif_ding") so owners adding a digital wallet don't have to invent
+// a "QR provider" value themselves. They can still override it if their
+// provider gave them a specific code.
+const slugifyProvider = (s: string) =>
+  s
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, "_")
+    .replace(/^_+|_+$/g, "");
 
 const EMPTY_FORM: PaymentMethodForm = {
   label: "",
@@ -282,6 +292,12 @@ function PaymentMethodEditDialog({
   );
 
   const isQr = form.method === "qr_code";
+  // Track whether the owner manually typed a provider code. While untouched,
+  // we keep it auto-synced to the label so adding a digital wallet only needs
+  // a name + the "QR code" type.
+  const [providerTouched, setProviderTouched] = useState(
+    !!method?.qr_provider,
+  );
 
   const save = useMutation({
     mutationFn: async () => {
@@ -341,8 +357,18 @@ function PaymentMethodEditDialog({
             <Label>Label</Label>
             <Input
               value={form.label}
-              onChange={(e) => set("label", e.target.value)}
-              placeholder="Cash, Baiduri Transfer, Pocket Pay QR…"
+              onChange={(e) => {
+                const label = e.target.value;
+                setForm((f) => ({
+                  ...f,
+                  label,
+                  qr_provider:
+                    f.method === "qr_code" && !providerTouched
+                      ? slugifyProvider(label)
+                      : f.qr_provider,
+                }));
+              }}
+              placeholder="Cash, Baiduri Transfer, Progresif Ding!…"
               data-testid="input-payment-label"
             />
           </div>
@@ -351,7 +377,16 @@ function PaymentMethodEditDialog({
             <Label>Method type</Label>
             <Select
               value={form.method}
-              onValueChange={(v) => set("method", v)}
+              onValueChange={(v) =>
+                setForm((f) => ({
+                  ...f,
+                  method: v,
+                  qr_provider:
+                    v === "qr_code" && !providerTouched
+                      ? slugifyProvider(f.label)
+                      : f.qr_provider,
+                }))
+              }
               disabled={isSystem}
             >
               <SelectTrigger data-testid="select-payment-method">
@@ -378,11 +413,14 @@ function PaymentMethodEditDialog({
 
           {isQr && (
             <div>
-              <Label>QR provider</Label>
+              <Label>Provider code</Label>
               <Input
                 value={form.qr_provider}
-                onChange={(e) => set("qr_provider", e.target.value)}
-                placeholder="pocket_pay_qr, pocket_pay_invoice, baiduri_ms…"
+                onChange={(e) => {
+                  setProviderTouched(true);
+                  set("qr_provider", e.target.value);
+                }}
+                placeholder="progresif_ding, pocket_pay_qr, baiduri_ms…"
                 disabled={isSystem}
                 data-testid="input-payment-qr-provider"
               />
@@ -392,7 +430,7 @@ function PaymentMethodEditDialog({
                 </p>
               ) : (
                 <p className="text-[10px] text-gray-500 mt-1">
-                  Required for QR. Suggestions: pocket_pay_qr, pocket_pay_invoice, baiduri_ms.
+                  Filled in for you from the label. Leave it as-is unless your wallet provider gave you a specific code.
                 </p>
               )}
             </div>

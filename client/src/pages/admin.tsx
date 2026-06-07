@@ -257,24 +257,11 @@ export default function Admin() {
             const role = staff?.role;
             const isOwner = role === "owner";
             const isManagerOrOwner = role === "owner" || role === "manager";
-            const visibleTabs = [
-              "dashboard",
-              "trends",
-              "orders",
-              "payments",
-              "best-selling",
-              ...(isManagerOrOwner ? ["customers"] : []),
-              ...(isOwner ? ["branches", "catalog", "discounts", "promo-codes", "payment-setup", "staff", "loyalty"] : []),
-              ...(isManagerOrOwner ? ["shifts", "collaborations", "subscriptions"] : []),
-            ];
-            const colMd = visibleTabs.length;
-            const colSm = Math.min(4, colMd);
             return (
           <Tabs defaultValue="dashboard" className="w-full">
             <TabsList
-              className="grid w-full bg-white border-2 border-black rounded-xl p-1 h-auto"
+              className="flex flex-wrap w-full justify-start gap-1 bg-white border-2 border-black rounded-xl p-1 h-auto"
               style={{
-                gridTemplateColumns: `repeat(${colSm}, minmax(0, 1fr))`,
                 boxShadow: "3px 3px 0px 0px rgba(0,0,0,0.9)",
               }}
             >
