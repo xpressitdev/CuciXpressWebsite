@@ -1798,7 +1798,81 @@ export default function POS() {
                       </SelectContent>
                     </Select>
                   </div>
-                  {/* POS Control Room: discount + promo. Hidden on a
+                  {paymentMethod === "cash" && (
+                    <div>
+                      <Label htmlFor="cash-received">
+                        Cash received{" "}
+                        <span className="text-red-500 text-xs">(required)</span>
+                      </Label>
+                      <Input
+                        id="cash-received"
+                        type="number"
+                        inputMode="decimal"
+                        min="0"
+                        step="0.01"
+                        value={cashReceived}
+                        onChange={(e) => setCashReceived(e.target.value)}
+                        placeholder={`e.g. ${(total / 100).toFixed(2)}`}
+                        data-testid="input-cash-received"
+                      />
+                      {cashReceivedCents != null && (
+                        <div className="mt-1 flex justify-between text-sm">
+                          <span className="text-gray-600">
+                            {cashReceivedCents < total ? "Short by" : "Change"}
+                          </span>
+                          <span
+                            className={
+                              cashReceivedCents < total
+                                ? "font-semibold text-red-600"
+                                : "font-semibold text-gray-900"
+                            }
+                            data-testid="text-cash-change"
+                          >
+                            {cashReceivedCents < total
+                              ? formatBND(total - cashReceivedCents)
+                              : formatBND(changeCents)}
+                          </span>
+                        </div>
+                      )}
+                    </div>
+                  )}
+                  {/* Reference is only meaningful for non-cash payments
+                      (card/QR txn id, transfer ref). Cash has no transaction
+                      id, so hide it to avoid a redundant empty field. */}
+                  {paymentMethod !== "cash" && (
+                    <div>
+                      <Label htmlFor="payment-ref">
+                        Reference{" "}
+                        {paymentMethod === "bank_transfer" ? (
+                          <span className="text-red-500 text-xs">(required)</span>
+                        ) : (
+                          <span className="text-gray-400 text-xs">(optional)</span>
+                        )}
+                      </Label>
+                      <Input
+                        id="payment-ref"
+                        value={paymentRef}
+                        onChange={(e) => setPaymentRef(e.target.value)}
+                        placeholder="Last 4 digits / txn id"
+                        data-testid="input-payment-ref"
+                      />
+                    </div>
+                  )}
+                  <div>
+                    <Label htmlFor="item-notes">
+                      Visit note{" "}
+                      <span className="text-gray-400 text-xs">(optional)</span>
+                    </Label>
+                    <Input
+                      id="item-notes"
+                      value={itemNotes}
+                      onChange={(e) => setItemNotes(e.target.value)}
+                      placeholder="e.g. extra dirty, scratch on door"
+                      data-testid="input-item-notes"
+                    />
+                  </div>
+                  {/* POS Control Room: discount + promo. Optional, so they
+                      sit below the required fields + visit note. Hidden on a
                       subscription redemption (the pack covers the wash). */}
                   {paymentMethod !== "subscription" && (
                     <>
@@ -1886,79 +1960,6 @@ export default function POS() {
                       </div>
                     </>
                   )}
-                  {paymentMethod === "cash" && (
-                    <div>
-                      <Label htmlFor="cash-received">
-                        Cash received{" "}
-                        <span className="text-red-500 text-xs">(required)</span>
-                      </Label>
-                      <Input
-                        id="cash-received"
-                        type="number"
-                        inputMode="decimal"
-                        min="0"
-                        step="0.01"
-                        value={cashReceived}
-                        onChange={(e) => setCashReceived(e.target.value)}
-                        placeholder={`e.g. ${(total / 100).toFixed(2)}`}
-                        data-testid="input-cash-received"
-                      />
-                      {cashReceivedCents != null && (
-                        <div className="mt-1 flex justify-between text-sm">
-                          <span className="text-gray-600">
-                            {cashReceivedCents < total ? "Short by" : "Change"}
-                          </span>
-                          <span
-                            className={
-                              cashReceivedCents < total
-                                ? "font-semibold text-red-600"
-                                : "font-semibold text-gray-900"
-                            }
-                            data-testid="text-cash-change"
-                          >
-                            {cashReceivedCents < total
-                              ? formatBND(total - cashReceivedCents)
-                              : formatBND(changeCents)}
-                          </span>
-                        </div>
-                      )}
-                    </div>
-                  )}
-                  {/* Reference is only meaningful for non-cash payments
-                      (card/QR txn id, transfer ref). Cash has no transaction
-                      id, so hide it to avoid a redundant empty field. */}
-                  {paymentMethod !== "cash" && (
-                    <div>
-                      <Label htmlFor="payment-ref">
-                        Reference{" "}
-                        {paymentMethod === "bank_transfer" ? (
-                          <span className="text-red-500 text-xs">(required)</span>
-                        ) : (
-                          <span className="text-gray-400 text-xs">(optional)</span>
-                        )}
-                      </Label>
-                      <Input
-                        id="payment-ref"
-                        value={paymentRef}
-                        onChange={(e) => setPaymentRef(e.target.value)}
-                        placeholder="Last 4 digits / txn id"
-                        data-testid="input-payment-ref"
-                      />
-                    </div>
-                  )}
-                  <div>
-                    <Label htmlFor="item-notes">
-                      Visit note{" "}
-                      <span className="text-gray-400 text-xs">(optional)</span>
-                    </Label>
-                    <Input
-                      id="item-notes"
-                      value={itemNotes}
-                      onChange={(e) => setItemNotes(e.target.value)}
-                      placeholder="e.g. extra dirty, scratch on door"
-                      data-testid="input-item-notes"
-                    />
-                  </div>
                 </CardContent>
               </Card>
             </div>
