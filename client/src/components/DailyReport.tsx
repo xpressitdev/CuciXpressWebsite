@@ -26,8 +26,11 @@ import { useToast } from "@/hooks/use-toast";
 
 type PaymentBreakdown = {
   payment_method: string;
+  qr_provider?: string | null;
   sales_cents: number; sales_count: number;
   refund_cents: number; refund_count: number;
+  mdr_bps?: number;
+  mdr_fee_cents?: number;
 };
 
 type Totals = {
@@ -35,6 +38,8 @@ type Totals = {
   sales_cents: number; sales_count: number;
   refund_cents: number; refund_count: number;
   net_sales_cents: number;
+  mdr_fee_cents?: number;
+  net_after_fees_cents?: number;
   cash_sales_cents: number;
   cash_refund_cents: number;
   expected_cash_cents: number;
@@ -68,6 +73,21 @@ const PAYMENT_LABELS: Record<string, string> = {
   subscription: "Subscription",
   voucher: "Voucher",
 };
+
+const PROVIDER_LABELS: Record<string, string> = {
+  progresif_ding: "Progresif Ding",
+  pocket_pay_qr: "Pocket QR",
+  pocket_pay: "Pocket Web",
+};
+
+// Rows are grouped per (payment_method, qr_provider), so a friendly label and
+// a unique React key must account for the provider too.
+const rowLabel = (r: PaymentBreakdown): string =>
+  r.qr_provider
+    ? PROVIDER_LABELS[r.qr_provider] ?? r.qr_provider.replace(/_/g, " ")
+    : PAYMENT_LABELS[r.payment_method] ?? r.payment_method;
+const rowKey = (r: PaymentBreakdown): string =>
+  `${r.payment_method}|${r.qr_provider ?? ""}`;
 
 const formatBND = (cents: number) =>
   `B$${(cents / 100).toLocaleString("en-US", {
@@ -147,9 +167,16 @@ export default function DailyReport({ branchName, staffName, branchId = null, ca
       baiduri_pay: 5, quick_pay: 6, subscription: 7, voucher: 8,
     };
     return [...totals.breakdown].sort(
-      (a, b) => (order[a.payment_method] ?? 99) - (order[b.payment_method] ?? 99),
+      (a, b) =>
+        (order[a.payment_method] ?? 99) - (order[b.payment_method] ?? 99) ||
+        (a.qr_provider ?? "").localeCompare(b.qr_provider ?? ""),
     );
   }, [totals]);
+
+  const mdrFeeCents = totals?.mdr_fee_cents ?? 0;
+  const netAfterFees =
+    totals?.net_after_fees_cents ??
+    (totals ? totals.net_sales_cents - mdrFeeCents : 0);
 
   const paidInCents = parseBND(paidInStr);
   const paidOutCents = parseBND(paidOutStr);
@@ -193,10 +220,13 @@ export default function DailyReport({ branchName, staffName, branchId = null, ca
     lines.push(``);
     lines.push(`— Sales Summary —`);
     for (const r of sortedBreakdown) {
-      const label = PAYMENT_LABELS[r.payment_method] ?? r.payment_method;
+      const label = rowLabel(r);
       lines.push(`${label} Sale: ${formatBND(r.sales_cents)} (${r.sales_count})`);
       lines.push(`${label} Refunds: ${formatBND(r.refund_cents)} (${r.refund_count})`);
       lines.push(`${label} Total: ${formatBND(r.sales_cents - r.refund_cents)}`);
+      if (r.mdr_fee_cents && r.mdr_fee_cents > 0) {
+        lines.push(`${label} Fee (${((r.mdr_bps ?? 0) / 100).toFixed(2)}%): -${formatBND(r.mdr_fee_cents)}`);
+      }
     }
     lines.push(``);
     lines.push(`— WhatsApp Summary —`);
@@ -207,6 +237,9 @@ export default function DailyReport({ branchName, staffName, branchId = null, ca
     lines.push(`Total Card/Pocket/Ding: ${formatBND(buckets.card_pocket_ding)}`);
     lines.push(`Total Cash Sales: ${formatBND(buckets.cash)}`);
     if (buckets.other > 0) lines.push(`Other (subscription/voucher): ${formatBND(buckets.other)}`);
+    lines.push(`Net Sales (after refunds): ${formatBND(totals.net_sales_cents)}`);
+    lines.push(`Transaction Fees (MDR): -${formatBND(mdrFeeCents)}`);
+    lines.push(`Net After Fees: ${formatBND(netAfterFees)}`);
     lines.push(`Expenses: ${formatBND(exp)}`);
     lines.push(`Total Cash in Hand: ${formatBND(cashInHand)}`);
     if (notes.trim()) {
@@ -330,9 +363,9 @@ export default function DailyReport({ branchName, staffName, branchId = null, ca
                   <div className="px-3 py-3 text-sm text-gray-500">No sales yet.</div>
                 ) : (
                   sortedBreakdown.map((r) => {
-                    const label = PAYMENT_LABELS[r.payment_method] ?? r.payment_method;
+                    const label = rowLabel(r);
                     return (
-                      <div key={r.payment_method} className="px-3 py-2">
+                      <div key={rowKey(r)} className="px-3 py-2">
                         <div className="text-xs uppercase tracking-wide font-bold text-gray-700 mb-1">
                           {label} Payments
                         </div>
@@ -352,11 +385,36 @@ export default function DailyReport({ branchName, staffName, branchId = null, ca
                           value={formatBND(r.sales_cents - r.refund_cents)}
                           bold
                         />
+                        {!!r.mdr_fee_cents && r.mdr_fee_cents > 0 && (
+                          <MiniRow
+                            label={`${label} Fee (${((r.mdr_bps ?? 0) / 100).toFixed(2)}%)`}
+                            value={`-${formatBND(r.mdr_fee_cents)}`}
+                            emphasis="warn"
+                          />
+                        )}
                       </div>
                     );
                   })
                 )}
               </Section>
+
+              {/* Net after fees — the headline number the owner cares about. */}
+              <div className="border-2 border-black rounded-md p-3 bg-gradient-to-br from-emerald-50 to-teal-50">
+                <div className="flex items-center justify-between text-sm">
+                  <span className="font-semibold text-gray-800">Net Sales (after refunds)</span>
+                  <span className="tabular-nums font-semibold">{formatBND(totals.net_sales_cents)}</span>
+                </div>
+                <div className="flex items-center justify-between text-sm">
+                  <span className="font-semibold text-gray-800">Transaction Fees (MDR)</span>
+                  <span className="tabular-nums font-semibold text-red-700">−{formatBND(mdrFeeCents)}</span>
+                </div>
+                <div className="flex items-center justify-between text-lg font-extrabold mt-1 pt-1 border-t-2 border-black">
+                  <span>Net After Fees</span>
+                  <span className="tabular-nums text-emerald-700" data-testid="text-daily-net-after-fees">
+                    {formatBND(netAfterFees)}
+                  </span>
+                </div>
+              </div>
 
               {/* Cash in Hand — what the drawer should physically hold. */}
               <div className="border-2 border-black rounded-md p-3 bg-gradient-to-br from-purple-50 to-orange-50">

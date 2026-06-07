@@ -56,6 +56,7 @@ import {
   timestamp,
   date,
   jsonb,
+  uniqueIndex,
 } from "drizzle-orm/pg-core";
 import { sql } from "drizzle-orm";
 import { createInsertSchema } from "drizzle-zod";
@@ -518,6 +519,36 @@ export const insertPaymentMethodSchema = createInsertSchema(paymentMethods).omit
 });
 export type PaymentMethodConfig = typeof paymentMethods.$inferSelect;
 export type InsertPaymentMethodConfig = z.infer<typeof insertPaymentMethodSchema>;
+
+// --- MDR / transaction fee rates ----------------------------
+// The merchant fee (Merchant Discount Rate) the payment provider charges the
+// business on each digital transaction. Keyed by the SAME (payment_method,
+// qr_provider) pair recorded on orders, so reports can look up the rate for a
+// transaction. Kept separate from `payment_methods` because the website
+// gateway uses qr_provider='pocket_pay', which the payment_methods CHECK
+// forbids. mdr_bps = rate in basis points (250 = 2.5%). Cash/bank = 0.
+export const paymentFeeRates = pgTable("payment_fee_rates", {
+  id: text("id").primaryKey(),
+  label: text("label").notNull(),
+  payment_method: text("payment_method").notNull(), // matches orders.payment_method
+  qr_provider: text("qr_provider"),                 // matches orders.qr_provider (null for card/cash)
+  mdr_bps: integer("mdr_bps").default(0).notNull(),  // basis points: 250 = 2.5%
+  created_at: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
+}, (t) => [
+  // NULL-safe uniqueness: Postgres treats NULL as distinct in plain unique
+  // indexes, which would allow duplicate (card, NULL) rows and break the rate
+  // map (last-write-wins). COALESCE the nullable qr_provider so card/cash rows
+  // can't be duplicated.
+  uniqueIndex("payment_fee_rates_method_provider_unique").on(
+    t.payment_method,
+    sql`coalesce(${t.qr_provider}, '')`,
+  ),
+]);
+export const insertPaymentFeeRateSchema = createInsertSchema(paymentFeeRates).omit({
+  created_at: true,
+});
+export type PaymentFeeRate = typeof paymentFeeRates.$inferSelect;
+export type InsertPaymentFeeRate = z.infer<typeof insertPaymentFeeRateSchema>;
 
 // --- Orders (POS transactions) -------------------------------
 // addons: jsonb array of { id: string, name: string, price_cents: number }

@@ -9,3 +9,4 @@
 - [Neon = ANY array gotcha](neon-array-any-gotcha.md) — raw `= ANY(${jsArray})` 500s with "malformed array literal" under neon; use `IN (${sql.join(...)})` or `inArray()`.
 - [Loyalty manual stamps](loyalty-manual-stamps.md) — manual stamps ADD ON TOP of auto-counted orders; one attribution rule (vehicle_id wins, plate-norm fallback when null) must match across lookup/customer-card/redeem.
 - [Shift totals = shared drawer](shift-totals-shared-drawer.md) — cash reports scope by branch+day (not shift_id); each branch = one shared drawer banked daily. Orders keep shift_id for audit only.
+- [MDR fee rates](mdr-fee-rates.md) — fee table keyed by method|qr_provider (missing=0bps); MUST use COALESCE NULL-safe unique index or dup (card,NULL) rows break the rate map. Fee on GROSS; net-after-fees is headline.

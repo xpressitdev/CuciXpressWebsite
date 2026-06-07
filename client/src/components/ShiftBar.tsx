@@ -20,8 +20,11 @@ import { apiRequest } from "@/lib/queryClient";
 
 type PaymentBreakdown = {
   payment_method: string;
+  qr_provider?: string | null;
   sales_cents: number; sales_count: number;
   refund_cents: number; refund_count: number;
+  mdr_bps?: number;
+  mdr_fee_cents?: number;
 };
 
 type Totals = {
@@ -29,6 +32,8 @@ type Totals = {
   sales_cents: number; sales_count: number;
   refund_cents: number; refund_count: number;
   net_sales_cents: number;
+  mdr_fee_cents?: number;
+  net_after_fees_cents?: number;
   cash_sales_cents: number;
   cash_refund_cents: number;
   expected_cash_cents: number;
@@ -56,6 +61,21 @@ const PAYMENT_LABELS: Record<string, string> = {
   subscription: "Subscription",
   voucher: "Voucher",
 };
+
+const PROVIDER_LABELS: Record<string, string> = {
+  progresif_ding: "Progresif Ding",
+  pocket_pay_qr: "Pocket QR",
+  pocket_pay: "Pocket Web",
+};
+
+// Breakdown rows are grouped per (payment_method, qr_provider); label and React
+// key must include the provider so each wallet shows separately.
+const rowLabel = (r: PaymentBreakdown): string =>
+  r.qr_provider
+    ? PROVIDER_LABELS[r.qr_provider] ?? r.qr_provider.replace(/_/g, " ")
+    : PAYMENT_LABELS[r.payment_method] ?? r.payment_method;
+const rowKey = (r: PaymentBreakdown): string =>
+  `${r.payment_method}|${r.qr_provider ?? ""}`;
 
 const formatBND = (cents: number) =>
   `B$${(cents / 100).toLocaleString("en-US", {
@@ -333,9 +353,9 @@ export default function ShiftBar({ branchId, branchName, enabled, canManage = fa
                     totals.breakdown.map((row) => {
                       const net = row.sales_cents - row.refund_cents;
                       return (
-                        <div key={row.payment_method} className="px-3 py-2 flex items-center justify-between">
+                        <div key={rowKey(row)} className="px-3 py-2 flex items-center justify-between">
                           <span className="font-semibold">
-                            {PAYMENT_LABELS[row.payment_method] ?? row.payment_method}
+                            {rowLabel(row)}
                           </span>
                           <span className="tabular-nums">
                             {formatBND(net)}
@@ -344,14 +364,31 @@ export default function ShiftBar({ branchId, branchName, enabled, canManage = fa
                                 (−{formatBND(row.refund_cents)} refund)
                               </span>
                             )}
+                            {!!row.mdr_fee_cents && row.mdr_fee_cents > 0 && (
+                              <span className="text-xs text-amber-600 ml-1">
+                                (−{formatBND(row.mdr_fee_cents)} fee)
+                              </span>
+                            )}
                           </span>
                         </div>
                       );
                     })
                   )}
-                  <div className="px-3 py-2 flex items-center justify-between bg-gray-50 font-bold">
+                  <div className="px-3 py-2 flex items-center justify-between bg-gray-50 font-semibold">
                     <span>Net sales</span>
                     <span className="tabular-nums">{formatBND(totals.net_sales_cents)}</span>
+                  </div>
+                  {(totals.mdr_fee_cents ?? 0) > 0 && (
+                    <div className="px-3 py-2 flex items-center justify-between text-amber-700">
+                      <span>− Transaction fees (MDR)</span>
+                      <span className="tabular-nums">−{formatBND(totals.mdr_fee_cents ?? 0)}</span>
+                    </div>
+                  )}
+                  <div className="px-3 py-2 flex items-center justify-between bg-emerald-50 font-bold text-emerald-800">
+                    <span>Net after fees</span>
+                    <span className="tabular-nums" data-testid="text-shift-net-after-fees">
+                      {formatBND(totals.net_after_fees_cents ?? (totals.net_sales_cents - (totals.mdr_fee_cents ?? 0)))}
+                    </span>
                   </div>
                 </div>
               </div>

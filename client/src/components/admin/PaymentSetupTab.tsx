@@ -190,6 +190,8 @@ export default function PaymentSetupTab() {
         </CardContent>
       </Card>
 
+      <FeeRatesCard />
+
       {editing && (
         <PaymentMethodEditDialog
           method={editing}
@@ -204,6 +206,275 @@ export default function PaymentSetupTab() {
         />
       )}
     </div>
+  );
+}
+
+interface FeeRateRow {
+  id: string;
+  label: string;
+  payment_method: string;
+  qr_provider: string | null;
+  mdr_bps: number;
+}
+interface FeeRateListResp { rows: FeeRateRow[]; }
+
+const bpsToPct = (bps: number) => (bps / 100).toFixed(2).replace(/\.?0+$/, "");
+const pctToBps = (pct: string) => Math.round((Number(pct) || 0) * 100);
+
+function FeeRatesCard() {
+  const { data, isLoading, error } = useQuery<FeeRateListResp>({
+    queryKey: ["/api/admin/fee-rates"],
+  });
+  const [creating, setCreating] = useState(false);
+  const rows = data?.rows ?? [];
+
+  return (
+    <Card className="cuci-card border-2 border-black">
+      <CardHeader>
+        <div className="flex items-start justify-between gap-3 flex-wrap">
+          <div>
+            <div className="cuci-eyebrow">POS Control Room</div>
+            <CardTitle className="text-2xl font-extrabold tracking-tight">
+              <span className="text-cuci-primary">Transaction fees (MDR)</span>
+            </CardTitle>
+            <p className="text-sm text-gray-600 max-w-2xl">
+              The cut each payment provider keeps per digital transaction. Reports
+              subtract these to show your <strong>net after fees</strong>. The fee is
+              charged on the full amount and is <strong>not</strong> refunded when an
+              order is refunded. Cash and bank transfer have no fee.
+            </p>
+          </div>
+          <Button
+            className="cuci-cta border-2 border-black"
+            onClick={() => setCreating(true)}
+            data-testid="button-new-fee-rate"
+          >
+            <Plus className="w-4 h-4 mr-1" /> New fee rate
+          </Button>
+        </div>
+      </CardHeader>
+      <CardContent>
+        {error && <p className="text-sm text-red-600">Failed to load fee rates.</p>}
+        {isLoading ? (
+          <p className="text-sm text-gray-500">Loading…</p>
+        ) : rows.length === 0 ? (
+          <p className="text-sm text-gray-500 italic py-6 text-center">
+            No fee rates yet. Click "New fee rate" to add one.
+          </p>
+        ) : (
+          <div className="grid md:grid-cols-2 gap-4">
+            {rows.map((r) => (
+              <FeeRateRowCard key={r.id} rate={r} />
+            ))}
+          </div>
+        )}
+      </CardContent>
+
+      {creating && <FeeRateEditDialog rate={null} onClose={() => setCreating(false)} />}
+    </Card>
+  );
+}
+
+function FeeRateRowCard({ rate }: { rate: FeeRateRow }) {
+  const queryClient = useQueryClient();
+  const { toast } = useToast();
+  const [pct, setPct] = useState(bpsToPct(rate.mdr_bps));
+  const dirty = pctToBps(pct) !== rate.mdr_bps;
+
+  const save = useMutation({
+    mutationFn: async () =>
+      apiRequest("PATCH", `/api/admin/fee-rates/${rate.id}`, { mdr_bps: pctToBps(pct) }),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["/api/admin/fee-rates"] });
+      toast({ title: "Fee rate updated" });
+    },
+    onError: (err: any) =>
+      toast({ title: "Failed to save", description: err?.message ?? "", variant: "destructive" }),
+  });
+
+  const del = useMutation({
+    mutationFn: async () => apiRequest("DELETE", `/api/admin/fee-rates/${rate.id}`),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["/api/admin/fee-rates"] });
+      toast({ title: "Fee rate removed" });
+    },
+    onError: (err: any) =>
+      toast({ title: "Failed to delete", description: err?.message ?? "", variant: "destructive" }),
+  });
+
+  return (
+    <div
+      className="border-2 border-black rounded-lg p-4 bg-white space-y-3"
+      data-testid={`fee-rate-card-${rate.id}`}
+    >
+      <div className="min-w-0">
+        <div className="font-extrabold text-lg tracking-tight truncate">{rate.label}</div>
+        <div className="text-xs text-gray-600 flex items-center gap-1.5 mt-1 flex-wrap">
+          <Badge variant="outline" className="border-black font-mono text-[10px]">
+            {rate.payment_method}
+          </Badge>
+          {rate.qr_provider && (
+            <Badge variant="outline" className="border-black font-mono text-[10px] flex items-center gap-1">
+              <QrCode className="w-3 h-3" /> {rate.qr_provider}
+            </Badge>
+          )}
+        </div>
+      </div>
+
+      <div className="flex items-end gap-2">
+        <div className="flex-1">
+          <Label className="text-xs">Fee %</Label>
+          <div className="flex items-center gap-1">
+            <Input
+              type="number"
+              step="0.01"
+              min="0"
+              max="20"
+              value={pct}
+              onChange={(e) => setPct(e.target.value)}
+              data-testid={`input-fee-rate-${rate.id}`}
+            />
+            <span className="font-bold">%</span>
+          </div>
+        </div>
+        <Button
+          size="sm"
+          className="cuci-cta border-2 border-black"
+          disabled={!dirty || save.isPending}
+          onClick={() => save.mutate()}
+          data-testid={`button-save-fee-rate-${rate.id}`}
+        >
+          <Save className="w-3 h-3 mr-1" /> Save
+        </Button>
+        <Button
+          size="sm"
+          variant="outline"
+          className="border-2 border-black text-red-600 hover:text-red-700"
+          disabled={del.isPending}
+          onClick={() => del.mutate()}
+          data-testid={`button-delete-fee-rate-${rate.id}`}
+        >
+          <Trash2 className="w-3 h-3" />
+        </Button>
+      </div>
+    </div>
+  );
+}
+
+function FeeRateEditDialog({ rate, onClose }: { rate: FeeRateRow | null; onClose: () => void }) {
+  const queryClient = useQueryClient();
+  const { toast } = useToast();
+  const isCreate = rate === null;
+  const [label, setLabel] = useState(rate?.label ?? "");
+  const [method, setMethod] = useState(rate?.payment_method ?? "card");
+  const [provider, setProvider] = useState(rate?.qr_provider ?? "");
+  const [pct, setPct] = useState(rate ? bpsToPct(rate.mdr_bps) : "");
+
+  const isQr = method === "qr_code";
+
+  const save = useMutation({
+    mutationFn: async () =>
+      apiRequest("POST", "/api/admin/fee-rates", {
+        label: label.trim(),
+        payment_method: method,
+        qr_provider: isQr ? provider.trim() : null,
+        mdr_bps: pctToBps(pct),
+      }),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["/api/admin/fee-rates"] });
+      toast({ title: "Fee rate created" });
+      onClose();
+    },
+    onError: (err: any) => {
+      const msg: string = err?.message ?? "";
+      toast({
+        title: "Failed to save",
+        description: msg.includes("duplicate_rate")
+          ? "A fee rate for that method/provider already exists."
+          : msg || "Check the form values",
+        variant: "destructive",
+      });
+    },
+  });
+
+  const valid = label.trim().length > 0 && (!isQr || provider.trim().length > 0);
+
+  return (
+    <Dialog open onOpenChange={(o) => { if (!o) onClose(); }}>
+      <DialogContent className="max-w-lg max-h-[90vh] overflow-y-auto">
+        <DialogHeader>
+          <DialogTitle className="text-xl font-extrabold">New fee rate</DialogTitle>
+        </DialogHeader>
+        <div className="space-y-3">
+          <div>
+            <Label>Label</Label>
+            <Input
+              value={label}
+              onChange={(e) => setLabel(e.target.value)}
+              placeholder="Card, Progresif Ding!, Pocket QR…"
+              data-testid="input-new-fee-label"
+            />
+          </div>
+          <div>
+            <Label>Method type</Label>
+            <Select value={method} onValueChange={setMethod}>
+              <SelectTrigger data-testid="select-fee-method">
+                <SelectValue placeholder="Select a method" />
+              </SelectTrigger>
+              <SelectContent>
+                {METHOD_OPTIONS.map((o) => (
+                  <SelectItem key={o.value} value={o.value}>{o.label}</SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          </div>
+          {isQr && (
+            <div>
+              <Label>Provider code</Label>
+              <Input
+                value={provider}
+                onChange={(e) => setProvider(e.target.value)}
+                placeholder="progresif_ding, pocket_pay_qr, pocket_pay…"
+                data-testid="input-new-fee-provider"
+              />
+              <p className="text-[10px] text-gray-500 mt-1">
+                Must match the provider code stored on orders for this wallet.
+              </p>
+            </div>
+          )}
+          <div>
+            <Label>Fee %</Label>
+            <div className="flex items-center gap-1">
+              <Input
+                type="number"
+                step="0.01"
+                min="0"
+                max="20"
+                value={pct}
+                onChange={(e) => setPct(e.target.value)}
+                placeholder="2.7"
+                data-testid="input-new-fee-pct"
+              />
+              <span className="font-bold">%</span>
+            </div>
+          </div>
+        </div>
+        <DialogFooter>
+          <Button variant="outline" className="border-2 border-black" onClick={onClose} data-testid="button-cancel-fee-rate">
+            Cancel
+          </Button>
+          <Button
+            className="cuci-cta border-2 border-black"
+            disabled={!valid || save.isPending}
+            onClick={() => save.mutate()}
+            data-testid="button-create-fee-rate"
+          >
+            <Save className="w-4 h-4 mr-1" />
+            {save.isPending ? "Saving…" : "Create rate"}
+          </Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
   );
 }
 

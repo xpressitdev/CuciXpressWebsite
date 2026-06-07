@@ -605,6 +605,22 @@ export async function registerRoutes(app: Express): Promise<Server> {
         refund_cents: hourlyMap.get(h)?.refund_cents ?? 0,
       }));
 
+      // MDR fees for the day — grouped by (method, provider) so per-wallet
+      // rates apply, then summed. Fee charged on gross (kept on refunds).
+      const feeGroups = (await db.execute(sql`
+        SELECT payment_method, qr_provider,
+               COALESCE(SUM(CASE WHEN status <> 'refunded' THEN total_cents ELSE 0 END),0)::int AS sales_cents,
+               COALESCE(SUM(CASE WHEN status =  'refunded' THEN total_cents ELSE 0 END),0)::int AS refund_cents
+          FROM orders
+         WHERE ticket_day = ${targetDate}::date
+           ${branchFilter}
+         GROUP BY payment_method, qr_provider
+      `)).rows as Array<{ payment_method: string; qr_provider: string | null; sales_cents: number; refund_cents: number }>;
+      const rateMap = await loadMdrRateMap(db);
+      const mdrFee = feeGroups.reduce((acc, g) => acc + mdrFeeForGroup(
+        mdrRateFor(rateMap, g.payment_method, g.qr_provider), g.sales_cents, g.refund_cents,
+      ), 0);
+
       const tx = Number(tilesRow.today_transactions ?? 0);
       const sales = Number(tilesRow.today_sales_cents ?? 0);
       const refundCount = Number(tilesRow.today_refund_count ?? 0);
@@ -622,6 +638,8 @@ export async function registerRoutes(app: Express): Promise<Server> {
           today_refund_total_cents: refundTotal,
           today_avg_refund_cents: refundCount > 0 ? Math.round(refundTotal / refundCount) : 0,
           today_net_sales_cents: sales,
+          today_mdr_fee_cents: mdrFee,
+          today_net_after_fees_cents: sales - refundTotal - mdrFee,
           today_active_staff: Number(tilesRow.today_active_staff ?? 0),
           today_active_customers: Number(tilesRow.today_active_customers ?? 0),
           total_staff: Number(tilesRow.total_staff ?? 0),
@@ -728,6 +746,21 @@ export async function registerRoutes(app: Express): Promise<Server> {
          WHERE is_active = true ORDER BY name
       `)).rows;
 
+      // MDR fees for the filtered range, grouped by (method, provider).
+      const feeGroups = (await db.execute(sql`
+        SELECT o.payment_method, o.qr_provider,
+               COALESCE(SUM(CASE WHEN o.status <> 'refunded' THEN o.total_cents ELSE 0 END),0)::int AS sales_cents,
+               COALESCE(SUM(CASE WHEN o.status =  'refunded' THEN o.total_cents ELSE 0 END),0)::int AS refund_cents
+          FROM orders o
+         WHERE o.ticket_day BETWEEN ${from}::date AND ${to}::date
+           ${branchFilter} ${pmFilter} ${staffFilter} ${searchFilter}
+         GROUP BY o.payment_method, o.qr_provider
+      `)).rows as Array<{ payment_method: string; qr_provider: string | null; sales_cents: number; refund_cents: number }>;
+      const rateMap = await loadMdrRateMap(db);
+      const mdrFee = feeGroups.reduce((acc, g) => acc + mdrFeeForGroup(
+        mdrRateFor(rateMap, g.payment_method, g.qr_provider), g.sales_cents, g.refund_cents,
+      ), 0);
+
       const txCount = Number(totals.transactions ?? 0);
       const refCount = Number(totals.refund_count ?? 0);
       const sales = Number(totals.sales_cents ?? 0);
@@ -744,6 +777,8 @@ export async function registerRoutes(app: Express): Promise<Server> {
           refund_count: refCount,
           refund_total_cents: refundTotal,
           net_sales_cents: sales,
+          mdr_fee_cents: mdrFee,
+          net_after_fees_cents: sales - refundTotal - mdrFee,
           items_sold: Number(totals.items_sold ?? 0),
           avg_sales_cents: txCount - refCount > 0 ? Math.round(sales / paidCount) : 0,
           avg_refund_cents: refCount > 0 ? Math.round(refundTotal / refCount) : 0,
@@ -1005,8 +1040,31 @@ export async function registerRoutes(app: Express): Promise<Server> {
          ORDER BY sales_cents DESC
       `)).rows as Array<any>;
 
+      const rateMap = await loadMdrRateMap(db);
       const totalSales = rows.reduce((a, r) => a + Number(r.sales_cents ?? 0), 0);
       const totalTx    = rows.reduce((a, r) => a + Number(r.transactions ?? 0), 0);
+      const totalRefund = rows.reduce((a, r) => a + Number(r.refund_cents ?? 0), 0);
+
+      const mappedRows = rows.map((r) => {
+        const sales = Number(r.sales_cents ?? 0);
+        const refund = Number(r.refund_cents ?? 0);
+        const bps = mdrRateFor(rateMap, r.payment_method, r.qr_provider);
+        const fee = mdrFeeForGroup(bps, sales, refund);
+        return {
+          payment_method: r.payment_method,
+          qr_provider: r.qr_provider,
+          transactions: Number(r.transactions ?? 0),
+          paid_count: Number(r.paid_count ?? 0),
+          refund_count: Number(r.refund_count ?? 0),
+          sales_cents: sales,
+          refund_cents: refund,
+          mdr_bps: bps,
+          mdr_fee_cents: fee,
+          net_cents: sales - refund - fee,
+          share_pct: totalSales > 0 ? Math.round((sales / totalSales) * 1000) / 10 : 0,
+        };
+      });
+      const totalFee = mappedRows.reduce((a, r) => a + r.mdr_fee_cents, 0);
 
       const branches = (await db.execute(
         sql`SELECT id, name FROM branches ORDER BY name`,
@@ -1015,20 +1073,14 @@ export async function registerRoutes(app: Express): Promise<Server> {
       res.json({
         filter: { branch_id: branchId, from, to },
         branches,
-        totals: { transactions: totalTx, sales_cents: totalSales },
-        rows: rows.map((r) => {
-          const sales = Number(r.sales_cents ?? 0);
-          return {
-            payment_method: r.payment_method,
-            qr_provider: r.qr_provider,
-            transactions: Number(r.transactions ?? 0),
-            paid_count: Number(r.paid_count ?? 0),
-            refund_count: Number(r.refund_count ?? 0),
-            sales_cents: sales,
-            refund_cents: Number(r.refund_cents ?? 0),
-            share_pct: totalSales > 0 ? Math.round((sales / totalSales) * 1000) / 10 : 0,
-          };
-        }),
+        totals: {
+          transactions: totalTx,
+          sales_cents: totalSales,
+          refund_cents: totalRefund,
+          mdr_fee_cents: totalFee,
+          net_cents: totalSales - totalRefund - totalFee,
+        },
+        rows: mappedRows,
       });
     } catch (err) {
       console.error('[admin.reports.payment-methods] failed:', err);
@@ -3010,6 +3062,96 @@ export async function registerRoutes(app: Express): Promise<Server> {
       res.json({ ok: true, deactivated: true });
     } catch (err) {
       console.error('[admin.payment_methods.delete] failed:', err);
+      res.status(500).json({ error: 'delete_failed' });
+    }
+  });
+
+  // ---- Transaction fee rates (MDR) — owner only ----------------------
+  // The merchant fee a payment provider charges per digital transaction.
+  // Keyed by the same (payment_method, qr_provider) pair stored on orders.
+  const clampBps = (v: unknown) => {
+    const n = Math.round(Number(v));
+    if (!Number.isFinite(n)) return null;
+    if (n < 0 || n > 2000) return null; // 0%..20% guardrail
+    return n;
+  };
+
+  app.get('/api/admin/fee-rates', requireStaff, requireStaffRole('owner'), async (_req, res) => {
+    try {
+      const rows = (await db.execute(sql`
+        SELECT id, label, payment_method, qr_provider, mdr_bps
+          FROM payment_fee_rates
+         ORDER BY mdr_bps, payment_method, qr_provider
+      `)).rows;
+      res.json({ rows });
+    } catch (err) {
+      console.error('[admin.fee_rates.list] failed:', err);
+      res.status(500).json({ error: 'list_failed' });
+    }
+  });
+
+  app.post('/api/admin/fee-rates', requireStaff, requireStaffRole('owner'), async (req, res) => {
+    const label = String(req.body?.label ?? '').trim();
+    const paymentMethod = String(req.body?.payment_method ?? '').trim();
+    const qrProviderRaw = req.body?.qr_provider;
+    const qrProvider = qrProviderRaw == null || String(qrProviderRaw).trim() === ''
+      ? null : String(qrProviderRaw).trim();
+    const bps = clampBps(req.body?.mdr_bps);
+    if (!label) return res.status(400).json({ error: 'missing_label' });
+    if (!paymentMethod) return res.status(400).json({ error: 'missing_payment_method' });
+    if (bps === null) return res.status(400).json({ error: 'invalid_mdr_bps' });
+    const id = `fee_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 7)}`;
+    try {
+      await db.execute(sql`
+        INSERT INTO payment_fee_rates (id, label, payment_method, qr_provider, mdr_bps)
+        VALUES (${id}, ${label}, ${paymentMethod}, ${qrProvider}, ${bps})
+      `);
+      res.json({ ok: true, id });
+    } catch (err: any) {
+      if (String(err?.code) === '23505') {
+        return res.status(409).json({ error: 'duplicate_rate' });
+      }
+      console.error('[admin.fee_rates.create] failed:', err);
+      res.status(500).json({ error: 'create_failed' });
+    }
+  });
+
+  app.patch('/api/admin/fee-rates/:id', requireStaff, requireStaffRole('owner'), async (req, res) => {
+    const id = String(req.params.id ?? '').trim();
+    if (!id) return res.status(400).json({ error: 'missing_id' });
+    const sets: ReturnType<typeof sql>[] = [];
+    if (req.body?.label !== undefined) {
+      const label = String(req.body.label).trim();
+      if (!label) return res.status(400).json({ error: 'missing_label' });
+      sets.push(sql`label = ${label}`);
+    }
+    if (req.body?.mdr_bps !== undefined) {
+      const bps = clampBps(req.body.mdr_bps);
+      if (bps === null) return res.status(400).json({ error: 'invalid_mdr_bps' });
+      sets.push(sql`mdr_bps = ${bps}`);
+    }
+    if (sets.length === 0) return res.status(400).json({ error: 'nothing_to_update' });
+    try {
+      const result = await db.execute(sql`
+        UPDATE payment_fee_rates SET ${sql.join(sets, sql`, `)} WHERE id = ${id}
+      `);
+      if (result.rowCount === 0) return res.status(404).json({ error: 'not_found' });
+      res.json({ ok: true });
+    } catch (err) {
+      console.error('[admin.fee_rates.update] failed:', err);
+      res.status(500).json({ error: 'update_failed' });
+    }
+  });
+
+  app.delete('/api/admin/fee-rates/:id', requireStaff, requireStaffRole('owner'), async (req, res) => {
+    const id = String(req.params.id ?? '').trim();
+    if (!id) return res.status(400).json({ error: 'missing_id' });
+    try {
+      const result = await db.execute(sql`DELETE FROM payment_fee_rates WHERE id = ${id}`);
+      if (result.rowCount === 0) return res.status(404).json({ error: 'not_found' });
+      res.json({ ok: true, deleted: true });
+    } catch (err) {
+      console.error('[admin.fee_rates.delete] failed:', err);
       res.status(500).json({ error: 'delete_failed' });
     }
   });
@@ -7371,6 +7513,31 @@ export async function registerRoutes(app: Express): Promise<Server> {
   // used to bucket orders into ticket_day on insert. Pass `null` for the
   // live "today" view so the day is derived in DB time — this avoids any
   // app-vs-DB clock drift around the UTC midnight boundary.
+  // --- MDR (merchant transaction fee) helpers --------------------------
+  // Rate map keyed by `${payment_method}|${qr_provider ?? ''}` -> basis points.
+  // Missing keys (cash, bank transfer, unconfigured wallets) = 0% fee.
+  type MdrRunner = typeof db | Parameters<Parameters<typeof db.transaction>[0]>[0];
+  async function loadMdrRateMap(runner: MdrRunner): Promise<Map<string, number>> {
+    const rows = (await runner.execute(sql`
+      SELECT payment_method, qr_provider, mdr_bps FROM payment_fee_rates
+    `)).rows as Array<{ payment_method: string; qr_provider: string | null; mdr_bps: number }>;
+    const map = new Map<string, number>();
+    for (const r of rows) {
+      map.set(`${r.payment_method}|${r.qr_provider ?? ''}`, Number(r.mdr_bps) || 0);
+    }
+    return map;
+  }
+  const mdrRateFor = (
+    map: Map<string, number>,
+    paymentMethod: string,
+    qrProvider: string | null,
+  ) => map.get(`${paymentMethod}|${qrProvider ?? ''}`) ?? 0;
+  // Fee policy (owner-chosen): MDR is charged on GROSS — the provider keeps its
+  // cut even when the sale is later refunded. So gross = sales + refunds (both
+  // are the original charged amounts). Round once per (method, provider) group.
+  const mdrFeeForGroup = (bps: number, salesCents: number, refundCents: number) =>
+    Math.round(((salesCents + refundCents) * bps) / 10000);
+
   async function computeShiftTotals(
     runner: typeof db | Parameters<Parameters<typeof db.transaction>[0]>[0],
     branchId: number,
@@ -7380,8 +7547,10 @@ export async function registerRoutes(app: Express): Promise<Server> {
     const dayFilter = day === null
       ? sql`ticket_day = (now() AT TIME ZONE 'UTC')::date`
       : sql`ticket_day = ${day}::date`;
-    const rows = (await runner.execute(sql`
-      SELECT payment_method,
+    // Group by (payment_method, qr_provider) — MDR rates differ per wallet
+    // (Progresif Ding vs Pocket QR vs Pocket Web are all 'qr_code').
+    const rawRows = (await runner.execute(sql`
+      SELECT payment_method, qr_provider,
              COALESCE(SUM(CASE WHEN status <> 'refunded' THEN total_cents ELSE 0 END), 0)::int AS sales_cents,
              COALESCE(SUM(CASE WHEN status <> 'refunded' THEN 1 ELSE 0 END), 0)::int          AS sales_count,
              COALESCE(SUM(CASE WHEN status =  'refunded' THEN total_cents ELSE 0 END), 0)::int AS refund_cents,
@@ -7389,32 +7558,39 @@ export async function registerRoutes(app: Express): Promise<Server> {
         FROM orders
        WHERE branch_id = ${branchId}
          AND ${dayFilter}
-       GROUP BY payment_method
-       ORDER BY payment_method
+       GROUP BY payment_method, qr_provider
+       ORDER BY payment_method, qr_provider
     `)).rows as Array<{
-      payment_method: string;
+      payment_method: string; qr_provider: string | null;
       sales_cents: number; sales_count: number;
       refund_cents: number; refund_count: number;
     }>;
+    const rateMap = await loadMdrRateMap(runner);
     let salesCents = 0, salesCount = 0, refundCents = 0, refundCount = 0;
-    let cashSales = 0, cashRefunds = 0;
-    for (const r of rows) {
+    let cashSales = 0, cashRefunds = 0, mdrFeeCents = 0;
+    const breakdown = rawRows.map((r) => {
+      const bps = mdrRateFor(rateMap, r.payment_method, r.qr_provider);
+      const fee = mdrFeeForGroup(bps, r.sales_cents, r.refund_cents);
       salesCents += r.sales_cents;
       salesCount += r.sales_count;
       refundCents += r.refund_cents;
       refundCount += r.refund_count;
+      mdrFeeCents += fee;
       if (r.payment_method === 'cash') {
-        cashSales = r.sales_cents;
-        cashRefunds = r.refund_cents;
+        cashSales += r.sales_cents;
+        cashRefunds += r.refund_cents;
       }
-    }
+      return { ...r, mdr_bps: bps, mdr_fee_cents: fee };
+    });
     return {
-      breakdown: rows,
+      breakdown,
       sales_cents: salesCents,
       sales_count: salesCount,
       refund_cents: refundCents,
       refund_count: refundCount,
       net_sales_cents: salesCents - refundCents,
+      mdr_fee_cents: mdrFeeCents,
+      net_after_fees_cents: salesCents - refundCents - mdrFeeCents,
       cash_sales_cents: cashSales,
       cash_refund_cents: cashRefunds,
       expected_cash_cents: openingFloatCents + cashSales - cashRefunds,

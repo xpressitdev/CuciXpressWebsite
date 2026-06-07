@@ -668,6 +668,8 @@ interface DashboardResponse {
     today_refund_total_cents: number;
     today_avg_refund_cents: number;
     today_net_sales_cents: number;
+    today_mdr_fee_cents: number;
+    today_net_after_fees_cents: number;
     today_active_staff: number;
     today_active_customers: number;
     total_staff: number;
@@ -709,6 +711,8 @@ function DashboardTab() {
       { label: "Total Refunds",            value: formatBND(tiles.today_refund_total_cents),         tone: "blue",   testId: "tile-refund-total" },
       { label: "Average Refund",           value: formatBND(tiles.today_avg_refund_cents),           tone: "pink",   testId: "tile-refund-avg" },
       { label: "Net Sales",                value: formatBND(tiles.today_net_sales_cents),            tone: "blue",   testId: "tile-net" },
+      { label: "Transaction Fees (MDR)",   value: formatBND(tiles.today_mdr_fee_cents),              tone: "amber",  testId: "tile-mdr-fee" },
+      { label: "Net After Fees",           value: formatBND(tiles.today_net_after_fees_cents),       tone: "green",  testId: "tile-net-after-fees" },
       { label: "Active Staff Today",       value: String(tiles.today_active_staff),                  tone: "purple", testId: "tile-staff-today" },
       { label: "Active Customers Today",   value: String(tiles.today_active_customers),              tone: "pink",   testId: "tile-cust-today" },
       { label: "Total Staff",              value: String(tiles.total_staff),                         tone: "green",  testId: "tile-staff-total" },
@@ -856,6 +860,7 @@ interface OrdersReportResponse {
     transactions: number; sales_cents: number; refund_count: number;
     refund_total_cents: number; net_sales_cents: number; items_sold: number;
     avg_sales_cents: number; avg_refund_cents: number;
+    mdr_fee_cents: number; net_after_fees_cents: number;
   };
   page: number; per_page: number; total_count: number;
   rows: Array<{
@@ -996,6 +1001,8 @@ function OrdersReportTab() {
         { label: "Average Refund",     value: formatBND(totals.avg_refund_cents),       testId: "report-tile-refund-avg" },
         { label: "Items Sold",         value: String(totals.items_sold),                testId: "report-tile-items" },
         { label: "Net Revenue",        value: formatBND(totals.sales_cents - totals.refund_total_cents), testId: "report-tile-revenue" },
+        { label: "Transaction Fees (MDR)", value: formatBND(totals.mdr_fee_cents),       testId: "report-tile-mdr-fee" },
+        { label: "Net After Fees",     value: formatBND(totals.net_after_fees_cents),   testId: "report-tile-net-after-fees" },
       ]
     : [];
 
@@ -1201,7 +1208,10 @@ function OrdersReportTab() {
 interface PaymentMethodsResponse {
   filter: { branch_id: number | null; from: string; to: string };
   branches: Array<{ id: number; name: string }>;
-  totals: { transactions: number; sales_cents: number };
+  totals: {
+    transactions: number; sales_cents: number;
+    refund_cents: number; mdr_fee_cents: number; net_cents: number;
+  };
   rows: Array<{
     payment_method: string;
     qr_provider: string | null;
@@ -1210,6 +1220,9 @@ interface PaymentMethodsResponse {
     refund_count: number;
     sales_cents: number;
     refund_cents: number;
+    mdr_bps: number;
+    mdr_fee_cents: number;
+    net_cents: number;
     share_pct: number;
   }>;
 }
@@ -1311,6 +1324,14 @@ function PaymentMethodsTab() {
               <div className="text-xs text-gray-600">Total Sales</div>
               <div className="font-semibold text-gray-900 mt-1">{formatBND(totals.sales_cents)}</div>
             </div>
+            <div className="rounded-lg border p-3 bg-amber-50/40">
+              <div className="text-xs text-gray-600">Transaction Fees (MDR)</div>
+              <div className="font-semibold text-amber-700 mt-1" data-testid="tile-pm-mdr-fee">{formatBND(totals.mdr_fee_cents)}</div>
+            </div>
+            <div className="rounded-lg border p-3 bg-emerald-50/60">
+              <div className="text-xs text-gray-600">Net After Fees</div>
+              <div className="font-semibold text-emerald-800 mt-1" data-testid="tile-pm-net-after-fees">{formatBND(totals.net_cents)}</div>
+            </div>
           </>
         )}
       </div>
@@ -1336,6 +1357,8 @@ function PaymentMethodsTab() {
                     <TableHead className="text-right">Transactions</TableHead>
                     <TableHead className="text-right">Refunds</TableHead>
                     <TableHead className="text-right">Sales</TableHead>
+                    <TableHead className="text-right">Fee (MDR)</TableHead>
+                    <TableHead className="text-right">Net</TableHead>
                     <TableHead className="text-right">Share</TableHead>
                   </TableRow>
                 </TableHeader>
@@ -1354,6 +1377,12 @@ function PaymentMethodsTab() {
                           {r.refund_count > 0 ? `${r.refund_count} (−${formatBND(r.refund_cents)})` : "—"}
                         </TableCell>
                         <TableCell className="text-right text-sm font-medium">{formatBND(r.sales_cents)}</TableCell>
+                        <TableCell className="text-right text-sm text-amber-700">
+                          {r.mdr_fee_cents > 0 ? (
+                            <>−{formatBND(r.mdr_fee_cents)}<span className="text-xs text-gray-400 ml-1">{(r.mdr_bps / 100).toFixed(2)}%</span></>
+                          ) : "—"}
+                        </TableCell>
+                        <TableCell className="text-right text-sm font-semibold text-emerald-800">{formatBND(r.net_cents)}</TableCell>
                         <TableCell className="text-right text-sm">
                           <div className="flex items-center justify-end gap-2">
                             <div className="w-20 h-2 bg-gray-100 rounded-full overflow-hidden">
@@ -2610,19 +2639,36 @@ interface ShiftDetailResp {
   totals: {
     breakdown: Array<{
       payment_method: string;
+      qr_provider?: string | null;
       sales_cents: number; sales_count: number;
       refund_cents: number; refund_count: number;
+      mdr_bps?: number;
+      mdr_fee_cents?: number;
     }>;
     sales_cents: number;
     sales_count: number;
     refund_cents: number;
     refund_count: number;
     net_sales_cents: number;
+    mdr_fee_cents?: number;
+    net_after_fees_cents?: number;
     cash_sales_cents: number;
     cash_refund_cents: number;
     expected_cash_cents: number;
   };
 }
+
+const SHIFT_PROVIDER_LABELS: Record<string, string> = {
+  progresif_ding: "Progresif Ding",
+  pocket_pay_qr: "Pocket QR",
+  pocket_pay: "Pocket Web",
+};
+const shiftRowLabel = (r: { payment_method: string; qr_provider?: string | null }): string =>
+  r.qr_provider
+    ? SHIFT_PROVIDER_LABELS[r.qr_provider] ?? r.qr_provider.replace(/_/g, " ")
+    : paymentMethodLabels[r.payment_method] ?? r.payment_method;
+const shiftRowKey = (r: { payment_method: string; qr_provider?: string | null }): string =>
+  `${r.payment_method}|${r.qr_provider ?? ""}`;
 
 function formatDateTime(iso: string | null): string {
   if (!iso) return "—";
@@ -2835,8 +2881,13 @@ function ShiftsTab() {
                     <p className="text-gray-500 italic">No orders.</p>
                   ) : (
                     detail.totals.breakdown.map((r) => (
-                      <div key={r.payment_method} className="flex justify-between">
-                        <span>{PAYMENT_LABEL[r.payment_method] ?? r.payment_method}</span>
+                      <div key={shiftRowKey(r)} className="flex justify-between">
+                        <span>
+                          {shiftRowLabel(r)}
+                          {(r.mdr_fee_cents ?? 0) > 0 && (
+                            <span className="text-xs text-amber-700 ml-1">(−{formatBND(r.mdr_fee_cents ?? 0)} fee)</span>
+                          )}
+                        </span>
                         <span className="tabular-nums">
                           {formatBND(r.sales_cents - r.refund_cents)}
                           {r.refund_count > 0 && (
@@ -2846,9 +2897,19 @@ function ShiftsTab() {
                       </div>
                     ))
                   )}
-                  <div className="flex justify-between font-bold border-t border-gray-200 pt-1 mt-1">
+                  <div className="flex justify-between border-t border-gray-200 pt-1 mt-1">
                     <span>Net sales</span>
                     <span className="tabular-nums">{formatBND(detail.totals.net_sales_cents)}</span>
+                  </div>
+                  {(detail.totals.mdr_fee_cents ?? 0) > 0 && (
+                    <div className="flex justify-between text-amber-700">
+                      <span>− Transaction fees (MDR)</span>
+                      <span className="tabular-nums">−{formatBND(detail.totals.mdr_fee_cents ?? 0)}</span>
+                    </div>
+                  )}
+                  <div className="flex justify-between font-bold text-emerald-800 border-t-2 border-black pt-1 mt-1">
+                    <span>Net after fees</span>
+                    <span className="tabular-nums">{formatBND(detail.totals.net_after_fees_cents ?? detail.totals.net_sales_cents)}</span>
                   </div>
                 </div>
 
