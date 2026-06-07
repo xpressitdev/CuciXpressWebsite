@@ -860,6 +860,12 @@ export async function registerRoutes(app: Express): Promise<Server> {
             if (qrProvider === 'pocket_pay_invoice')  return 'Pocket Payment Invoice';
             if (qrProvider === 'dst_easy' || qrProvider === 'quickpay') return 'Quickpay';
             if (qrProvider === 'baiduri_ms')          return 'Baiduri MS Payment Request';
+            // Owner-added wallets (e.g. 'progresif_ding') — humanise the slug so
+            // reports attribute them on their own instead of lumping them under
+            // Pocket Payment QR. (NULL provider stays the legacy Pocket default.)
+            if (qrProvider) {
+              return qrProvider.replace(/_/g, ' ').replace(/\b\w/g, (c) => c.toUpperCase());
+            }
             return 'Pocket Payment QR';
           default: return pm;
         }
@@ -2849,24 +2855,33 @@ export async function registerRoutes(app: Express): Promise<Server> {
   });
 
   // ---- Payment methods (POS dropdown config) --------------------------
-  // Wallet (method='qr_code') providers the POS order endpoint will accept and
-  // persist. Keep in lockstep with ALLOWED_QR_PROVIDERS in client/src/pages/pos.tsx
-  // — anything outside this set is silently dropped to NULL at checkout, which
-  // would break payment-method attribution/reporting.
-  const ALLOWED_QR_PROVIDERS = ['pocket_pay_qr', 'pocket_pay_invoice', 'baiduri_ms'] as const;
+  // Wallet (method='qr_code') providers are OWNER-DEFINABLE: the owner adds a
+  // digital wallet in Admin → Payment Setup and we store a slug code derived
+  // from the label (e.g. "Progresif Ding!" → 'progresif_ding'). The slug is
+  // free text in the DB (orders.qr_provider) — the only reserved value is
+  // 'pocket_pay' (the online Pocket Pay callback idempotency index). The POS
+  // order endpoint accepts the same slug shape, so a newly added wallet flows
+  // straight through to checkout/reporting without any code change.
+  const providerSlug = z
+    .string()
+    .trim()
+    .min(1)
+    .max(40)
+    .regex(/^[a-z0-9_]+$/, 'provider must be lowercase letters, numbers and underscores')
+    .refine((v) => v !== 'pocket_pay', { message: "'pocket_pay' is reserved" });
   const paymentMethodBaseSchema = z.object({
     label: z.string().trim().min(1).max(80),
     method: z.enum([
       'cash', 'bank_transfer', 'card', 'qr_code',
       'baiduri_pay', 'quick_pay', 'subscription', 'voucher',
     ]),
-    qr_provider: z.enum(ALLOWED_QR_PROVIDERS).nullable().optional(),
+    qr_provider: providerSlug.nullable().optional(),
     is_active: z.boolean().optional(),
     sort_order: z.number().int().min(0).max(999).optional(),
   });
-  // A qr_code wallet method MUST carry a recognised provider; non-qr_code
-  // methods must not. ('pocket_pay' can never pass z.enum above — it stays
-  // blocked both here and via the DB CHECK constraint.)
+  // A qr_code wallet method MUST carry a provider slug; non-qr_code methods
+  // must not. ('pocket_pay' is rejected by providerSlug above and by the DB
+  // CHECK constraint.)
   const paymentMethodProviderRefine = (d: { method: string; qr_provider?: string | null }) =>
     d.method === 'qr_code' ? !!d.qr_provider : !d.qr_provider;
   const paymentMethodBodySchema = paymentMethodBaseSchema.refine(
@@ -6316,15 +6331,21 @@ export async function registerRoutes(app: Express): Promise<Server> {
       'baiduri_pay', 'quick_pay', 'subscription', 'voucher',
     ]),
     payment_ref: z.string().trim().max(120).optional().nullable(),
-    // Discriminates the qr_code "wallet" payment methods so reports can
-    // tell Pocket QR / Pocket Invoice / Baiduri MS apart. Only meaningful
-    // when payment_method='qr_code'; ignored otherwise.
-    // Note: manual POS Pocket QR uses 'pocket_pay_qr' (not 'pocket_pay') so
-    // counter entries never collide with the online Pocket Pay callback
-    // idempotency index (idx_orders_pocket_pay_payment_ref), which is
-    // reserved for qr_provider='pocket_pay'.
+    // Discriminates the qr_code "wallet" payment methods so reports can tell
+    // the different wallets apart (Pocket QR, Baiduri MS, owner-added wallets
+    // like Progresif Ding!, etc.). Only meaningful when payment_method='qr_code';
+    // ignored otherwise. Accepts any owner-defined provider slug — the set of
+    // wallets lives in the payment_methods config table, not a hardcoded list.
+    // Note: 'pocket_pay' is reserved for the online Pocket Pay callback
+    // idempotency index (idx_orders_pocket_pay_payment_ref); manual POS wallets
+    // must never use it, so it is rejected here.
     qr_provider: z
-      .enum(['pocket_pay_qr', 'pocket_pay_invoice', 'baiduri_ms'])
+      .string()
+      .trim()
+      .min(1)
+      .max(40)
+      .regex(/^[a-z0-9_]+$/)
+      .refine((v) => v !== 'pocket_pay', { message: "'pocket_pay' is reserved" })
       .optional()
       .nullable(),
     // Cash tendered by the customer. Optional — when omitted the server

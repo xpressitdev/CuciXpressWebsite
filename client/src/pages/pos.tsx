@@ -127,10 +127,6 @@ interface PosDiscount {
   kind: "percent" | "fixed";
   value: number;
 }
-// qr_provider values the order endpoint will accept. Custom wallet
-// providers outside this set can't be sent (server enum) — we fall back
-// to a plain qr_code with no provider so checkout still succeeds.
-const ALLOWED_QR_PROVIDERS = ["pocket_pay_qr", "pocket_pay_invoice", "baiduri_ms"] as const;
 
 interface ActiveMembership {
   id: string;
@@ -252,7 +248,14 @@ function paymentDisplayLabel(
   const opt = PAYMENT_OPTIONS.find(
     (o) => o.method === method && (o.qrProvider ?? null) === (qrProvider ?? null),
   );
-  return opt?.label ?? PAYMENT_LABELS[method] ?? method;
+  if (opt) return opt.label;
+  // Owner-added wallets (e.g. 'progresif_ding') aren't in the static list —
+  // humanise the slug so the receipt names them instead of falling back to a
+  // generic "QR Payment".
+  if (method === "qr_code" && qrProvider) {
+    return qrProvider.replace(/_/g, " ").replace(/\b\w/g, (c) => c.toUpperCase());
+  }
+  return PAYMENT_LABELS[method] ?? method;
 }
 
 // Source of truth for branch id -> display name. Lane/cashier accounts
@@ -816,14 +819,10 @@ export default function POS() {
         plate: plate.trim(),
         addon_ids: oneTap ? [] : Array.from(selectedAddons),
         payment_method: oneTap ? "subscription" : paymentMethod,
-        // The order endpoint only accepts the three known wallet providers;
-        // a custom qr_code method with an unrecognised provider falls back
-        // to a plain qr_code so checkout still succeeds.
-        qr_provider:
-          oneTap || !qrProvider ||
-          !(ALLOWED_QR_PROVIDERS as readonly string[]).includes(qrProvider)
-            ? null
-            : qrProvider,
+        // Wallets are owner-defined in Admin → Payment Setup; whatever
+        // qr_provider slug the selected method carries flows straight through
+        // to the order so reporting can attribute it.
+        qr_provider: oneTap ? null : (qrProvider || null),
         payment_ref: oneTap ? null : paymentRef.trim() || null,
         paid_amount_cents:
           oneTap || paymentMethod !== "cash" ? null : cashReceivedCents,

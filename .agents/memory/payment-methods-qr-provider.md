@@ -1,48 +1,46 @@
 ---
 name: Payment methods & qr_provider model
-description: How "wallet" POS payment methods (Pocket QR/Invoice, Baiduri MS) are represented, and the unique-index landmine on pocket_pay.
+description: How "wallet" POS payment methods are represented (owner-definable provider slugs), and the unique-index landmine on pocket_pay.
 ---
 
 # Payment method representation
 
-The "wallet" payment methods are NOT distinct `payment_method` enum values.
-They are stored as `payment_method='qr_code'` plus a `qr_provider` discriminator:
+The "wallet" payment methods are NOT distinct `payment_method` values. They are
+stored as `payment_method='qr_code'` plus a `qr_provider` discriminator slug, e.g.:
 
-- `pocket_pay`         → online self-checkout (Pocket Pay callback flow)
+- `pocket_pay`         → online self-checkout (Pocket Pay callback flow) — RESERVED, see below
 - `pocket_pay_qr`      → manual POS counter "Pocket Payment QR"
 - `pocket_pay_invoice` → "Pocket Payment Invoice"
 - `baiduri_ms`         → "Baiduri MS Payment Request"
 - `dst_easy` / `quickpay` → "Quickpay" (synced/legacy)
+- owner-added wallets (e.g. `progresif_ding`) → humanised from the slug
 
-The server reporting `paymentLabel(pm, qrProvider)` (in `server/routes.ts`) is the
-source of truth for turning these into display labels; the qr_code default falls
-back to "Pocket Payment QR". On the `orders` table `qr_provider` is still free text
-(no CHECK), but the **admin-configurable** `payment_methods` table (POS Control Room)
-is stricter — see below.
+# Wallet providers are OWNER-DEFINABLE (no hardcoded allowlist)
 
-# Admin payment-method config: providers are an enforced enum (lockstep)
+Wallet providers are free-form slugs the owner creates in Admin → Payment Setup.
+The form auto-derives the slug from the label (`"Progresif Ding!"` → `progresif_ding`).
 
-The POS Control Room lets the owner configure payment methods. A `qr_code` wallet
-method must carry a `qr_provider` from a fixed allowed set, duplicated in two places
-that must stay in lockstep:
-- POS client checkout clamp: `ALLOWED_QR_PROVIDERS` in `client/src/pages/pos.tsx`
-- Admin create/update validation: `ALLOWED_QR_PROVIDERS` in `server/routes.ts`
-Currently: `pocket_pay_qr`, `pocket_pay_invoice`, `baiduri_ms`.
+**Rule:** validate `qr_provider` as a slug `^[a-z0-9_]+$` (1–40 chars), reject only
+the reserved literal `pocket_pay`. This same shape must hold in BOTH the admin
+payment-methods schema AND the POS order-create schema (`posOrderSchema`) in
+`server/routes.ts`, and the POS checkout must pass the configured provider straight
+through (no static allowlist filter).
 
-**Why:** the POS order endpoint only persists a `qr_provider` that's in the client's
-allowed set — anything else is silently coerced to `NULL`. Before this was enforced,
-an owner could save a wallet method with an unknown provider that looked selectable in
-POS but recorded `qr_provider = NULL`, corrupting payment attribution/reporting. The
-`payment_methods` table also has a CHECK blocking `qr_provider = 'pocket_pay'`.
+**Why:** there used to be a hardcoded enum `ALLOWED_QR_PROVIDERS` duplicated in
+`server/routes.ts` and `client/src/pages/pos.tsx`; the POS silently coerced any
+provider outside it to `NULL` at checkout, so an owner-added wallet looked
+selectable but recorded `qr_provider = NULL`, corrupting attribution. It also made
+the self-service "Payment Setup" UI a lie — the button enabled but the backend
+rejected the save with a misleading "pocket_pay reserved" toast (a false substring
+match in `describeError` against the zod enum text `...pocket_pay_qr...`). The DB
+always allowed it: `orders.qr_provider` is free text and `payment_methods` only has
+`CHECK (qr_provider <> 'pocket_pay')` + `UNIQUE(method, COALESCE(qr_provider,''))`.
 
-**How to apply:** adding/removing a wallet provider means updating BOTH `ALLOWED_QR_PROVIDERS`
-lists together; a `qr_code` method must always have a recognised provider, non-`qr_code`
-methods must not set one.
-
-**Why:** synced data (KedaiPOS) and reports already model these via qr_provider, so
-the POS must match to keep aggregation/reconciliation consistent. Inventing new
-`payment_method` enum values would also break the `orders_payment_method_check`
-CHECK constraint and split a single logical method across two representations.
+**How to apply:** to add a wallet, just create it in the UI — no code change. When
+labeling an unknown non-NULL provider in reports/receipts, humanise the slug
+(`progresif_ding` → "Progresif Ding"); keep NULL provider as the legacy
+"Pocket Payment QR" default so old data isn't relabelled. A `qr_code` method must
+always carry a provider; non-`qr_code` methods must not set one.
 
 # The pocket_pay unique-index landmine
 

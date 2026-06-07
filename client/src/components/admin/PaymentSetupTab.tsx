@@ -58,6 +58,10 @@ const METHOD_LABELS: Record<string, string> = Object.fromEntries(
 
 const RESERVED_PROVIDER = "pocket_pay";
 
+// A provider code must be lowercase letters, numbers and underscores only —
+// mirrors the server-side validation so we can flag bad codes before saving.
+const PROVIDER_CODE_RE = /^[a-z0-9_]+$/;
+
 // Turn a wallet label like "Progresif Ding!" into a stable internal code
 // ("progresif_ding") so owners adding a digital wallet don't have to invent
 // a "QR provider" value themselves. They can still override it if their
@@ -208,7 +212,7 @@ function describeError(err: any): string {
   if (msg.includes("provider_required_for_qr")) return "A QR provider is required when the method is QR code.";
   if (msg.includes("method_provider_taken")) return "A payment method with that exact label already exists. Give this one a different label (e.g. \"Bank Transfer Baiduri\").";
   if (msg.includes("invalid_method")) return "That payment method type is not allowed.";
-  if (msg.includes("pocket_pay")) return "The provider value 'pocket_pay' is reserved. Try pocket_pay_qr or pocket_pay_invoice.";
+  if (msg.includes("pocket_pay")) return "The provider code 'pocket_pay' is reserved by the system. Pick a different name.";
   return msg || "Check the form values";
 }
 
@@ -339,10 +343,14 @@ function PaymentMethodEditDialog({
   const set = <K extends keyof PaymentMethodForm>(k: K, v: PaymentMethodForm[K]) =>
     setForm((f) => ({ ...f, [k]: v }));
 
-  const providerBlocked = isQr && form.qr_provider.trim() === RESERVED_PROVIDER;
+  const providerValue = form.qr_provider.trim();
+  const providerBlocked = isQr && providerValue === RESERVED_PROVIDER;
+  const providerBadFormat =
+    isQr && providerValue.length > 0 && !PROVIDER_CODE_RE.test(providerValue);
   const valid =
     form.label.trim().length > 0 &&
-    (!isQr || (form.qr_provider.trim().length > 0 && !providerBlocked));
+    (!isQr ||
+      (providerValue.length > 0 && !providerBlocked && !providerBadFormat));
 
   return (
     <Dialog open onOpenChange={(o) => { if (!o) onClose(); }}>
@@ -426,7 +434,11 @@ function PaymentMethodEditDialog({
               />
               {providerBlocked ? (
                 <p className="text-[10px] text-red-600 mt-1">
-                  "pocket_pay" is reserved. Use pocket_pay_qr, pocket_pay_invoice, or baiduri_ms.
+                  "pocket_pay" is reserved by the system. Pick a different name.
+                </p>
+              ) : providerBadFormat ? (
+                <p className="text-[10px] text-red-600 mt-1">
+                  Use lowercase letters, numbers and underscores only (e.g. progresif_ding).
                 </p>
               ) : (
                 <p className="text-[10px] text-gray-500 mt-1">
