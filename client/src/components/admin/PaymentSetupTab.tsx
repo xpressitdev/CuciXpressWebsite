@@ -270,7 +270,7 @@ function FeeRatesCard() {
         )}
       </CardContent>
 
-      {creating && <FeeRateEditDialog rate={null} onClose={() => setCreating(false)} />}
+      {creating && <FeeRateEditDialog existing={rows} onClose={() => setCreating(false)} />}
     </Card>
   );
 }
@@ -361,25 +361,46 @@ function FeeRateRowCard({ rate }: { rate: FeeRateRow }) {
   );
 }
 
-function FeeRateEditDialog({ rate, onClose }: { rate: FeeRateRow | null; onClose: () => void }) {
+// Key a payment method / fee rate by its exact (method, provider) pair. This is
+// the SAME key the backend rate map uses, so two rows with the same key would
+// collide. Used to hide already-configured gateways from the picker.
+const feeKey = (method: string, provider: string | null) =>
+  `${method}|${provider ?? ""}`;
+
+function FeeRateEditDialog({ existing, onClose }: { existing: FeeRateRow[]; onClose: () => void }) {
   const queryClient = useQueryClient();
   const { toast } = useToast();
-  const isCreate = rate === null;
-  const [label, setLabel] = useState(rate?.label ?? "");
-  const [method, setMethod] = useState(rate?.payment_method ?? "card");
-  const [provider, setProvider] = useState(rate?.qr_provider ?? "");
-  const [pct, setPct] = useState(rate ? bpsToPct(rate.mdr_bps) : "");
 
-  const isQr = method === "qr_code";
+  // Pull the real, configured payment gateways. Each fee rate must link to ONE
+  // specific gateway (e.g. "Progresif Ding!" vs "Pocket QR" — both qr_code but
+  // with different providers and different fees), so the owner picks a concrete
+  // gateway here instead of a generic method type + hand-typed provider code.
+  const { data: pmData, isLoading: pmLoading } = useQuery<PaymentMethodListResp>({
+    queryKey: ["/api/admin/payment-methods"],
+  });
+
+  // A gateway already covered by a fee rate would just produce a duplicate, so
+  // hide it. Cash / bank transfer always have no fee, so they're hidden too.
+  const takenKeys = new Set(existing.map((r) => feeKey(r.payment_method, r.qr_provider)));
+  const options = (pmData?.rows ?? [])
+    .filter((p) => p.method !== "cash" && p.method !== "bank_transfer")
+    .filter((p) => !takenKeys.has(feeKey(p.method, p.qr_provider)));
+
+  const [selectedId, setSelectedId] = useState("");
+  const [pct, setPct] = useState("");
+
+  const selected = options.find((p) => p.id === selectedId) ?? null;
 
   const save = useMutation({
-    mutationFn: async () =>
-      apiRequest("POST", "/api/admin/fee-rates", {
-        label: label.trim(),
-        payment_method: method,
-        qr_provider: isQr ? provider.trim() : null,
+    mutationFn: async () => {
+      if (!selected) throw new Error("no_method_selected");
+      return apiRequest("POST", "/api/admin/fee-rates", {
+        label: selected.label,
+        payment_method: selected.method,
+        qr_provider: selected.qr_provider,
         mdr_bps: pctToBps(pct),
-      }),
+      });
+    },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["/api/admin/fee-rates"] });
       toast({ title: "Fee rate created" });
@@ -390,14 +411,14 @@ function FeeRateEditDialog({ rate, onClose }: { rate: FeeRateRow | null; onClose
       toast({
         title: "Failed to save",
         description: msg.includes("duplicate_rate")
-          ? "A fee rate for that method/provider already exists."
+          ? "A fee rate for that payment method already exists."
           : msg || "Check the form values",
         variant: "destructive",
       });
     },
   });
 
-  const valid = label.trim().length > 0 && (!isQr || provider.trim().length > 0);
+  const valid = !!selected && pct.trim().length > 0;
 
   return (
     <Dialog open onOpenChange={(o) => { if (!o) onClose(); }}>
@@ -407,41 +428,31 @@ function FeeRateEditDialog({ rate, onClose }: { rate: FeeRateRow | null; onClose
         </DialogHeader>
         <div className="space-y-3">
           <div>
-            <Label>Label</Label>
-            <Input
-              value={label}
-              onChange={(e) => setLabel(e.target.value)}
-              placeholder="Card, Progresif Ding!, Pocket QR…"
-              data-testid="input-new-fee-label"
-            />
-          </div>
-          <div>
-            <Label>Method type</Label>
-            <Select value={method} onValueChange={setMethod}>
+            <Label>Payment method</Label>
+            <Select value={selectedId} onValueChange={setSelectedId} disabled={pmLoading}>
               <SelectTrigger data-testid="select-fee-method">
-                <SelectValue placeholder="Select a method" />
+                <SelectValue placeholder={pmLoading ? "Loading…" : "Choose a payment method"} />
               </SelectTrigger>
               <SelectContent>
-                {METHOD_OPTIONS.map((o) => (
-                  <SelectItem key={o.value} value={o.value}>{o.label}</SelectItem>
+                {options.map((p) => (
+                  <SelectItem key={p.id} value={p.id}>
+                    {p.label}
+                    {p.qr_provider ? ` (${p.qr_provider})` : ""}
+                  </SelectItem>
                 ))}
               </SelectContent>
             </Select>
-          </div>
-          {isQr && (
-            <div>
-              <Label>Provider code</Label>
-              <Input
-                value={provider}
-                onChange={(e) => setProvider(e.target.value)}
-                placeholder="progresif_ding, pocket_pay_qr, pocket_pay…"
-                data-testid="input-new-fee-provider"
-              />
-              <p className="text-[10px] text-gray-500 mt-1">
-                Must match the provider code stored on orders for this wallet.
+            {!pmLoading && options.length === 0 && (
+              <p className="text-[11px] text-gray-500 mt-1">
+                Every payment method already has a fee rate. Edit an existing one
+                instead, or add a new payment method first.
               </p>
-            </div>
-          )}
+            )}
+            <p className="text-[10px] text-gray-500 mt-1">
+              Each gateway is listed separately — e.g. Progresif Ding! and Pocket
+              QR are both QR but charge different fees.
+            </p>
+          </div>
           <div>
             <Label>Fee %</Label>
             <div className="flex items-center gap-1">
