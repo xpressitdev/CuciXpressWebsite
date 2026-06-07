@@ -1154,7 +1154,7 @@ export default function POS() {
               </Link>
               <div className="cuci-eyebrow">Cashier · Cuci Xpress</div>
               <h1 className="text-3xl md:text-4xl font-extrabold tracking-tight text-gray-900">
-                Point of <span className="text-cuci-primary">sale</span>
+                Point of <span className="text-cuci-primary">Sale</span>
               </h1>
             </div>
             <div className="flex items-center gap-2 flex-wrap">
