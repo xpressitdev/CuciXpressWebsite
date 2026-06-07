@@ -1259,70 +1259,6 @@ export default function POS() {
                 <BranchStatusControl branchId={branchId} />
               )}
 
-              {/* Package picker */}
-              <Card>
-                <CardHeader>
-                  <CardTitle className="text-base">Package</CardTitle>
-                </CardHeader>
-                <CardContent className="space-y-4">
-                  {(() => {
-                    const pkgs = catalog?.packages ?? [];
-                    const cats = [...(catalog?.categories ?? [])].sort(
-                      (a, b) => a.sort_order - b.sort_order,
-                    );
-                    // Build category groups in order, then an "Other" bucket
-                    // for packages with no (or an unknown) category. When no
-                    // categories exist at all, fall back to one flat group.
-                    const groups: Array<{ id: string; name: string | null; items: CatalogPackage[] }> = [];
-                    for (const c of cats) {
-                      const items = pkgs.filter((p) => p.category_id === c.id);
-                      if (items.length > 0) groups.push({ id: c.id, name: c.name, items });
-                    }
-                    const known = new Set(cats.map((c) => c.id));
-                    const uncategorised = pkgs.filter(
-                      (p) => !p.category_id || !known.has(p.category_id),
-                    );
-                    if (uncategorised.length > 0) {
-                      groups.push({
-                        id: "__uncat",
-                        name: groups.length > 0 ? "Other" : null,
-                        items: uncategorised,
-                      });
-                    }
-                    return groups.map((g) => (
-                      <div key={g.id} className="space-y-2">
-                        {g.name && (
-                          <p
-                            className="text-xs font-semibold uppercase tracking-wide text-gray-500"
-                            data-testid={`label-category-${g.id}`}
-                          >
-                            {g.name}
-                          </p>
-                        )}
-                        <div className="flex flex-wrap gap-2">
-                          {g.items.map((p) => (
-                            <Button
-                              key={p.id}
-                              type="button"
-                              variant={p.id === packageId ? "default" : "outline"}
-                              onClick={() => setPackageId(p.id)}
-                              data-testid={`button-package-${p.id}`}
-                            >
-                              {p.name}
-                            </Button>
-                          ))}
-                        </div>
-                      </div>
-                    ));
-                  })()}
-                  {activePackage?.description && (
-                    <p className="text-sm text-gray-500">
-                      {activePackage.description}
-                    </p>
-                  )}
-                </CardContent>
-              </Card>
-
               {/* Plate + customer */}
               <Card>
                 <CardHeader>
@@ -1654,6 +1590,70 @@ export default function POS() {
                         />
                       </div>
                     </div>
+                  )}
+                </CardContent>
+              </Card>
+
+              {/* Package picker */}
+              <Card>
+                <CardHeader>
+                  <CardTitle className="text-base">Package</CardTitle>
+                </CardHeader>
+                <CardContent className="space-y-4">
+                  {(() => {
+                    const pkgs = catalog?.packages ?? [];
+                    const cats = [...(catalog?.categories ?? [])].sort(
+                      (a, b) => a.sort_order - b.sort_order,
+                    );
+                    // Build category groups in order, then an "Other" bucket
+                    // for packages with no (or an unknown) category. When no
+                    // categories exist at all, fall back to one flat group.
+                    const groups: Array<{ id: string; name: string | null; items: CatalogPackage[] }> = [];
+                    for (const c of cats) {
+                      const items = pkgs.filter((p) => p.category_id === c.id);
+                      if (items.length > 0) groups.push({ id: c.id, name: c.name, items });
+                    }
+                    const known = new Set(cats.map((c) => c.id));
+                    const uncategorised = pkgs.filter(
+                      (p) => !p.category_id || !known.has(p.category_id),
+                    );
+                    if (uncategorised.length > 0) {
+                      groups.push({
+                        id: "__uncat",
+                        name: groups.length > 0 ? "Other" : null,
+                        items: uncategorised,
+                      });
+                    }
+                    return groups.map((g) => (
+                      <div key={g.id} className="space-y-2">
+                        {g.name && (
+                          <p
+                            className="text-xs font-semibold uppercase tracking-wide text-gray-500"
+                            data-testid={`label-category-${g.id}`}
+                          >
+                            {g.name}
+                          </p>
+                        )}
+                        <div className="flex flex-wrap gap-2">
+                          {g.items.map((p) => (
+                            <Button
+                              key={p.id}
+                              type="button"
+                              variant={p.id === packageId ? "default" : "outline"}
+                              onClick={() => setPackageId(p.id)}
+                              data-testid={`button-package-${p.id}`}
+                            >
+                              {p.name}
+                            </Button>
+                          ))}
+                        </div>
+                      </div>
+                    ));
+                  })()}
+                  {activePackage?.description && (
+                    <p className="text-sm text-gray-500">
+                      {activePackage.description}
+                    </p>
                   )}
                 </CardContent>
               </Card>
