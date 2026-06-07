@@ -2003,80 +2003,82 @@ export default function POS() {
 
             </div>
 
-            {/* --- Right: Today's orders -------------------------------- */}
-            <div className="space-y-4">
+            {/* --- Today's orders — full width below the builder -------- */}
+            <div className="space-y-4 lg:col-span-3">
               {/* Today's orders */}
               <Card>
                 <CardHeader>
                   <CardTitle className="text-base">Today</CardTitle>
                 </CardHeader>
-                <CardContent className="space-y-2 max-h-96 overflow-y-auto">
+                <CardContent className="max-h-96 overflow-y-auto">
                   {!todayData || todayData.orders.length === 0 ? (
                     <p className="text-sm text-gray-500 text-center py-4">
                       No orders yet today.
                     </p>
                   ) : (
-                    todayData.orders.map((o) => {
-                      const isRefunded = o.status === "refunded";
-                      return (
-                        <div
-                          key={o.id}
-                          className={`flex items-center justify-between text-sm border-b last:border-b-0 py-2 gap-2 ${
-                            isRefunded ? "opacity-70" : ""
-                          }`}
-                          data-testid={`row-today-${o.id}`}
-                        >
-                          <div className="flex flex-col min-w-0">
-                            <span
-                              className={`font-mono font-semibold ${
-                                isRefunded ? "line-through text-gray-500" : ""
-                              }`}
-                            >
-                              {o.ticket_code}
-                            </span>
-                            <span className="text-gray-500 text-xs truncate">
-                              {o.plate} · {formatTime(o.created_at)}
-                            </span>
-                            {isRefunded && o.refund_reason && (
-                              <span className="text-xs text-red-600 italic truncate">
-                                {o.refund_reason}
+                    <div className="grid gap-2 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
+                      {todayData.orders.map((o) => {
+                        const isRefunded = o.status === "refunded";
+                        return (
+                          <div
+                            key={o.id}
+                            className={`flex items-center justify-between text-sm border rounded-md p-2 gap-2 ${
+                              isRefunded ? "opacity-70" : ""
+                            }`}
+                            data-testid={`row-today-${o.id}`}
+                          >
+                            <div className="flex flex-col min-w-0">
+                              <span
+                                className={`font-mono font-semibold ${
+                                  isRefunded ? "line-through text-gray-500" : ""
+                                }`}
+                              >
+                                {o.ticket_code}
                               </span>
-                            )}
-                          </div>
-                          <div className="flex flex-col items-end gap-1">
-                            <span
-                              className={`font-medium ${
-                                isRefunded ? "text-red-600" : ""
-                              }`}
-                            >
-                              {isRefunded ? "−" : ""}
-                              {formatBND(o.total_cents)}
-                            </span>
-                            {isRefunded ? (
-                              <Badge
-                                variant="destructive"
-                                className="text-xs"
-                                data-testid={`badge-refunded-${o.id}`}
+                              <span className="text-gray-500 text-xs truncate">
+                                {o.plate} · {formatTime(o.created_at)}
+                              </span>
+                              {isRefunded && o.refund_reason && (
+                                <span className="text-xs text-red-600 italic truncate">
+                                  {o.refund_reason}
+                                </span>
+                              )}
+                            </div>
+                            <div className="flex flex-col items-end gap-1">
+                              <span
+                                className={`font-medium ${
+                                  isRefunded ? "text-red-600" : ""
+                                }`}
                               >
-                                Refunded
-                              </Badge>
-                            ) : (
-                              <Button
-                                type="button"
-                                variant="ghost"
-                                size="sm"
-                                className="h-6 px-2 text-xs text-red-600 hover:text-red-700 hover:bg-red-50"
-                                disabled={refundOrder.isPending}
-                                onClick={() => promptRefund(o)}
-                                data-testid={`button-refund-${o.id}`}
-                              >
-                                Refund
-                              </Button>
-                            )}
+                                {isRefunded ? "−" : ""}
+                                {formatBND(o.total_cents)}
+                              </span>
+                              {isRefunded ? (
+                                <Badge
+                                  variant="destructive"
+                                  className="text-xs"
+                                  data-testid={`badge-refunded-${o.id}`}
+                                >
+                                  Refunded
+                                </Badge>
+                              ) : (
+                                <Button
+                                  type="button"
+                                  variant="ghost"
+                                  size="sm"
+                                  className="h-6 px-2 text-xs text-red-600 hover:text-red-700 hover:bg-red-50"
+                                  disabled={refundOrder.isPending}
+                                  onClick={() => promptRefund(o)}
+                                  data-testid={`button-refund-${o.id}`}
+                                >
+                                  Refund
+                                </Button>
+                              )}
+                            </div>
                           </div>
-                        </div>
-                      );
-                    })
+                        );
+                      })}
+                    </div>
                   )}
                 </CardContent>
               </Card>
