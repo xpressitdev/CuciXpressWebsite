@@ -36,6 +36,7 @@ import {
   ChevronUp,
   ChevronDown,
   Undo2,
+  RotateCcw,
   Pencil,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
@@ -61,6 +62,17 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog";
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from "@/components/ui/alert-dialog";
+import { Textarea } from "@/components/ui/textarea";
 import { useStaffAuth } from "@/hooks/useStaffAuth";
 import { useToast } from "@/hooks/use-toast";
 import { apiRequest } from "@/lib/queryClient";
@@ -305,6 +317,9 @@ export default function POS() {
   const [cashReceived, setCashReceived] = useState<string>("");
   const [itemNotes, setItemNotes] = useState<string>("");
   const [scanOpen, setScanOpen] = useState<boolean>(false);
+  // Phase 7 refund: styled confirm modal (replaces native confirm/prompt).
+  const [refundTarget, setRefundTarget] = useState<TodayOrder | null>(null);
+  const [refundReason, setRefundReason] = useState<string>("");
 
   // POS Control Room: cashier-selected discount + promo code.
   const [discountId, setDiscountId] = useState<string>("none");
@@ -722,10 +737,10 @@ export default function POS() {
   };
 
   // ----- Phase 4: full-order refund -----
-  // Any staff can refund (per owner decision). Confirm + optional
-  // reason via the browser's confirm/prompt — keeps the UI minimal
-  // for v1; the Phase 7 visual refresh will replace these with a
-  // proper modal. Subscription orders DO NOT credit the wash back.
+  // Any staff can refund (per owner decision). Confirmation + optional
+  // reason are captured by the styled AlertDialog below (see promptRefund /
+  // confirmRefund). The modal stays open while the request is in flight and
+  // closes from these callbacks. Subscription orders DO NOT credit the wash back.
   const refundOrder = useMutation({
     mutationFn: async (vars: { orderId: string; reason: string | null }) => {
       // apiRequest returns the raw Response (it only does the
@@ -745,6 +760,7 @@ export default function POS() {
         title: `Refunded ${data.order.ticket_code}`,
         description: `${data.order.plate} · −${formatBND(data.order.total_cents)}`,
       });
+      setRefundTarget(null);
     },
     onError: (err: any) => {
       const code = err?.message ?? "refund_failed";
@@ -761,20 +777,26 @@ export default function POS() {
         description: friendly,
         variant: "destructive",
       });
+      setRefundTarget(null);
     },
   });
 
+  // Open the styled refund confirmation modal. Actual refund fires from
+  // the modal's "Refund" action so the cashier can't trigger it by an
+  // accidental dismiss (the AlertDialog is modal — no outside-click /
+  // Escape-to-confirm).
   const promptRefund = (o: TodayOrder) => {
-    if (!confirm(
-      `Refund ticket ${o.ticket_code} (${o.plate}) for ${formatBND(o.total_cents)}?\n\n` +
-      `This cannot be undone. The order will show as a negative entry.`,
-    )) {
-      return;
-    }
-    const reason = prompt("Reason (optional):") ?? "";
+    setRefundReason("");
+    setRefundTarget(o);
+  };
+
+  const confirmRefund = () => {
+    if (!refundTarget) return;
+    // Leave the modal open while the request is in flight so the cashier
+    // sees the "Refunding…" state; the mutation callbacks close it.
     refundOrder.mutate({
-      orderId: o.id,
-      reason: reason.trim() || null,
+      orderId: refundTarget.id,
+      reason: refundReason.trim() || null,
     });
   };
 
@@ -2145,6 +2167,86 @@ export default function POS() {
           />
         </DialogContent>
       </Dialog>
+
+      {/* Phase 7 refund confirmation — styled, branded modal that replaces
+          the browser's native confirm()/prompt(). It is modal (no
+          outside-click or Escape dismiss), so a cashier can only close it
+          via Cancel or Refund. The optional reason is captured inline. */}
+      <AlertDialog
+        open={refundTarget !== null}
+        onOpenChange={(open) => {
+          if (!open) setRefundTarget(null);
+        }}
+      >
+        <AlertDialogContent
+          className="border-2 border-black rounded-2xl"
+          onEscapeKeyDown={(e) => e.preventDefault()}
+        >
+          <AlertDialogHeader>
+            <AlertDialogTitle className="flex items-center gap-2">
+              <RotateCcw className="w-5 h-5 text-red-600" />
+              Refund this order?
+            </AlertDialogTitle>
+            <AlertDialogDescription asChild>
+              <div className="space-y-3 pt-1">
+                {refundTarget && (
+                  <div className="rounded-xl bg-gray-50 border border-gray-200 p-3 space-y-1.5">
+                    <div className="flex items-center justify-between text-sm">
+                      <span className="text-gray-500">Ticket</span>
+                      <span className="font-semibold text-gray-900">
+                        {refundTarget.ticket_code}
+                      </span>
+                    </div>
+                    <div className="flex items-center justify-between text-sm">
+                      <span className="text-gray-500">Plate</span>
+                      <span className="font-semibold text-gray-900">
+                        {refundTarget.plate}
+                      </span>
+                    </div>
+                    <div className="flex items-center justify-between text-sm">
+                      <span className="text-gray-500">Amount</span>
+                      <span className="font-bold text-red-600">
+                        −{formatBND(refundTarget.total_cents)}
+                      </span>
+                    </div>
+                  </div>
+                )}
+                <p className="text-sm text-gray-600">
+                  This cannot be undone. The order will show as a negative
+                  entry in today's sales.
+                </p>
+              </div>
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <div className="space-y-1.5">
+            <Label htmlFor="refund-reason" className="text-sm">
+              Reason <span className="text-gray-400">(optional)</span>
+            </Label>
+            <Textarea
+              id="refund-reason"
+              value={refundReason}
+              onChange={(e) => setRefundReason(e.target.value)}
+              placeholder="e.g. customer changed their mind, double charge…"
+              rows={2}
+              className="resize-none"
+              data-testid="input-refund-reason"
+            />
+          </div>
+          <AlertDialogFooter>
+            <AlertDialogCancel data-testid="button-refund-cancel">
+              Cancel
+            </AlertDialogCancel>
+            <AlertDialogAction
+              onClick={confirmRefund}
+              disabled={refundOrder.isPending}
+              className="bg-red-600 hover:bg-red-700 text-white"
+              data-testid="button-refund-confirm"
+            >
+              {refundOrder.isPending ? "Refunding…" : "Refund"}
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </div>
   );
 }
