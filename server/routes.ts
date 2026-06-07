@@ -7356,14 +7356,26 @@ export async function registerRoutes(app: Express): Promise<Server> {
   // - Owner/manager can review all shifts under /admin -> Shifts tab.
   // ==========================================================================
 
-  // Aggregate the totals for a given shift_id. Returns sales, refunds,
-  // expected cash, and a per-payment-method breakdown. Reused by both
-  // the running view (shift open) and the close screen (shift opening).
+  // Aggregate the totals for a branch's shared cash drawer on a single
+  // day. Each branch runs ONE shared drawer per day: every cashier rings
+  // into it, and the cash is banked after the day's shift — so the report
+  // must show ALL of the branch's sales for that day regardless of which
+  // staff (or which shift) rang them up. Returns sales, refunds, expected
+  // cash, and a per-payment-method breakdown. Reused by the running view
+  // (today), the close screen (today), and the admin detail (the shift's
+  // own day). `day` is a 'YYYY-MM-DD' string in the same UTC convention
+  // used to bucket orders into ticket_day on insert. Pass `null` for the
+  // live "today" view so the day is derived in DB time — this avoids any
+  // app-vs-DB clock drift around the UTC midnight boundary.
   async function computeShiftTotals(
     runner: typeof db | Parameters<Parameters<typeof db.transaction>[0]>[0],
-    shiftId: number,
+    branchId: number,
+    day: string | null,
     openingFloatCents: number,
   ) {
+    const dayFilter = day === null
+      ? sql`ticket_day = (now() AT TIME ZONE 'UTC')::date`
+      : sql`ticket_day = ${day}::date`;
     const rows = (await runner.execute(sql`
       SELECT payment_method,
              COALESCE(SUM(CASE WHEN status <> 'refunded' THEN total_cents ELSE 0 END), 0)::int AS sales_cents,
@@ -7371,7 +7383,8 @@ export async function registerRoutes(app: Express): Promise<Server> {
              COALESCE(SUM(CASE WHEN status =  'refunded' THEN total_cents ELSE 0 END), 0)::int AS refund_cents,
              COALESCE(SUM(CASE WHEN status =  'refunded' THEN 1 ELSE 0 END), 0)::int          AS refund_count
         FROM orders
-       WHERE shift_id = ${shiftId}
+       WHERE branch_id = ${branchId}
+         AND ${dayFilter}
        GROUP BY payment_method
        ORDER BY payment_method
     `)).rows as Array<{
@@ -7479,7 +7492,9 @@ export async function registerRoutes(app: Express): Promise<Server> {
         return res.json({ shift: null });
       }
       const shift = rows[0];
-      const totals = await computeShiftTotals(db, shift.id, shift.opening_float_cents);
+      // Shared drawer: show ALL of this branch's sales for TODAY, regardless
+      // of which staff/shift rang them up. `null` = DB-derived today (UTC).
+      const totals = await computeShiftTotals(db, shift.branch_id, null, shift.opening_float_cents);
       res.json({ shift, totals });
     } catch (err) {
       console.error('[pos.shifts.current] failed:', err);
@@ -7508,16 +7523,18 @@ export async function registerRoutes(app: Express): Promise<Server> {
     try {
       const result = await db.transaction(async (tx) => {
         const rows = (await tx.execute(sql`
-          SELECT id, opening_float_cents
+          SELECT id, branch_id, opening_float_cents
             FROM cashier_shifts
            WHERE opened_by_staff_id = ${staffId} AND status = 'open'
            FOR UPDATE
-        `)).rows as Array<{ id: number; opening_float_cents: number }>;
+        `)).rows as Array<{ id: number; branch_id: number; opening_float_cents: number }>;
         if (rows.length === 0) {
           throw Object.assign(new Error('no_open_shift'), { httpStatus: 404 });
         }
         const shift = rows[0];
-        const totals = await computeShiftTotals(tx, shift.id, shift.opening_float_cents);
+        // Shared drawer: reconcile against ALL of this branch's cash for TODAY.
+        // `null` = DB-derived today (UTC), matching the live current view.
+        const totals = await computeShiftTotals(tx, shift.branch_id, null, shift.opening_float_cents);
         const expected = totals.expected_cash_cents;
         const variance = body.counted_cents - expected;
 
@@ -7608,7 +7625,10 @@ export async function registerRoutes(app: Express): Promise<Server> {
       `)).rows as any[];
       if (rows.length === 0) return res.status(404).json({ error: 'not_found' });
       const shift = rows[0];
-      const totals = await computeShiftTotals(db, shift.id, shift.opening_float_cents);
+      // Shared drawer: show this branch's whole-day totals for the day this
+      // shift was opened (UTC bucket, matching ticket_day on the orders).
+      const shiftDay = new Date(shift.opened_at).toISOString().slice(0, 10);
+      const totals = await computeShiftTotals(db, shift.branch_id, shiftDay, shift.opening_float_cents);
       res.json({ shift, totals });
     } catch (err) {
       console.error('[admin.shifts.detail] failed:', err);

@@ -7,3 +7,4 @@
 - [SharePoint history import + chart refresh](sharepoint-history-import.md) — re-importing the master Excel: run import script then recompute_vip_tiers; charts are live (no cache); run long imports via a temp workflow (detached procs get killed).
 - [Staging DB schema drift](staging-db-schema-drift.md) — STAGING_DATABASE_URL is an older snapshot; apply migrations/manual/*.sql (idempotent) before running DB-backed tests, never patch dev/prod.
 - [Loyalty manual stamps](loyalty-manual-stamps.md) — manual stamps ADD ON TOP of auto-counted orders; one attribution rule (vehicle_id wins, plate-norm fallback when null) must match across lookup/customer-card/redeem.
+- [Shift totals = shared drawer](shift-totals-shared-drawer.md) — cash reports scope by branch+day (not shift_id); each branch = one shared drawer banked daily. Orders keep shift_id for audit only.
