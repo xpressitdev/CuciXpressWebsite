@@ -693,6 +693,35 @@ export const loyaltyRedemptions = pgTable("loyalty_redemptions", {
 });
 export type LoyaltyRedemption = typeof loyaltyRedemptions.$inferSelect;
 
+// --- Loyalty manual stamps (cashier-credited) ----------------
+// Migration backstop (2026-06-07): when launching digital receipts,
+// some plates' physical B$12 receipts won't auto-count (plate typo /
+// walk-in not captured / different plate). A branch-locked cashier
+// verifies the paper receipts and credits the matching number of
+// stamps to a plate. Each row = a credit of `stamps_total`; redemption
+// decrements `stamps_remaining` (mirrors memberships.remaining_washes).
+// Attached to a CAR by vehicle_id when one exists, else matched by the
+// normalised plate — same per-plate attribution the loyalty card uses.
+// staff_id + branch_id + note + receipt_no form the audit trail.
+export const loyaltyManualStamps = pgTable("loyalty_manual_stamps", {
+  id: text("id").primaryKey(),
+  vehicle_id: integer("vehicle_id").references(() => cars.id),
+  plate: text("plate").notNull(),
+  plate_norm: text("plate_norm").notNull(),
+  stamps_total: integer("stamps_total").notNull(),
+  stamps_remaining: integer("stamps_remaining").notNull(),
+  note: text("note"),
+  receipt_no: text("receipt_no"),
+  branch_id: integer("branch_id").references(() => branches.id),
+  staff_id: text("staff_id").references(() => staff.id).notNull(),
+  created_at: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
+});
+export const insertLoyaltyManualStampSchema = createInsertSchema(loyaltyManualStamps).omit({
+  created_at: true,
+});
+export type LoyaltyManualStamp = typeof loyaltyManualStamps.$inferSelect;
+export type InsertLoyaltyManualStamp = z.infer<typeof insertLoyaltyManualStampSchema>;
+
 // --- Cashier shifts (Phase 8) -------------------------------
 // One open shift per staff at a time (enforced by partial unique
 // index on opened_by_staff_id WHERE status='open'). The shift

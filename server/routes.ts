@@ -5320,6 +5320,17 @@ export async function registerRoutes(app: Express): Promise<Server> {
              AND o.id NOT IN (SELECT order_id FROM membership_redemptions)
            GROUP BY c.id
         ),
+        -- Cashier-credited stamps (digital-receipt migration backstop). Same
+        -- attribution: vehicle_id FK wins, plate fallback only when null.
+        manual AS (
+          SELECT c.id AS vehicle_id, COALESCE(SUM(m.stamps_remaining), 0)::int AS mstamps
+            FROM owned_cars c
+            JOIN loyalty_manual_stamps m
+              ON (m.vehicle_id = c.id
+                  OR (m.vehicle_id IS NULL AND m.plate_norm = c.plate_norm))
+           WHERE m.stamps_remaining > 0
+           GROUP BY c.id
+        ),
         pending AS (
           SELECT DISTINCT ON (c.id)
                  c.id AS vehicle_id,
@@ -5339,13 +5350,14 @@ export async function registerRoutes(app: Express): Promise<Server> {
         SELECT c.id            AS vehicle_id,
                c.license_plate AS plate,
                c.brand, c.model,
-               COALESCE(e.stamps, 0) AS stamps,
+               (COALESCE(e.stamps, 0) + COALESCE(mn.mstamps, 0)) AS stamps,
                p.order_id, p.payment_ref, p.created_at AS pending_created_at,
                p.plate AS pending_plate, p.branch_name AS pending_branch
           FROM owned_cars c
           LEFT JOIN eligible e ON e.vehicle_id = c.id
+          LEFT JOIN manual   mn ON mn.vehicle_id = c.id
           LEFT JOIN pending  p ON p.vehicle_id = c.id
-         ORDER BY COALESCE(e.stamps, 0) DESC, c.id ASC
+         ORDER BY (COALESCE(e.stamps, 0) + COALESCE(mn.mstamps, 0)) DESC, c.id ASC
       `)).rows as Array<any>;
 
       const cards = rows.map((r) => {
@@ -5467,9 +5479,28 @@ export async function registerRoutes(app: Express): Promise<Server> {
            FOR UPDATE
         `)).rows as Array<{ id: string }>;
 
-        if (eligibleRows.length < LOYALTY_REQUIRED_COUNT) {
-          return { http: 400, body: { error: 'not_enough_stamps', have: eligibleRows.length, need: LOYALTY_REQUIRED_COUNT } };
+        // Cashier-credited manual stamps for this car (digital-receipt
+        // migration backstop). Locked + oldest-first so concurrent redeems
+        // serialize and we always burn the earliest credits.
+        const plateNorm = carPlate.toUpperCase().replace(/\s+/g, '');
+        const manualRows = (await tx.execute(sql`
+          SELECT id, stamps_remaining FROM loyalty_manual_stamps
+           WHERE stamps_remaining > 0
+             AND (vehicle_id = ${vehicleId}
+                  OR (vehicle_id IS NULL AND plate_norm = ${plateNorm}))
+           ORDER BY created_at ASC
+           FOR UPDATE
+        `)).rows as Array<{ id: string; stamps_remaining: number }>;
+        const manualAvailable = manualRows.reduce((s, r) => s + Number(r.stamps_remaining), 0);
+
+        const totalAvailable = eligibleRows.length + manualAvailable;
+        if (totalAvailable < LOYALTY_REQUIRED_COUNT) {
+          return { http: 400, body: { error: 'not_enough_stamps', have: totalAvailable, need: LOYALTY_REQUIRED_COUNT } };
         }
+
+        // Consume real orders first, then top up from manual credits.
+        const ordersToConsume = eligibleRows.slice(0, LOYALTY_REQUIRED_COUNT);
+        let needFromManual = LOYALTY_REQUIRED_COUNT - ordersToConsume.length;
 
         const redemptionId = `loy_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 8)}`;
         const voucherId    = `ord_loy_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 8)}`;
@@ -5503,15 +5534,28 @@ export async function registerRoutes(app: Express): Promise<Server> {
             (${redemptionId}, ${userId}, ${voucherId}, ${LOYALTY_PKG_ID}, NULL)
         `);
 
-        // Punch the 4 receipts. Loop instead of ANY(array) — Drizzle's
+        // Punch the real receipts. Loop instead of ANY(array) — Drizzle's
         // sql tag binds JS arrays as a record tuple, not a text[], which
         // breaks the cast. 4 rows max so the loop cost is negligible.
-        for (const row of eligibleRows) {
+        for (const row of ordersToConsume) {
           await tx.execute(sql`
             UPDATE orders SET loyalty_consumed_in = ${redemptionId}
              WHERE id = ${row.id}
                AND loyalty_consumed_in IS NULL
           `);
+        }
+
+        // Top up the remainder from cashier-credited manual stamps, oldest
+        // first, decrementing stamps_remaining (memberships-style).
+        for (const row of manualRows) {
+          if (needFromManual <= 0) break;
+          const take = Math.min(needFromManual, Number(row.stamps_remaining));
+          await tx.execute(sql`
+            UPDATE loyalty_manual_stamps
+               SET stamps_remaining = stamps_remaining - ${take}
+             WHERE id = ${row.id}
+          `);
+          needFromManual -= take;
         }
 
         return {
@@ -7007,6 +7051,173 @@ export async function registerRoutes(app: Express): Promise<Server> {
     } catch (err) {
       console.error('[pos.branch.status] failed:', err);
       res.status(500).json({ error: 'status_update_failed' });
+    }
+  });
+
+  // ==========================================================================
+  // Loyalty — cashier "verify physical receipt & add stamps" (digital-receipt
+  // migration backstop). Branch-locked cashier checks a customer's paper B$12
+  // receipts and credits the matching number of stamps to a plate. Auto-count
+  // (real orders by plate) stays the baseline; manual stamps add on top.
+  // ==========================================================================
+  const LOYALTY_PLATE_NORM = (s: string) => s.toUpperCase().replace(/\s+/g, "");
+
+  // GET /api/pos/loyalty/lookup?plate=  → current stamp picture for a plate so
+  // the cashier doesn't double-credit washes that already auto-counted.
+  app.get('/api/pos/loyalty/lookup', requireStaff, async (req, res) => {
+    const raw = String(req.query.plate ?? '').trim();
+    if (!raw) return res.status(400).json({ error: 'plate_required' });
+    const norm = LOYALTY_PLATE_NORM(raw);
+    try {
+      const car = (await db.execute(sql`
+        SELECT id, license_plate, brand, model FROM cars
+         WHERE REGEXP_REPLACE(UPPER(license_plate), '\s+', '', 'g') = ${norm}
+         LIMIT 1
+      `)).rows[0] as { id: number; license_plate: string; brand: string | null; model: string | null } | undefined;
+      const carId = car?.id ?? null;
+
+      // Auto stamps: eligible paid B$12 orders for this plate, not yet consumed.
+      // Same attribution as the customer card: vehicle_id FK wins; plate fallback
+      // only when vehicle_id IS NULL.
+      const autoRow = (await db.execute(sql`
+        SELECT COUNT(*)::int AS n FROM orders o
+         WHERE o.package_id           = ${LOYALTY_PKG_ID}
+           AND o.loyalty_consumed_in IS NULL
+           AND o.status               IN ('paid','queued','washing','done')
+           AND NOT (o.payment_method  = 'voucher' AND o.qr_provider = 'loyalty')
+           AND o.id NOT IN (SELECT order_id FROM membership_redemptions)
+           AND (
+                 (${carId}::int IS NOT NULL AND o.vehicle_id = ${carId})
+                 OR (o.vehicle_id IS NULL
+                     AND REGEXP_REPLACE(UPPER(o.plate), '\s+', '', 'g') = ${norm})
+               )
+      `)).rows[0] as { n: number };
+
+      const manualRow = (await db.execute(sql`
+        SELECT COALESCE(SUM(stamps_remaining), 0)::int AS n FROM loyalty_manual_stamps
+         WHERE stamps_remaining > 0
+           AND (
+                 (${carId}::int IS NOT NULL AND vehicle_id = ${carId})
+                 OR (vehicle_id IS NULL AND plate_norm = ${norm})
+               )
+      `)).rows[0] as { n: number };
+
+      const auto = Number(autoRow?.n ?? 0);
+      const manual = Number(manualRow?.n ?? 0);
+      const total = auto + manual;
+      res.json({
+        plate: car?.license_plate ?? raw,
+        vehicle_id: carId,
+        brand: car?.brand ?? null,
+        model: car?.model ?? null,
+        auto_stamps: auto,
+        manual_stamps: manual,
+        total_stamps: total,
+        required: LOYALTY_REQUIRED_COUNT,
+        can_redeem: total >= LOYALTY_REQUIRED_COUNT,
+      });
+    } catch (err) {
+      console.error('[pos.loyalty.lookup] failed:', err);
+      res.status(500).json({ error: 'lookup_failed' });
+    }
+  });
+
+  // POST /api/pos/loyalty/stamp  Body: { plate, count, note?, receipt_no? }
+  // Credits `count` manual stamps to a plate. Branch-locked: the credit is
+  // tagged with the cashier's branch (owner/manager may pass branch_id).
+  const manualStampSchema = z.object({
+    plate: z.string().trim().min(1).max(20),
+    count: z.coerce.number().int().min(1).max(4),
+    note: z.string().trim().max(160).optional().nullable(),
+    receipt_no: z.string().trim().max(40).optional().nullable(),
+  });
+  app.post('/api/pos/loyalty/stamp', requireStaff, async (req, res) => {
+    const parsed = manualStampSchema.safeParse(req.body);
+    if (!parsed.success) return res.status(400).json({ error: 'invalid_request' });
+    const staffUser = req.staff!.user as any;
+    const staffId = String(staffUser.id);
+    const staffRole = staffUser.role as 'owner' | 'manager' | 'lane' | 'cashier';
+    const staffBranchId = staffUser.branchId as number | null;
+
+    // Branch-locked, mirroring PATCH /api/pos/branch/status: lane/cashier are
+    // pinned to their own branch; owner/manager may target another branch via
+    // body.branch_id. The credit MUST carry a resolved branch for audit.
+    const isPrivileged = staffRole === 'owner' || staffRole === 'manager';
+    const bodyBranchId = Number(req.body?.branch_id);
+    const branchId = isPrivileged && Number.isFinite(bodyBranchId) && bodyBranchId > 0
+      ? bodyBranchId
+      : staffBranchId;
+    if (branchId == null) {
+      return res.status(400).json({ error: 'no_branch' });
+    }
+    const branchExists = (await db.execute(sql`
+      SELECT 1 FROM branches WHERE id = ${branchId} LIMIT 1
+    `)).rows.length > 0;
+    if (!branchExists) {
+      return res.status(400).json({ error: 'invalid_branch' });
+    }
+
+    const { plate, count } = parsed.data;
+    const note = parsed.data.note && parsed.data.note.length > 0 ? parsed.data.note : null;
+    const receiptNo = parsed.data.receipt_no && parsed.data.receipt_no.length > 0 ? parsed.data.receipt_no : null;
+    const norm = LOYALTY_PLATE_NORM(plate);
+
+    try {
+      const car = (await db.execute(sql`
+        SELECT id FROM cars
+         WHERE REGEXP_REPLACE(UPPER(license_plate), '\s+', '', 'g') = ${norm}
+         LIMIT 1
+      `)).rows[0] as { id: number } | undefined;
+      const vehicleId = car?.id ?? null;
+
+      const id = `lms_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 8)}`;
+      await db.execute(sql`
+        INSERT INTO loyalty_manual_stamps
+          (id, vehicle_id, plate, plate_norm, stamps_total, stamps_remaining,
+           note, receipt_no, branch_id, staff_id)
+        VALUES
+          (${id}, ${vehicleId}, ${plate.toUpperCase()}, ${norm}, ${count}, ${count},
+           ${note}, ${receiptNo}, ${branchId}, ${staffId})
+      `);
+
+      // Recompute the plate's total for the response so the cashier sees the
+      // new running count immediately.
+      const autoRow = (await db.execute(sql`
+        SELECT COUNT(*)::int AS n FROM orders o
+         WHERE o.package_id           = ${LOYALTY_PKG_ID}
+           AND o.loyalty_consumed_in IS NULL
+           AND o.status               IN ('paid','queued','washing','done')
+           AND NOT (o.payment_method  = 'voucher' AND o.qr_provider = 'loyalty')
+           AND o.id NOT IN (SELECT order_id FROM membership_redemptions)
+           AND (
+                 (${vehicleId}::int IS NOT NULL AND o.vehicle_id = ${vehicleId})
+                 OR (o.vehicle_id IS NULL
+                     AND REGEXP_REPLACE(UPPER(o.plate), '\s+', '', 'g') = ${norm})
+               )
+      `)).rows[0] as { n: number };
+      const manualRow = (await db.execute(sql`
+        SELECT COALESCE(SUM(stamps_remaining), 0)::int AS n FROM loyalty_manual_stamps
+         WHERE stamps_remaining > 0
+           AND (
+                 (${vehicleId}::int IS NOT NULL AND vehicle_id = ${vehicleId})
+                 OR (vehicle_id IS NULL AND plate_norm = ${norm})
+               )
+      `)).rows[0] as { n: number };
+
+      const auto = Number(autoRow?.n ?? 0);
+      const manual = Number(manualRow?.n ?? 0);
+      res.status(201).json({
+        ok: true,
+        added: count,
+        auto_stamps: auto,
+        manual_stamps: manual,
+        total_stamps: auto + manual,
+        required: LOYALTY_REQUIRED_COUNT,
+        can_redeem: auto + manual >= LOYALTY_REQUIRED_COUNT,
+      });
+    } catch (err) {
+      console.error('[pos.loyalty.stamp] failed:', err);
+      res.status(500).json({ error: 'stamp_failed' });
     }
   });
 
