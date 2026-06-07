@@ -57,6 +57,7 @@ import {
   Percent,
   Tag,
   Wallet,
+  Stamp,
 } from "lucide-react";
 import { Link } from "wouter";
 import { motion } from "framer-motion";
@@ -69,6 +70,7 @@ import DiscountsTab from "@/components/admin/DiscountsTab";
 import PromoCodesTab from "@/components/admin/PromoCodesTab";
 import PaymentSetupTab from "@/components/admin/PaymentSetupTab";
 import StaffTab from "@/components/admin/StaffTab";
+import LoyaltyStampTab from "@/components/admin/LoyaltyStampTab";
 import CategoriesSection from "@/components/admin/CategoriesSection";
 import {
   AreaChart,
@@ -262,7 +264,7 @@ export default function Admin() {
               "payments",
               "best-selling",
               ...(isManagerOrOwner ? ["customers"] : []),
-              ...(isOwner ? ["branches", "catalog", "discounts", "promo-codes", "payment-setup", "staff"] : []),
+              ...(isOwner ? ["branches", "catalog", "discounts", "promo-codes", "payment-setup", "staff", "loyalty"] : []),
               ...(isManagerOrOwner ? ["shifts", "collaborations", "subscriptions"] : []),
             ];
             const colMd = visibleTabs.length;
@@ -336,6 +338,12 @@ export default function Admin() {
                 <TabsTrigger value="staff" className="flex items-center gap-2" data-testid="tab-staff">
                   <ShieldCheck className="w-4 h-4" />
                   Staff
+                </TabsTrigger>
+              )}
+              {isOwner && (
+                <TabsTrigger value="loyalty" className="flex items-center gap-2" data-testid="tab-loyalty">
+                  <Stamp className="w-4 h-4" />
+                  Loyalty
                 </TabsTrigger>
               )}
               {isManagerOrOwner && (
@@ -422,6 +430,12 @@ export default function Admin() {
             {isOwner && (
               <TabsContent value="staff" className="mt-6">
                 <StaffTab />
+              </TabsContent>
+            )}
+
+            {isOwner && (
+              <TabsContent value="loyalty" className="mt-6">
+                <LoyaltyStampTab />
               </TabsContent>
             )}
 

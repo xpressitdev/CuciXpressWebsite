@@ -24,10 +24,16 @@ depending on where you look.
 oldest-first, all under `FOR UPDATE` (car row + orders + manual rows) so concurrent
 redeems for the same car serialize and can't over-consume.
 
+**Access: OWNER-ONLY.** Both /api/pos/loyalty/lookup and /stamp are
+`requireStaffRole('owner')`, and the UI lives in an owner-only admin tab
+(LoyaltyStampTab), NOT the cashier POS. (Owner explicitly pulled this off cashiers
+— it's an audit-sensitive credit action.)
+
 **Branch-lock:** POST /api/pos/loyalty/stamp must resolve a non-null, existing
-branch before insert (400 `no_branch` / `invalid_branch`) — mirror
-PATCH /api/pos/branch/status. lane/cashier pinned to own branch; owner/manager may
-pass `branch_id`. The credit row carries branch_id for audit.
+branch before insert (400 `no_branch` / `invalid_branch`). Owners have
+branchId=null, so the admin tab makes them pick a branch (required) and sends
+`branch_id`; the server treats owner as privileged. The credit row carries
+branch_id for audit.
 
 **Why:** owner wants a full audit trail (who/when/branch/note/receipt) and the
 migration means past washes are already auto-counted — the tool only tops up the
