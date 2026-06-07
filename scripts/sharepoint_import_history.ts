@@ -38,6 +38,12 @@ const args = process.argv.slice(2);
 const limitArg = args.find(a => a.startsWith('--limit='));
 const LIMIT = limitArg ? Number(limitArg.split('=')[1]) : Infinity;
 const DRY_RUN = args.includes('--dry-run');
+// Optional fast-path: begin scanning at a given 1-based sourceRowNumber so we
+// don't re-fetch tens of thousands of already-imported rows over the Graph API
+// just to skip them. sourceRowNumber math is unchanged (offset + i + 1), so
+// the row numbers written stay identical — only the starting offset moves.
+const startArg = args.find(a => a.startsWith('--start-row='));
+const START_OFFSET = startArg ? Math.max(0, Number(startArg.split('=')[1]) - 1) : 0;
 
 // --- Branch name -> id (matches BRANCHES in client/src/pages/pos.tsx) -------
 const BRANCH_NAME_TO_ID: Record<string, number> = {
@@ -268,7 +274,8 @@ async function main() {
   // hit Postgres 50x for the upsert.
   const carCache = new Map<string, number>();
 
-  for (let offset = 0; offset < toImport; offset += CHUNK) {
+  if (START_OFFSET > 0) console.log(`Fast-path: starting scan at sourceRowNumber ${START_OFFSET + 1} (skipping earlier already-imported rows).`);
+  for (let offset = START_OFFSET; offset < toImport; offset += CHUNK) {
     const lo = firstDataRow + offset;
     const hi = Math.min(firstDataRow + offset + CHUNK - 1, firstDataRow + toImport - 1);
     const addr = `${startCol}${lo}:${endCol}${hi}`;
