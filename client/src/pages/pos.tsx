@@ -704,9 +704,9 @@ export default function POS() {
     // Cash payments must record how much cash was handed over (no blank /
     // "exact" shortcut) so the drawer reconciles and the receipt shows change.
     (paymentMethod !== "cash" || cashReceivedCents != null) &&
-    // Card payments must record a reference (last 4 digits / txn id) so the
-    // sale can be matched against the card terminal settlement.
-    (paymentMethod !== "card" || paymentRef.trim().length > 0) &&
+    // Bank transfer must record a reference (transaction id) so the sale can
+    // be matched against the bank statement.
+    (paymentMethod !== "bank_transfer" || paymentRef.trim().length > 0) &&
     // Subscription payment requires an active wash-pack on file. Block
     // submit until the cashier either resolves a customer with a pack
     // or switches payment method — the server enforces this too, but
@@ -1931,7 +1931,7 @@ export default function POS() {
                     <div>
                       <Label htmlFor="payment-ref">
                         Reference{" "}
-                        {paymentMethod === "card" ? (
+                        {paymentMethod === "bank_transfer" ? (
                           <span className="text-red-500 text-xs">(required)</span>
                         ) : (
                           <span className="text-gray-400 text-xs">(optional)</span>
