@@ -579,6 +579,9 @@ export const orders = pgTable("orders", {
   package_name: text("package_name").notNull(),
   package_price_cents: integer("package_price_cents").notNull(),
   addons: jsonb("addons").$type<OrderAddonSnapshot[]>().default([]).notNull(),
+  // How many units of this package were sold in one transaction (e.g. a
+  // bulk voucher sale). Defaults to 1 — subtotal = (package + addons) * qty.
+  quantity: integer("quantity").default(1).notNull(),
   subtotal_cents: integer("subtotal_cents").notNull(),
   total_cents: integer("total_cents").notNull(),
   payment_method: text("payment_method").notNull(),

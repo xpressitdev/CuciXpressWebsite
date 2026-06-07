@@ -10,4 +10,5 @@
 - [Outbox draining under Neon HTTP](outbox-neon-claim.md) — queue doubled rows: Neon HTTP autocommits so SELECT…FOR UPDATE SKIP LOCKED gives no protection; claim atomically + lease, dev also drains shared queue.
 - [Loyalty manual stamps](loyalty-manual-stamps.md) — manual stamps ADD ON TOP of auto-counted orders; one attribution rule (vehicle_id wins, plate-norm fallback when null) must match across lookup/customer-card/redeem.
 - [Shift totals = shared drawer](shift-totals-shared-drawer.md) — cash reports scope by branch+day (not shift_id); each branch = one shared drawer banked daily. Orders keep shift_id for audit only.
+- [DB migration workflow](db-migration-workflow.md) — db:push/drizzle-kit are BLOCKED; change schema via raw idempotent SQL in migrations/manual applied to BOTH $DATABASE_URL and $STAGING_DATABASE_URL.
 - [MDR fee rates](mdr-fee-rates.md) — fee table keyed by method|qr_provider (missing=0bps); MUST use COALESCE NULL-safe unique index or dup (card,NULL) rows break the rate map. Fee on GROSS; net-after-fees is headline.

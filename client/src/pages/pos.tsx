@@ -195,6 +195,7 @@ interface CreatedOrder {
   package_name: string;
   package_price_cents: number;
   addons: Array<{ id: string; name: string; price_cents: number }>;
+  quantity: number;
   subtotal_cents: number;
   total_cents: number;
   paid_amount_cents: number | null;
@@ -319,6 +320,7 @@ export default function POS() {
   const [paymentKey, setPaymentKey] = useState<string>("cash");
   const [paymentRef, setPaymentRef] = useState<string>("");
   const [cashReceived, setCashReceived] = useState<string>("");
+  const [quantity, setQuantity] = useState<number>(1);
   const [itemNotes, setItemNotes] = useState<string>("");
   const [scanOpen, setScanOpen] = useState<boolean>(false);
   // Phase 7 refund: styled confirm modal (replaces native confirm/prompt).
@@ -488,7 +490,13 @@ export default function POS() {
       .reduce((s, a) => s + a.price_cents, 0);
   }, [catalog, selectedAddons]);
 
-  const subtotal = (packagePrice ?? 0) + addonsTotal;
+  // Quantity multiplies the whole line (package + add-ons) into the subtotal —
+  // e.g. selling several wash vouchers in one transaction. Free/subscription
+  // washes are always a single car, so the multiplier is forced to 1 there.
+  const unitPrice = (packagePrice ?? 0) + addonsTotal;
+  const effectiveQty =
+    paymentMethod === "subscription" ? 1 : Math.max(1, quantity);
+  const subtotal = unitPrice * effectiveQty;
 
   // Today's sales summary for the right-rail: net sales (excluding refunds),
   // refund total, and a per-payment-method breakdown so the cashier can see
@@ -868,6 +876,7 @@ export default function POS() {
         paid_amount_cents:
           oneTap || paymentMethod !== "cash" ? null : cashReceivedCents,
         branch_id: branchId,
+        quantity: oneTap || paymentMethod === "subscription" ? 1 : Math.max(1, quantity),
         item_notes: oneTap ? null : itemNotes.trim() || null,
         vehicle_id: matchedVehicleId,
         customer_phone: oneTap ? null : customerPhone.trim() || null,
@@ -923,6 +932,7 @@ export default function POS() {
     setSelectedAddons(new Set());
     setPaymentRef("");
     setCashReceived("");
+    setQuantity(1);
     setItemNotes("");
     setMatchedVehicleId(null);
     setVehicleSuggestions([]);
@@ -952,14 +962,15 @@ export default function POS() {
     }
     setPrinting(true);
     try {
+      const qty = lastOrder.quantity ?? 1;
       const items = [
         {
-          name: lastOrder.package_name,
-          price: formatBND(lastOrder.package_price_cents),
+          name: qty > 1 ? `${lastOrder.package_name} × ${qty}` : lastOrder.package_name,
+          price: formatBND(lastOrder.package_price_cents * qty),
         },
         ...lastOrder.addons.map((a) => ({
-          name: `+ ${a.name}`,
-          price: formatBND(a.price_cents),
+          name: qty > 1 ? `+ ${a.name} × ${qty}` : `+ ${a.name}`,
+          price: formatBND(a.price_cents * qty),
         })),
       ];
       await printReceipt({
@@ -1072,13 +1083,25 @@ export default function POS() {
 
               <div className="space-y-2 text-sm">
                 <div className="flex justify-between">
-                  <span className="text-gray-700">{lastOrder.package_name}</span>
-                  <span className="font-semibold">{formatBND(lastOrder.package_price_cents)}</span>
+                  <span className="text-gray-700">
+                    {lastOrder.package_name}
+                    {(lastOrder.quantity ?? 1) > 1 && (
+                      <span className="text-gray-500"> × {lastOrder.quantity}</span>
+                    )}
+                  </span>
+                  <span className="font-semibold">
+                    {formatBND(lastOrder.package_price_cents * (lastOrder.quantity ?? 1))}
+                  </span>
                 </div>
                 {lastOrder.addons.map((a) => (
                   <div key={a.id} className="flex justify-between text-gray-600">
-                    <span>+ {a.name}</span>
-                    <span>{formatBND(a.price_cents)}</span>
+                    <span>
+                      + {a.name}
+                      {(lastOrder.quantity ?? 1) > 1 && (
+                        <span className="text-gray-500"> × {lastOrder.quantity}</span>
+                      )}
+                    </span>
+                    <span>{formatBND(a.price_cents * (lastOrder.quantity ?? 1))}</span>
                   </div>
                 ))}
                 <div className="border-t-2 border-dashed border-gray-300 my-3" />
@@ -1993,6 +2016,64 @@ export default function POS() {
                       );
                     })}
                   </div>
+                  {/* Quantity — multiply the line for bulk sales (e.g.
+                      vouchers). Hidden on a free/subscription wash, which is
+                      always a single car. */}
+                  {paymentMethod !== "subscription" && (
+                    <div className="flex items-center justify-between">
+                      <Label htmlFor="quantity" className="text-sm text-gray-600">
+                        Quantity
+                      </Label>
+                      <div className="flex items-center gap-2">
+                        <Button
+                          type="button"
+                          variant="outline"
+                          size="icon"
+                          className="h-8 w-8"
+                          onClick={() => setQuantity((q) => Math.max(1, q - 1))}
+                          disabled={effectiveQty <= 1}
+                          data-testid="button-quantity-decrement"
+                        >
+                          −
+                        </Button>
+                        <Input
+                          id="quantity"
+                          type="number"
+                          inputMode="numeric"
+                          min="1"
+                          step="1"
+                          className="h-8 w-16 text-center"
+                          value={quantity}
+                          onChange={(e) => {
+                            const n = parseInt(e.target.value, 10);
+                            setQuantity(Number.isFinite(n) && n >= 1 ? n : 1);
+                          }}
+                          data-testid="input-quantity"
+                        />
+                        <Button
+                          type="button"
+                          variant="outline"
+                          size="icon"
+                          className="h-8 w-8"
+                          onClick={() => setQuantity((q) => Math.max(1, q + 1))}
+                          data-testid="button-quantity-increment"
+                        >
+                          +
+                        </Button>
+                      </div>
+                    </div>
+                  )}
+                  {effectiveQty > 1 && (
+                    <div
+                      className="flex justify-between text-sm text-gray-600"
+                      data-testid="row-summary-subtotal"
+                    >
+                      <span>
+                        Subtotal ({formatBND(unitPrice)} × {effectiveQty})
+                      </span>
+                      <span>{formatBND(subtotal)}</span>
+                    </div>
+                  )}
                   {useMembership && (
                     <div
                       className="flex justify-between text-sm text-emerald-700 font-medium"

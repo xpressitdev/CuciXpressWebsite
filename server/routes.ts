@@ -6630,6 +6630,10 @@ export async function registerRoutes(app: Express): Promise<Server> {
     // print/show the amount paid and change due on the receipt.
     paid_amount_cents: z.number().int().nonnegative().optional().nullable(),
     branch_id: z.number().int().positive(),
+    // How many units of the package are being bought in one go (e.g. a bulk
+    // voucher sale). Defaults to 1; the server multiplies the line into the
+    // subtotal. Ignored (forced to 1) for free/subscription washes.
+    quantity: z.number().int().min(1).max(999).default(1),
     order_notes: z.string().trim().max(500).optional().nullable(),
     item_notes: z.string().trim().max(500).optional().nullable(),
     // Phase 1 (2026-05-04): vehicle/customer linking. All optional —
@@ -6783,8 +6787,12 @@ export async function registerRoutes(app: Express): Promise<Server> {
         }
 
         // 3. Compute totals server-side. Never trust client amounts.
+        // Quantity multiplies the whole line (package + add-ons). Free /
+        // subscription washes are always a single car, so force qty = 1.
+        const quantity =
+          body.payment_method === 'subscription' ? 1 : body.quantity;
         const addonsTotal = addonSnapshots.reduce((s, a) => s + a.price_cents, 0);
-        const subtotal = pkg.price_cents + addonsTotal;
+        const subtotal = (pkg.price_cents + addonsTotal) * quantity;
 
         // 4. Allocate the next ticket code for this branch + day.
         const seqRow = (await tx.execute(sql`
@@ -7036,7 +7044,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
           INSERT INTO orders (
             id, branch_id, staff_id, plate,
             package_id, package_name, package_price_cents,
-            addons, subtotal_cents, total_cents,
+            addons, quantity, subtotal_cents, total_cents,
             discount_cents, promo_discount_cents, discount_id, promo_code_id,
             payment_method, qr_provider, payment_ref,
             paid_amount_cents, change_cents,
@@ -7047,7 +7055,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
           ) VALUES (
             ${orderId}, ${effectiveBranchId}, ${staffId}, ${plateUpper},
             ${pkg.id}, ${pkg.name}, ${pkg.price_cents},
-            ${JSON.stringify(addonSnapshots)}::jsonb, ${subtotal}, ${chargedTotal},
+            ${JSON.stringify(addonSnapshots)}::jsonb, ${quantity}, ${subtotal}, ${chargedTotal},
             ${discountCents}, ${promoDiscountCents}, ${appliedDiscountId}, ${appliedPromoId},
             ${body.payment_method}, ${body.payment_method === 'qr_code' ? (body.qr_provider ?? null) : null}, ${body.payment_method === 'cash' ? null : (body.payment_ref ?? null)},
             ${paidAmountCents}, ${changeCents},
@@ -7081,7 +7089,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
         }
 
         return {
-          orderId, ticketCode, pkg, addonSnapshots, subtotal,
+          orderId, ticketCode, pkg, addonSnapshots, quantity, subtotal,
           chargedTotal, discountCents, promoDiscountCents, redeemMembership,
           paidAmountCents, changeCents,
         };
@@ -7097,6 +7105,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
           package_name: result.pkg.name,
           package_price_cents: result.pkg.price_cents,
           addons: result.addonSnapshots,
+          quantity: result.quantity,
           subtotal_cents: result.subtotal,
           total_cents: result.chargedTotal,
           discount_cents: result.discountCents,
