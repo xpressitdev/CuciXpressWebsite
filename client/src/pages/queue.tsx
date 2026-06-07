@@ -341,8 +341,8 @@ function BranchDetail({ branch }: { branch: QueueBranch }) {
                   </p>
                 </div>
               ))}
-              <div className="flex items-center text-gray-400 px-2 font-bold tracking-wider">
-                → EXIT
+              <div className="flex items-center text-gray-400 px-2 font-bold tracking-wider whitespace-nowrap">
+                END OF QUEUE
               </div>
             </div>
           </div>
