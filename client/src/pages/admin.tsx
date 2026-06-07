@@ -93,6 +93,50 @@ interface SubscriptionsResponse {
   signups: SubscriptionSignup[];
 }
 
+interface SubscriptionRevenueRow {
+  id: string;
+  customer_name: string | null;
+  plan_label: string;
+  status: string;
+  created_at: string;
+  expires_at: string | null;
+  price_cents: number;
+  mdr_fee_cents: number;
+  net_cents: number;
+  daily_cents: number;
+  day_index: number;
+  days_remaining: number;
+  recognized_cents: number;
+  deferred_cents: number;
+  earned_today_cents: number;
+}
+
+interface SubscriptionRevenueResponse {
+  as_of: string;
+  mdr_bps: number;
+  recognition_days: number;
+  totals: {
+    total_count: number;
+    active_count: number;
+    gross_cents: number;
+    mdr_fee_cents: number;
+    net_cents: number;
+    recognized_cents: number;
+    deferred_cents: number;
+    earned_today_cents: number;
+  };
+  by_plan: Array<{
+    label: string;
+    count: number;
+    gross_cents: number;
+    net_cents: number;
+    recognized_cents: number;
+    deferred_cents: number;
+    earned_today_cents: number;
+  }>;
+  subscriptions: SubscriptionRevenueRow[];
+}
+
 const formatBND = (cents: number) =>
   `B$${(cents / 100).toLocaleString("en-US", {
     minimumFractionDigits: 2,
@@ -118,6 +162,11 @@ export default function Admin() {
 
   const { data: subscriptionsData, error: subscriptionsError } = useQuery<SubscriptionsResponse>({
     queryKey: ['/api/admin/subscriptions'],
+    enabled: isAuthenticated,
+  });
+
+  const { data: subRevenue, isLoading: subRevenueLoading } = useQuery<SubscriptionRevenueResponse>({
+    queryKey: ['/api/admin/subscriptions/revenue'],
     enabled: isAuthenticated,
   });
 
@@ -588,6 +637,158 @@ export default function Admin() {
 
             {isManagerOrOwner && (
             <TabsContent value="subscriptions" className="mt-6">
+              <div className="space-y-10">
+              {/* ---- Subscription revenue (recognized daily over 30 days) ---- */}
+              <div>
+                <div className="flex flex-wrap items-end justify-between gap-2 mb-1">
+                  <h2 className="text-xl font-bold text-gray-900">Subscription revenue</h2>
+                  {subRevenue && (
+                    <span className="text-sm text-gray-500">
+                      Counted daily over {subRevenue.recognition_days} days · after{" "}
+                      {(subRevenue.mdr_bps / 100).toFixed(2)}% online fee
+                    </span>
+                  )}
+                </div>
+                <p className="text-sm text-gray-600 mb-4 max-w-3xl">
+                  When a subscription is bought, the one-time online card fee is taken first,
+                  then the rest is counted as income a little each day across its 30-day plan.
+                  This view is separate — it does not affect your daily sales reports or the
+                  SharePoint sheet.
+                </p>
+
+                {subRevenueLoading ? (
+                  <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+                    {[0, 1, 2, 3].map((i) => (
+                      <Card key={i}><CardContent className="p-4">
+                        <div className="h-4 w-24 bg-gray-200 rounded animate-pulse mb-3" />
+                        <div className="h-7 w-28 bg-gray-200 rounded animate-pulse" />
+                      </CardContent></Card>
+                    ))}
+                  </div>
+                ) : !subRevenue || subRevenue.totals.total_count === 0 ? (
+                  <Card>
+                    <CardContent className="py-12 text-center">
+                      <Calendar className="w-12 h-12 text-gray-400 mx-auto mb-4" />
+                      <h3 className="text-lg font-semibold text-gray-900 mb-2">No subscriptions sold yet</h3>
+                      <p className="text-gray-600">
+                        Once an Unlimited or Multi-Car Family plan is sold, its daily earned
+                        revenue will appear here.
+                      </p>
+                    </CardContent>
+                  </Card>
+                ) : (
+                  <div className="space-y-6">
+                    <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+                      <Card><CardContent className="p-4">
+                        <p className="text-sm text-gray-500">Earned today</p>
+                        <p className="text-2xl font-bold text-cuci-primary">{formatBND(subRevenue.totals.earned_today_cents)}</p>
+                      </CardContent></Card>
+                      <Card><CardContent className="p-4">
+                        <p className="text-sm text-gray-500">Recognized to date</p>
+                        <p className="text-2xl font-bold text-gray-900">{formatBND(subRevenue.totals.recognized_cents)}</p>
+                      </CardContent></Card>
+                      <Card><CardContent className="p-4">
+                        <p className="text-sm text-gray-500">Not yet earned</p>
+                        <p className="text-2xl font-bold text-gray-900">{formatBND(subRevenue.totals.deferred_cents)}</p>
+                      </CardContent></Card>
+                      <Card><CardContent className="p-4">
+                        <p className="text-sm text-gray-500">Active subscriptions</p>
+                        <p className="text-2xl font-bold text-gray-900">{subRevenue.totals.active_count}</p>
+                      </CardContent></Card>
+                    </div>
+
+                    <Card><CardContent className="p-4">
+                      <div className="grid grid-cols-2 md:grid-cols-3 gap-4 text-sm">
+                        <div>
+                          <p className="text-gray-500">Total sales (gross)</p>
+                          <p className="font-semibold text-gray-900">{formatBND(subRevenue.totals.gross_cents)}</p>
+                        </div>
+                        <div>
+                          <p className="text-gray-500">Online fees taken</p>
+                          <p className="font-semibold text-gray-900">−{formatBND(subRevenue.totals.mdr_fee_cents)}</p>
+                        </div>
+                        <div>
+                          <p className="text-gray-500">Net to recognize</p>
+                          <p className="font-semibold text-gray-900">{formatBND(subRevenue.totals.net_cents)}</p>
+                        </div>
+                      </div>
+                    </CardContent></Card>
+
+                    {subRevenue.by_plan.length > 0 && (
+                      <div>
+                        <h3 className="text-sm font-semibold text-gray-700 mb-2">By plan</h3>
+                        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                          {subRevenue.by_plan.map((p) => (
+                            <Card key={p.label}><CardContent className="p-4">
+                              <div className="flex items-center justify-between mb-2">
+                                <p className="font-semibold text-gray-900">{p.label}</p>
+                                <Badge variant="outline">{p.count} sold</Badge>
+                              </div>
+                              <div className="grid grid-cols-3 gap-2 text-sm">
+                                <div>
+                                  <p className="text-gray-500">Earned today</p>
+                                  <p className="font-medium text-cuci-primary">{formatBND(p.earned_today_cents)}</p>
+                                </div>
+                                <div>
+                                  <p className="text-gray-500">Recognized</p>
+                                  <p className="font-medium text-gray-900">{formatBND(p.recognized_cents)}</p>
+                                </div>
+                                <div>
+                                  <p className="text-gray-500">Not yet earned</p>
+                                  <p className="font-medium text-gray-900">{formatBND(p.deferred_cents)}</p>
+                                </div>
+                              </div>
+                            </CardContent></Card>
+                          ))}
+                        </div>
+                      </div>
+                    )}
+
+                    <div>
+                      <h3 className="text-sm font-semibold text-gray-700 mb-2">Individual subscriptions</h3>
+                      <Card><CardContent className="p-0 overflow-x-auto">
+                        <table className="w-full text-sm">
+                          <thead>
+                            <tr className="text-left text-gray-500 border-b">
+                              <th className="p-3 font-medium">Customer</th>
+                              <th className="p-3 font-medium">Plan</th>
+                              <th className="p-3 font-medium">Sold</th>
+                              <th className="p-3 font-medium text-center">Day</th>
+                              <th className="p-3 font-medium text-right">Per day</th>
+                              <th className="p-3 font-medium text-right">Earned today</th>
+                              <th className="p-3 font-medium text-right">Recognized</th>
+                              <th className="p-3 font-medium text-right">Not yet earned</th>
+                            </tr>
+                          </thead>
+                          <tbody>
+                            {subRevenue.subscriptions.map((s) => (
+                              <tr key={s.id} className="border-b last:border-0 hover:bg-gray-50">
+                                <td className="p-3 text-gray-900">{s.customer_name || "Walk-in"}</td>
+                                <td className="p-3 text-gray-700">
+                                  {s.plan_label}
+                                  {s.status !== "active" && (
+                                    <Badge variant="outline" className="ml-2 text-gray-500">{s.status}</Badge>
+                                  )}
+                                </td>
+                                <td className="p-3 text-gray-500">{formatDate(s.created_at)}</td>
+                                <td className="p-3 text-center text-gray-700">{s.day_index}/{subRevenue.recognition_days}</td>
+                                <td className="p-3 text-right text-gray-700">{formatBND(s.daily_cents)}</td>
+                                <td className="p-3 text-right text-cuci-primary font-medium">{formatBND(s.earned_today_cents)}</td>
+                                <td className="p-3 text-right text-gray-900">{formatBND(s.recognized_cents)}</td>
+                                <td className="p-3 text-right text-gray-700">{formatBND(s.deferred_cents)}</td>
+                              </tr>
+                            ))}
+                          </tbody>
+                        </table>
+                      </CardContent></Card>
+                    </div>
+                  </div>
+                )}
+              </div>
+
+              {/* ---- Interest signups ---- */}
+              <div>
+                <h2 className="text-xl font-bold text-gray-900 mb-4">Interest signups</h2>
               {signups.length === 0 ? (
                 <Card>
                   <CardContent className="py-12 text-center">
@@ -637,6 +838,8 @@ export default function Admin() {
                   ))}
                 </div>
               )}
+              </div>
+              </div>
             </TabsContent>
             )}
           </Tabs>

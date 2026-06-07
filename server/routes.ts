@@ -528,6 +528,141 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
+  // GET /api/admin/subscriptions/revenue?date=YYYY-MM-DD
+  // Subscription revenue recognition (owner/manager). Each unlimited
+  // subscription (B$60 Unlimited Xpress, B$150 Multi-Car Family) is paid
+  // online via the web Pocket QR gateway, so we take that gateway's MDR
+  // fee ONCE at purchase and then spread the NET evenly over a fixed
+  // 30-day plan window measured from each sale's own purchase date.
+  // No refunds: a cancelled subscription keeps recognizing all 30 days.
+  // This number lives ONLY in the Subscription tab — it never feeds the
+  // main dashboard, payment-methods report, orders report, or SharePoint.
+  app.get('/api/admin/subscriptions/revenue', requireStaff, requireStaffRole('owner', 'manager'), async (req, res) => {
+    const RECOGNITION_DAYS = 30;
+    // Brunei (UTC+8) calendar-day helpers — recognition is day-based.
+    const bntDateStr = (d: Date) =>
+      new Date(d.getTime() + 8 * 3600 * 1000).toISOString().slice(0, 10);
+    const dayNum = (ymd: string) => Math.floor(Date.parse(`${ymd}T00:00:00Z`) / 86400000);
+    const planLabel = (cents: number) =>
+      cents === 6000 ? 'Unlimited Xpress'
+        : cents === 15000 ? 'Multi-Car Family'
+          : `Subscription (B$${(cents / 100).toFixed(2)})`;
+
+    const dateParam = String(req.query.date ?? '').trim();
+    let asOf: string;
+    if (dateParam) {
+      // Reject malformed AND impossible dates (e.g. 2026-13-45, 2026-02-30):
+      // the round-trip catches values JS would silently normalize.
+      const probe = new Date(`${dateParam}T00:00:00Z`);
+      const valid = /^\d{4}-\d{2}-\d{2}$/.test(dateParam)
+        && !Number.isNaN(probe.getTime())
+        && probe.toISOString().slice(0, 10) === dateParam;
+      if (!valid) return res.status(400).json({ error: 'invalid_date' });
+      asOf = dateParam;
+    } else {
+      asOf = bntDateStr(new Date());
+    }
+    const asOfDay = dayNum(asOf);
+
+    try {
+      const rateMap = await loadMdrRateMap(db);
+      // Subscriptions are sold online via the web Pocket QR gateway.
+      const mdrBps = mdrRateFor(rateMap, 'qr_code', 'pocket_pay');
+
+      const rows = (await db.execute(sql`
+        SELECT m.id, m.price_cents, m.status, m.created_at, m.expires_at,
+               c.name AS customer_name
+          FROM memberships m
+          LEFT JOIN customers c ON c.id = m.customer_id
+         WHERE m.kind = 'unlimited'
+         ORDER BY m.created_at DESC
+      `)).rows as Array<{
+        id: string; price_cents: number; status: string;
+        created_at: string | Date; expires_at: string | Date | null;
+        customer_name: string | null;
+      }>;
+
+      // recognized(net, daysElapsed) = round(net * clamp(daysElapsed,0,30) / 30)
+      const recognizedAt = (net: number, recDays: number) =>
+        Math.round((net * Math.min(Math.max(recDays, 0), RECOGNITION_DAYS)) / RECOGNITION_DAYS);
+
+      const subscriptions = rows.map((r) => {
+        const gross = Number(r.price_cents) || 0;
+        const mdrFee = Math.round((gross * mdrBps) / 10000);
+        const net = gross - mdrFee;
+        const createdYmd = bntDateStr(new Date(r.created_at));
+        // Purchase day counts as the first recognition day → +1. `elapsed`
+        // is intentionally UNCLAMPED so earned-today drops to 0 once the
+        // 30-day window closes (recognizedAt clamps internally).
+        const elapsed = asOfDay - dayNum(createdYmd) + 1;
+        const recDays = Math.min(Math.max(elapsed, 0), RECOGNITION_DAYS);
+        const recognized = recognizedAt(net, elapsed);
+        // earned today = recognized(today) − recognized(yesterday); naturally
+        // 0 before purchase and once the 30-day window is fully recognized.
+        const earnedToday = recognized - recognizedAt(net, elapsed - 1);
+        return {
+          id: r.id,
+          customer_name: r.customer_name,
+          plan_label: planLabel(gross),
+          status: r.status,
+          created_at: r.created_at,
+          expires_at: r.expires_at,
+          price_cents: gross,
+          mdr_fee_cents: mdrFee,
+          net_cents: net,
+          daily_cents: Math.round(net / RECOGNITION_DAYS),
+          day_index: recDays,
+          days_remaining: Math.max(0, RECOGNITION_DAYS - recDays),
+          recognized_cents: recognized,
+          deferred_cents: net - recognized,
+          earned_today_cents: earnedToday,
+        };
+      });
+
+      const totals = {
+        total_count: subscriptions.length,
+        active_count: subscriptions.filter((s) => s.status === 'active').length,
+        gross_cents: 0, mdr_fee_cents: 0, net_cents: 0,
+        recognized_cents: 0, deferred_cents: 0, earned_today_cents: 0,
+      };
+      const byPlanMap = new Map<string, {
+        label: string; count: number; gross_cents: number; net_cents: number;
+        recognized_cents: number; deferred_cents: number; earned_today_cents: number;
+      }>();
+      for (const s of subscriptions) {
+        totals.gross_cents += s.price_cents;
+        totals.mdr_fee_cents += s.mdr_fee_cents;
+        totals.net_cents += s.net_cents;
+        totals.recognized_cents += s.recognized_cents;
+        totals.deferred_cents += s.deferred_cents;
+        totals.earned_today_cents += s.earned_today_cents;
+        const p = byPlanMap.get(s.plan_label) ?? {
+          label: s.plan_label, count: 0, gross_cents: 0, net_cents: 0,
+          recognized_cents: 0, deferred_cents: 0, earned_today_cents: 0,
+        };
+        p.count += 1;
+        p.gross_cents += s.price_cents;
+        p.net_cents += s.net_cents;
+        p.recognized_cents += s.recognized_cents;
+        p.deferred_cents += s.deferred_cents;
+        p.earned_today_cents += s.earned_today_cents;
+        byPlanMap.set(s.plan_label, p);
+      }
+
+      res.json({
+        as_of: asOf,
+        mdr_bps: mdrBps,
+        recognition_days: RECOGNITION_DAYS,
+        totals,
+        by_plan: Array.from(byPlanMap.values()).sort((a, b) => b.gross_cents - a.gross_cents),
+        subscriptions,
+      });
+    } catch (error) {
+      console.error('Error computing subscription revenue:', error);
+      res.status(500).json({ error: 'Failed to compute subscription revenue' });
+    }
+  });
+
   // ============================================================
   // ADMIN — Phase 5a Owner Dashboard + Order Report (2026-05-04)
   // Owner/manager only. Read-only aggregations over orders +
