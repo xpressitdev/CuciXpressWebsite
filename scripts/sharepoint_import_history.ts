@@ -44,6 +44,13 @@ const DRY_RUN = args.includes('--dry-run');
 // the row numbers written stay identical — only the starting offset moves.
 const startArg = args.find(a => a.startsWith('--start-row='));
 const START_OFFSET = startArg ? Math.max(0, Number(startArg.split('=')[1]) - 1) : 0;
+// --limit is an ABSOLUTE top-of-sheet row cap (toImport = min(totalDataRows, LIMIT)),
+// not "N rows after --start-row". If both are set and the cap falls below the
+// start row, nothing would be scanned — fail fast instead of silently no-op'ing.
+if (startArg && limitArg && LIMIT < START_OFFSET + 1) {
+  console.error(`--limit (${LIMIT}) is below --start-row (${START_OFFSET + 1}); nothing would be scanned. --limit is an absolute row cap, not a count from --start-row.`);
+  process.exit(1);
+}
 
 // --- Branch name -> id (matches BRANCHES in client/src/pages/pos.tsx) -------
 const BRANCH_NAME_TO_ID: Record<string, number> = {
