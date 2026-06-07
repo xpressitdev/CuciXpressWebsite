@@ -701,6 +701,9 @@ export default function POS() {
     packagePrice !== null &&
     plate.trim().length > 0 &&
     branchId !== null &&
+    // Cash payments must record how much cash was handed over (no blank /
+    // "exact" shortcut) so the drawer reconciles and the receipt shows change.
+    (paymentMethod !== "cash" || cashReceivedCents != null) &&
     // Subscription payment requires an active wash-pack on file. Block
     // submit until the cashier either resolves a customer with a pack
     // or switches payment method — the server enforces this too, but
@@ -857,7 +860,8 @@ export default function POS() {
         // qr_provider slug the selected method carries flows straight through
         // to the order so reporting can attribute it.
         qr_provider: oneTap ? null : (qrProvider || null),
-        payment_ref: oneTap ? null : paymentRef.trim() || null,
+        payment_ref:
+          oneTap || paymentMethod === "cash" ? null : paymentRef.trim() || null,
         paid_amount_cents:
           oneTap || paymentMethod !== "cash" ? null : cashReceivedCents,
         branch_id: branchId,
@@ -1883,7 +1887,7 @@ export default function POS() {
                     <div>
                       <Label htmlFor="cash-received">
                         Cash received{" "}
-                        <span className="text-gray-400 text-xs">(optional)</span>
+                        <span className="text-red-500 text-xs">(required)</span>
                       </Label>
                       <Input
                         id="cash-received"
@@ -1917,29 +1921,34 @@ export default function POS() {
                       )}
                     </div>
                   )}
-                  <div>
-                    <Label htmlFor="payment-ref">
-                      Reference{" "}
-                      <span className="text-gray-400 text-xs">(optional)</span>
-                    </Label>
-                    <Input
-                      id="payment-ref"
-                      value={paymentRef}
-                      onChange={(e) => setPaymentRef(e.target.value)}
-                      placeholder="Last 4 digits / txn id"
-                      data-testid="input-payment-ref"
-                    />
-                  </div>
+                  {/* Reference is only meaningful for non-cash payments
+                      (card/QR txn id, transfer ref). Cash has no transaction
+                      id, so hide it to avoid a redundant empty field. */}
+                  {paymentMethod !== "cash" && (
+                    <div>
+                      <Label htmlFor="payment-ref">
+                        Reference{" "}
+                        <span className="text-gray-400 text-xs">(optional)</span>
+                      </Label>
+                      <Input
+                        id="payment-ref"
+                        value={paymentRef}
+                        onChange={(e) => setPaymentRef(e.target.value)}
+                        placeholder="Last 4 digits / txn id"
+                        data-testid="input-payment-ref"
+                      />
+                    </div>
+                  )}
                   <div>
                     <Label htmlFor="item-notes">
-                      Car notes{" "}
+                      Visit note{" "}
                       <span className="text-gray-400 text-xs">(optional)</span>
                     </Label>
                     <Input
                       id="item-notes"
                       value={itemNotes}
                       onChange={(e) => setItemNotes(e.target.value)}
-                      placeholder="e.g. silver Mini Cooper"
+                      placeholder="e.g. extra dirty, scratch on door"
                       data-testid="input-item-notes"
                     />
                   </div>

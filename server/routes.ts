@@ -6660,6 +6660,12 @@ export async function registerRoutes(app: Express): Promise<Server> {
       });
     }
     const body = parsed.data;
+    // Cash payments must record the cash tendered (mirrors the POS "Cash
+    // received (required)" gate) so the drawer reconciles and change is
+    // computed from a real figure rather than assumed-exact.
+    if (body.payment_method === 'cash' && body.paid_amount_cents == null) {
+      return res.status(400).json({ error: 'cash_amount_required' });
+    }
     const staffUser = req.staff!.user as any;
     const staffId = staffUser.id as string;
     const staffRole = staffUser.role as 'owner' | 'manager' | 'lane' | 'cashier';
@@ -7034,7 +7040,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
             ${pkg.id}, ${pkg.name}, ${pkg.price_cents},
             ${JSON.stringify(addonSnapshots)}::jsonb, ${subtotal}, ${chargedTotal},
             ${discountCents}, ${promoDiscountCents}, ${appliedDiscountId}, ${appliedPromoId},
-            ${body.payment_method}, ${body.payment_method === 'qr_code' ? (body.qr_provider ?? null) : null}, ${body.payment_ref ?? null},
+            ${body.payment_method}, ${body.payment_method === 'qr_code' ? (body.qr_provider ?? null) : null}, ${body.payment_method === 'cash' ? null : (body.payment_ref ?? null)},
             ${paidAmountCents}, ${changeCents},
             ${ticketCode}, 'queued',
             ${body.order_notes ?? null}, ${body.item_notes ?? null},
