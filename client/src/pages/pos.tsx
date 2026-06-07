@@ -16,18 +16,17 @@ import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { Link } from "wouter";
 import {
   ArrowLeft,
-  Camera,
   CheckCircle2,
   Clock,
   History,
   Loader2,
   LogOut,
   MapPin,
+  Phone,
   Plus,
   Printer,
   ReceiptText,
   ShieldCheck,
-  Upload,
   User,
   X,
   QrCode,
@@ -767,127 +766,6 @@ export default function POS() {
     });
   };
 
-  // ----- Phase 3: license plate recognition -----
-  // Two hidden file inputs: one with `capture="environment"` opens the
-  // device camera on mobile (and falls back to a file picker on desktop),
-  // the other is a plain gallery/upload picker. Both feed the same handler
-  // so behaviour is identical post-capture.
-  const cameraInputRef = useRef<HTMLInputElement | null>(null);
-  const uploadInputRef = useRef<HTMLInputElement | null>(null);
-  const [lprBusy, setLprBusy] = useState<boolean>(false);
-
-  const fileToBase64 = (file: File): Promise<string> =>
-    new Promise((resolve, reject) => {
-      const r = new FileReader();
-      r.onerror = () => reject(new Error("file_read_failed"));
-      r.onload = () => {
-        const out = String(r.result ?? "");
-        // Strip the "data:<mime>;base64," prefix the server also strips.
-        const i = out.indexOf(",");
-        resolve(i >= 0 ? out.slice(i + 1) : out);
-      };
-      r.readAsDataURL(file);
-    });
-
-  const recognizePlate = async (file: File) => {
-    if (branchId === null) {
-      toast({
-        title: "Pick a branch first",
-        description: "Choose a branch before scanning a plate.",
-        variant: "destructive",
-      });
-      return;
-    }
-    if (!file.type.startsWith("image/")) {
-      toast({ title: "Not an image", variant: "destructive" });
-      return;
-    }
-    if (file.size > 8 * 1024 * 1024) {
-      toast({
-        title: "Image too large",
-        description: "Please use a photo under 8MB.",
-        variant: "destructive",
-      });
-      return;
-    }
-    setLprBusy(true);
-    try {
-      const base64 = await fileToBase64(file);
-      const r = await fetch("/api/pos/lpr/recognize", {
-        method: "POST",
-        credentials: "include",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          image_base64: base64,
-          image_mime: file.type,
-          branch_id: branchId,
-        }),
-      });
-      if (!r.ok) {
-        const j = await r.json().catch(() => ({}));
-        if (r.status === 503) {
-          toast({
-            title: "Plate scanner unavailable",
-            description: "Please type the plate by hand.",
-            variant: "destructive",
-          });
-        } else {
-          toast({
-            title: "Couldn't read plate",
-            description: j.error ?? `Error ${r.status}`,
-            variant: "destructive",
-          });
-        }
-        return;
-      }
-      const data = (await r.json()) as {
-        recognized_plate: string | null;
-        confidence: number | null;
-        vehicle: VehicleSuggestion | null;
-      };
-      if (!data.recognized_plate) {
-        toast({
-          title: "No plate detected",
-          description: "Try a clearer photo, or type the plate.",
-          variant: "destructive",
-        });
-        return;
-      }
-      // Auto-fill, and auto-pick the vehicle if there's an exact match
-      // on file. Staff can still edit the plate or clear the match.
-      if (data.vehicle) {
-        pickVehicle(data.vehicle);
-        const pct = data.confidence !== null ? ` (${Math.round(data.confidence * 100)}%)` : "";
-        toast({
-          title: `Matched ${data.vehicle.license_plate}${pct}`,
-          description: data.vehicle.customer
-            ? `${data.vehicle.customer.name} — please confirm`
-            : "No customer on file — please confirm",
-        });
-      } else {
-        setPlate(data.recognized_plate);
-        setMatchedVehicleId(null);
-        const pct = data.confidence !== null ? ` (${Math.round(data.confidence * 100)}%)` : "";
-        toast({
-          title: `Read ${data.recognized_plate}${pct}`,
-          description: "New vehicle — please confirm and add details.",
-        });
-      }
-    } catch (err) {
-      console.error("[lpr] failed:", err);
-      toast({
-        title: "Plate scanner failed",
-        description: "Please type the plate by hand.",
-        variant: "destructive",
-      });
-    } finally {
-      setLprBusy(false);
-      // Reset file inputs so picking the same file twice still fires onChange.
-      if (cameraInputRef.current) cameraInputRef.current.value = "";
-      if (uploadInputRef.current) uploadInputRef.current.value = "";
-    }
-  };
-
   const createOrder = useMutation<
     { ok: true; order: CreatedOrder },
     Error,
@@ -1439,62 +1317,6 @@ export default function POS() {
                   <CardTitle className="text-base">License Plate</CardTitle>
                 </CardHeader>
                 <CardContent className="space-y-3">
-                  {/* Hidden inputs for camera + gallery. The Camera button
-                      uses capture="environment" so mobile opens the back
-                      camera; on desktop both fall back to a file picker. */}
-                  <input
-                    ref={cameraInputRef}
-                    type="file"
-                    accept="image/*"
-                    capture="environment"
-                    className="hidden"
-                    onChange={(e) => {
-                      const f = e.target.files?.[0];
-                      if (f) recognizePlate(f);
-                    }}
-                    data-testid="input-lpr-camera"
-                  />
-                  <input
-                    ref={uploadInputRef}
-                    type="file"
-                    accept="image/*"
-                    className="hidden"
-                    onChange={(e) => {
-                      const f = e.target.files?.[0];
-                      if (f) recognizePlate(f);
-                    }}
-                    data-testid="input-lpr-upload"
-                  />
-                  <div className="flex gap-2">
-                    <Button
-                      type="button"
-                      variant="outline"
-                      size="sm"
-                      disabled={lprBusy || branchId === null}
-                      onClick={() => cameraInputRef.current?.click()}
-                      className="flex-1"
-                      data-testid="button-lpr-camera"
-                    >
-                      {lprBusy ? (
-                        <Loader2 className="w-4 h-4 mr-1 animate-spin" />
-                      ) : (
-                        <Camera className="w-4 h-4 mr-1" />
-                      )}
-                      {lprBusy ? "Reading…" : "Camera"}
-                    </Button>
-                    <Button
-                      type="button"
-                      variant="outline"
-                      size="sm"
-                      disabled={lprBusy || branchId === null}
-                      onClick={() => uploadInputRef.current?.click()}
-                      className="flex-1"
-                      data-testid="button-lpr-upload"
-                    >
-                      <Upload className="w-4 h-4 mr-1" />
-                      Upload
-                    </Button>
-                  </div>
                   <div className="relative">
                     <Input
                       ref={plateInputRef}
@@ -1665,31 +1487,63 @@ export default function POS() {
                               </Button>
                             </div>
                           )}
-                          <div className="text-xs text-gray-600 mt-1 flex flex-wrap gap-x-3 gap-y-1">
+                          {/* Customer name + phone — the cashier can greet
+                              the customer by name and has a number to call. */}
+                          <div className="mt-1.5 flex flex-wrap items-center gap-x-3 gap-y-1 text-sm">
+                            <span className="inline-flex items-center gap-1 font-medium text-gray-900">
+                              <User className="w-3.5 h-3.5 text-gray-500" />
+                              {vehicleHistory.customer?.name?.trim() || "Walk-in (no customer on file)"}
+                            </span>
+                            {vehicleHistory.customer?.phone?.trim() && (
+                              <a
+                                href={`tel:${vehicleHistory.customer.phone.trim()}`}
+                                className="inline-flex items-center gap-1 text-cuci-primary hover:underline"
+                                data-testid="link-customer-phone"
+                              >
+                                <Phone className="w-3.5 h-3.5" />
+                                {vehicleHistory.customer.phone.trim()}
+                              </a>
+                            )}
+                          </div>
+                          <div className="text-xs text-gray-600 mt-1.5 flex flex-wrap gap-x-3 gap-y-1">
                             <span className="inline-flex items-center gap-1">
                               <History className="w-3 h-3" />
                               {vehicleHistory.total_visits} prior visit{vehicleHistory.total_visits === 1 ? "" : "s"}
                             </span>
                             {vehicleHistory.total_visits > 0 && (
-                              <span>
+                              <span className="font-medium text-gray-700">
                                 Spent {formatBND(vehicleHistory.total_spent_cents)}
                               </span>
                             )}
                             {vehicleHistory.favourite_branch_id && (
                               <span className="inline-flex items-center gap-1">
                                 <MapPin className="w-3 h-3" />
-                                {BRANCH_NAME_BY_ID[vehicleHistory.favourite_branch_id] ??
+                                Usual: {BRANCH_NAME_BY_ID[vehicleHistory.favourite_branch_id] ??
                                   `Branch ${vehicleHistory.favourite_branch_id}`}
                               </span>
                             )}
                           </div>
                           {vehicleHistory.recent_orders[0] && (
-                            <div className="text-xs text-gray-500 mt-1">
-                              Last: {vehicleHistory.recent_orders[0].package_name}
-                              {" · "}
-                              {formatBND(vehicleHistory.recent_orders[0].total_cents)}
-                              {" · "}
-                              {formatRelative(vehicleHistory.recent_orders[0].created_at)}
+                            <div className="text-xs text-gray-500 mt-1 flex flex-wrap gap-x-2 gap-y-0.5">
+                              <span className="inline-flex items-center gap-1">
+                                <Clock className="w-3 h-3" />
+                                Last visit:{" "}
+                                {new Date(vehicleHistory.recent_orders[0].created_at).toLocaleDateString("en-GB", {
+                                  day: "numeric",
+                                  month: "short",
+                                  year: "numeric",
+                                  timeZone: "Asia/Brunei",
+                                })}
+                                {" "}({formatRelative(vehicleHistory.recent_orders[0].created_at)})
+                              </span>
+                              <span>
+                                · {vehicleHistory.recent_orders[0].package_name}
+                                {" · "}
+                                {formatBND(vehicleHistory.recent_orders[0].total_cents)}
+                                {" · "}
+                                {BRANCH_NAME_BY_ID[vehicleHistory.recent_orders[0].branch_id] ??
+                                  `Branch ${vehicleHistory.recent_orders[0].branch_id}`}
+                              </span>
                             </div>
                           )}
                           {activeMembership && (
