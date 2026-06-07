@@ -6474,10 +6474,14 @@ export async function registerRoutes(app: Express): Promise<Server> {
         // 2. Look up + snapshot the requested addons.
         let addonSnapshots: Array<{ id: string; name: string; price_cents: number }> = [];
         if (body.addon_ids.length > 0) {
+          // Match each addon id as an individual parameter via an IN-list.
+          // (A raw `= ANY(${jsArray})` fails under the neon driver — the JS
+          // array isn't serialised to a Postgres array literal, so Postgres
+          // rejects it as a "malformed array literal".)
           const addonRows = (await tx.execute(sql`
             SELECT id, name, price_cents
               FROM addons_catalog
-             WHERE id = ANY(${body.addon_ids})
+             WHERE id IN (${sql.join(body.addon_ids.map((id) => sql`${id}`), sql`, `)})
                AND is_active = true
           `)).rows as Array<{ id: string; name: string; price_cents: number }>;
           if (addonRows.length !== body.addon_ids.length) {
