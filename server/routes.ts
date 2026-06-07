@@ -7775,6 +7775,19 @@ export async function registerRoutes(app: Express): Promise<Server> {
         RETURNING id, branch_id, opened_by_staff_id, opening_float_cents,
                   opening_note, status, opened_at
       `)).rows[0] as any;
+      // Auto-sync branch availability: opening a shift flips the branch to Open
+      // (and clears any stale closed/maintenance note). Best-effort — never fail
+      // the shift open over this. Staff can still change status manually anytime
+      // via PATCH /api/pos/branch/status.
+      try {
+        await db.execute(sql`
+          UPDATE branches
+             SET status = 'open', is_open = true, status_note = NULL
+           WHERE id = ${effectiveBranchId}
+        `);
+      } catch (statusErr) {
+        console.warn('[pos.shifts.open] branch auto-open failed:', statusErr);
+      }
       res.status(201).json({ ok: true, shift: ins });
     } catch (err: any) {
       if (err?.code === '23505') {
@@ -7897,6 +7910,26 @@ export async function registerRoutes(app: Express): Promise<Server> {
         `)).rows[0];
         return { shift: upd, totals };
       });
+      // Auto-sync branch availability: closing a shift flips the branch to
+      // Closed — but ONLY when no other shift is still open at that branch
+      // (two cashiers can each hold an open shift; the branch stays open until
+      // the last one closes). Done after the close commits and best-effort, so
+      // the cash reconciliation is never rolled back over a status hiccup. Staff
+      // can still set status manually anytime via PATCH /api/pos/branch/status.
+      try {
+        await db.execute(sql`
+          UPDATE branches
+             SET status = 'closed', is_open = false, status_note = NULL
+           WHERE id = ${(result.shift as any).branch_id}
+             AND NOT EXISTS (
+               SELECT 1 FROM cashier_shifts
+                WHERE branch_id = ${(result.shift as any).branch_id}
+                  AND status = 'open'
+             )
+        `);
+      } catch (statusErr) {
+        console.warn('[pos.shifts.close] branch auto-close failed:', statusErr);
+      }
       res.json({ ok: true, ...result });
     } catch (err: any) {
       const status = err?.httpStatus ?? 500;

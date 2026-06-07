@@ -26,6 +26,19 @@ against the same full-day totals (duplicate close records). No one-open-shift-
 per-branch / single-close-authority rule exists yet. Stale never-closed shifts
 are the usual cause; closing them is a manual DB/owner action.
 
+**Branch availability auto-syncs with shifts:** opening a cashier shift flips the
+branch's customer-facing `status` to `'open'` (is_open=true, status_note cleared);
+closing a shift flips it to `'closed'` — but ONLY when no other shift is still
+open at that branch (multiple cashiers can each hold an open shift; the branch
+stays open until the LAST one closes, via `NOT EXISTS (... cashier_shifts open)`).
+**Why:** branch had to be flipped manually before; owner wanted it automatic.
+**How to apply:** both updates are BEST-EFFORT (own try/catch, warn-only) and the
+close one runs AFTER the close txn commits, so a status write can never roll back
+the cash reconciliation. Manual `PATCH /api/pos/branch/status` is intentionally
+NOT restricted — last-writer-wins, so automation can overwrite a recent manual
+status (accepted tradeoff). Frontend ShiftBar invalidates `/api/queue/snapshot`
+(the source BranchStatusControl reads) on open/close so the dropdown refreshes.
+
 **Owner/manager oversight:** owner/manager resolve+close the SELECTED branch's
 open shift (any opener), NOT their own. `/api/pos/shifts/current?branch_id=` and
 `/close` (body `branch_id`) switch to branch scoping for those roles only;

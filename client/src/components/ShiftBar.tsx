@@ -148,6 +148,9 @@ export default function ShiftBar({ branchId, branchName, enabled, canManage = fa
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["/api/pos/shifts/current"] });
+      // Opening a shift auto-flips the branch to Open server-side; refresh the
+      // snapshot so BranchStatusControl reflects it.
+      queryClient.invalidateQueries({ queryKey: ["/api/queue/snapshot"] });
       toast({ title: "Shift opened", description: "Drawer ready." });
       setOpenModal(false);
       setFloatStr("");
@@ -171,6 +174,9 @@ export default function ShiftBar({ branchId, branchName, enabled, canManage = fa
     },
     onSuccess: (data: any) => {
       queryClient.invalidateQueries({ queryKey: ["/api/pos/shifts/current"] });
+      // Closing a shift auto-flips the branch to Closed server-side; refresh the
+      // snapshot so BranchStatusControl reflects it.
+      queryClient.invalidateQueries({ queryKey: ["/api/queue/snapshot"] });
       const variance = data?.shift?.closing_variance_cents ?? 0;
       const variantText = variance === 0
         ? "Drawer balanced."
