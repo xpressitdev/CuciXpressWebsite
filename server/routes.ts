@@ -6666,6 +6666,15 @@ export async function registerRoutes(app: Express): Promise<Server> {
     if (body.payment_method === 'cash' && body.paid_amount_cents == null) {
       return res.status(400).json({ error: 'cash_amount_required' });
     }
+    // Card payments must record a reference (last 4 digits / txn id) so the
+    // sale can be reconciled against the card terminal settlement (mirrors
+    // the POS "Reference (required)" gate).
+    if (
+      body.payment_method === 'card' &&
+      (body.payment_ref == null || body.payment_ref.trim() === '')
+    ) {
+      return res.status(400).json({ error: 'card_reference_required' });
+    }
     const staffUser = req.staff!.user as any;
     const staffId = staffUser.id as string;
     const staffRole = staffUser.role as 'owner' | 'manager' | 'lane' | 'cashier';
