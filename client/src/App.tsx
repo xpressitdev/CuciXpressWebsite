@@ -1,9 +1,10 @@
 import { Switch, Route, useLocation } from "wouter";
 import { queryClient } from "./lib/queryClient";
-import { QueryClientProvider } from "@tanstack/react-query";
+import { QueryClientProvider, useQuery } from "@tanstack/react-query";
 import { Toaster } from "@/components/ui/toaster";
 import { TooltipProvider } from "@/components/ui/tooltip";
 import { useEffect } from "react";
+import { AlertTriangle } from "lucide-react";
 import Home from "@/pages/home";
 import GalleryPage from "@/pages/gallery";
 import Partners from "@/pages/partners";
@@ -53,11 +54,31 @@ function Router() {
   );
 }
 
+function SandboxBanner() {
+  const { data } = useQuery<{ sandbox: boolean }>({
+    queryKey: ["/api/sandbox-status"],
+  });
+
+  if (!data?.sandbox) return null;
+
+  return (
+    <div
+      data-testid="banner-sandbox"
+      className="fixed top-0 inset-x-0 z-[9999] flex items-center justify-center gap-2 bg-yellow-400 px-4 py-1.5 text-center text-xs font-bold uppercase tracking-wide text-black border-b-2 border-black shadow-md"
+    >
+      <AlertTriangle className="h-4 w-4 shrink-0" />
+      <span>Sandbox — Test Mode · Not the real site · No real money or data</span>
+      <AlertTriangle className="h-4 w-4 shrink-0" />
+    </div>
+  );
+}
+
 function App() {
   return (
     <QueryClientProvider client={queryClient}>
       <TooltipProvider>
         <Toaster />
+        <SandboxBanner />
         <Router />
       </TooltipProvider>
     </QueryClientProvider>
