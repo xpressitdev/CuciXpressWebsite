@@ -5583,6 +5583,12 @@ export async function registerRoutes(app: Express): Promise<Server> {
   // ─────────────────────────────────────────────────────────────
   const LOYALTY_PKG_ID         = 'pkg_basic_tyre_wax';
   const LOYALTY_REQUIRED_COUNT = 4;
+  // Snapshot name written onto the redeemed voucher ORDER row (order
+  // summary / receipt / reports). package_id stays LOYALTY_PKG_ID so
+  // eligibility counting + report linking are unaffected; only the
+  // human-readable label changes so a redeemed wash reads as the reward,
+  // not the paid package it was earned from.
+  const LOYALTY_VOUCHER_NAME   = '5th Free Wash';
 
   // Per-plate loyalty (2026-05-25): stamps + voucher belong to a CAR,
   // not to the customer account, because the POS only captures the plate
@@ -5689,7 +5695,10 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
       res.json({
         package_id: LOYALTY_PKG_ID,
+        // Qualifying package the customer must buy to earn stamps.
         package_name: 'Basic Wash + Tyre Shine + Spray Wax',
+        // Label of the free wash they redeem — matches the voucher order row.
+        reward_name: LOYALTY_VOUCHER_NAME,
         required: LOYALTY_REQUIRED_COUNT,
         cards,
       });
@@ -5821,7 +5830,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
             ticket_code, status, customer_name_walkin
           ) VALUES (
             ${voucherId}, NULL, ${userId}, ${vehicleId}, ${carPlate},
-            ${pkg.id}, ${pkg.name}, 0,
+            ${pkg.id}, ${LOYALTY_VOUCHER_NAME}, 0,
             '[]'::jsonb, 0, 0,
             'voucher', ${redemptionId}, 'loyalty',
             NULL, 'paid', NULL

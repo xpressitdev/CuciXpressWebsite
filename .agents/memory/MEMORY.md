@@ -9,6 +9,7 @@
 - [Neon = ANY array gotcha](neon-array-any-gotcha.md) — raw `= ANY(${jsArray})` 500s with "malformed array literal" under neon; use `IN (${sql.join(...)})` or `inArray()`.
 - [Outbox draining under Neon HTTP](outbox-neon-claim.md) — queue doubled rows: Neon HTTP autocommits so SELECT…FOR UPDATE SKIP LOCKED gives no protection; claim atomically + lease, dev also drains shared queue.
 - [Loyalty manual stamps](loyalty-manual-stamps.md) — manual stamps ADD ON TOP of auto-counted orders; one attribution rule (vehicle_id wins, plate-norm fallback when null) must match across lookup/customer-card/redeem.
+- [Loyalty voucher reward label](loyalty-voucher-label.md) — redeemed free wash shows "5th Free Wash" but keeps qualifying package_id; API splits reward_name vs qualifying package_name; best-selling B$0 split is intentional.
 - [Shift totals = shared drawer](shift-totals-shared-drawer.md) — cash reports scope by branch+day (not shift_id); each branch = one shared drawer banked daily. Orders keep shift_id for audit only.
 - [Sales/refund accounting](sales-refund-accounting.md) — report "sales_cents" must be GROSS (incl refunded) so net=sales-refunds ties out; excl-refunded + subtracting refunds double-counts.
 - [Add-on line quantity & category](addon-line-quantity.md) — bulk selling is per-add-on qty in the order addons jsonb (fallback ?? 1), not on orders; packages stay single-wash; orders.quantity column left in DB but unused.

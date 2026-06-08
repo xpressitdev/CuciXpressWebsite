@@ -33,6 +33,7 @@ interface LoyaltyPlateCard {
 interface LoyaltyResp {
   package_id: string;
   package_name: string;
+  reward_name: string;
   required: number;
   cards: LoyaltyPlateCard[];
 }
@@ -154,7 +155,7 @@ export function LoyaltyCard({ cars: _cars }: Props) {
           open={voucherPlate != null}
           onClose={() => setVoucherPlate(null)}
           voucher={activeVoucher}
-          packageName={data.package_name}
+          packageName={data.reward_name}
         />
       )}
     </>
