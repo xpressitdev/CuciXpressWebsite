@@ -318,10 +318,12 @@ export default function Admin() {
                 <BarChart3 className="w-4 h-4" />
                 Dashboard
               </TabsTrigger>
-              <TabsTrigger value="trends" className="flex items-center gap-2" data-testid="tab-trends">
-                <LineChartIcon className="w-4 h-4" />
-                Trends
-              </TabsTrigger>
+              {isManagerOrOwner && (
+                <TabsTrigger value="trends" className="flex items-center gap-2" data-testid="tab-trends">
+                  <LineChartIcon className="w-4 h-4" />
+                  Trends
+                </TabsTrigger>
+              )}
               <TabsTrigger value="orders" className="flex items-center gap-2" data-testid="tab-orders-report">
                 <ClipboardList className="w-4 h-4" />
                 Order Report
@@ -411,9 +413,11 @@ export default function Admin() {
               <DashboardTab />
             </TabsContent>
 
-            <TabsContent value="trends" className="mt-6">
-              <TrendsTab />
-            </TabsContent>
+            {isManagerOrOwner && (
+              <TabsContent value="trends" className="mt-6">
+                <TrendsTab />
+              </TabsContent>
+            )}
 
             <TabsContent value="orders" className="mt-6">
               <OrdersReportTab />
