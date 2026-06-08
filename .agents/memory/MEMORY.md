@@ -1,7 +1,6 @@
 - [Auth session cookies](auth-session-cookies.md) — customer login dropping on mobile? Check Lucia `sessionCookie.expires` (true=persistent, false=dies on tab close), not session-expiry bugs.
 - [Lane queue ordering](queue-ordering.md) — queue ordered by queue_position NULLS LAST then created_at; the 3 readers (snapshot SQL, LaneControl sort, today route SELECT) must stay in lockstep.
 - [Staging test DB](staging-test-db.md) — vitest integration tests hit STAGING (not dev/prod); a 42703 "column does not exist" 500 means staging missed a manual migration — re-apply it.
-- [Staging sandbox setup](staging-sandbox-setup.md) — clone prod config into staging via pg_dump (data-only for config tables); neon DRIVER gets search_path=public on pooler but psql shows it empty — don't be fooled.
 - [Payment methods & qr_provider](payment-methods-qr-provider.md) — wallet methods are qr_code + qr_provider (not new enums); manual Pocket QR must use `pocket_pay_qr`, never `pocket_pay` (unique-index landmine).
 - [WhatsApp receipt file share](whatsapp-receipt-share.md) — wa.me link is text-only; attach files via navigator.share, probe canShare synchronously or the fallback popup gets blocked.
 - [Tailwind dynamic classes](tailwind-dynamic-classes.md) — class strings from API/DB/concatenation render unstyled (JIT can't see them); use literal class strings in source and index in.
