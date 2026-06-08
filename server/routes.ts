@@ -204,21 +204,6 @@ function processGoogleReviews(data: any) {
 
 export async function registerRoutes(app: Express): Promise<Server> {
   // ===================================================================
-  // Public sandbox-mode flag (no auth). True only when this instance is
-  // pointed at the staging/dummy database (i.e. DATABASE_URL has been set
-  // to the STAGING_DATABASE_URL value on a forked sandbox repl). The real
-  // production site uses the prod DATABASE_URL, so these never match there
-  // and the banner stays hidden. Used by the client to show a clear
-  // "SANDBOX — TEST MODE" banner so staff never confuse it with the live site.
-  // ===================================================================
-  app.get("/api/sandbox-status", (_req, res) => {
-    const dbUrl = process.env.DATABASE_URL;
-    const stagingUrl = process.env.STAGING_DATABASE_URL;
-    const sandbox = Boolean(dbUrl && stagingUrl && dbUrl === stagingUrl);
-    res.json({ sandbox });
-  });
-
-  // ===================================================================
   // Public Live Queue snapshot (no auth). Polled ~every 15s by both
   // the /queue page and the home-page widget.
   //
