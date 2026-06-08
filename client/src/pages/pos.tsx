@@ -470,12 +470,17 @@ export default function POS() {
     }
   }, [paymentOptions, paymentKey]);
 
-  // Default to the first package as soon as the catalog loads.
+  // Default to the first package once, as soon as the catalog first loads.
+  // After that we never re-select automatically — a package is optional, so
+  // the cashier can clear it ("No Package") for voucher / wiper / interior-only
+  // sales without it snapping back to the default.
+  const didInitPackage = useRef(false);
   useEffect(() => {
-    if (catalog && !packageId && catalog.packages.length > 0) {
+    if (catalog && !didInitPackage.current && catalog.packages.length > 0) {
+      didInitPackage.current = true;
       setPackageId(catalog.packages[0].id);
     }
-  }, [catalog, packageId]);
+  }, [catalog]);
 
   const activePackage = useMemo(
     () => catalog?.packages.find((p) => p.id === packageId) ?? null,
@@ -707,9 +712,13 @@ export default function POS() {
       ? Math.max(0, cashReceivedCents - total)
       : 0;
 
+  // An order needs at least one line item to charge for: a wash package, or —
+  // for voucher / wiper / interior-only sales — at least one add-on. A package
+  // is no longer mandatory.
+  const hasLineItem = !!activePackage || selectedAddons.size > 0;
+
   const canSubmit =
-    !!activePackage &&
-    packagePrice !== null &&
+    hasLineItem &&
     plate.trim().length > 0 &&
     branchId !== null &&
     // Cash payments must record how much cash was handed over (no blank /
@@ -866,7 +875,7 @@ export default function POS() {
       // The server synthesizes a B$0 "Unlimited Xpress" line.
       const oneTap = !!vars && (vars as { unlimited?: boolean }).unlimited === true;
       const res = await apiRequest("POST", "/api/pos/orders", {
-        package_id: oneTap ? null : packageId,
+        package_id: oneTap ? null : packageId || null,
         plate: plate.trim(),
         addon_ids: oneTap ? [] : Array.from(selectedAddons.keys()),
         addon_quantities: oneTap ? undefined : Object.fromEntries(selectedAddons),
@@ -1758,6 +1767,19 @@ export default function POS() {
                       </div>
                     ));
                   })()}
+                  {/* A package is optional — let the cashier ring up a sale
+                      with no wash (e.g. just vouchers, wipers, or interior
+                      cleaning add-ons). */}
+                  <div className="flex flex-wrap gap-2 pt-1">
+                    <Button
+                      type="button"
+                      variant={!activePackage ? "default" : "outline"}
+                      onClick={() => setPackageId("")}
+                      data-testid="button-package-none"
+                    >
+                      No Package
+                    </Button>
+                  </div>
                   {activePackage?.description && (
                     <p className="text-sm text-gray-500">
                       {activePackage.description}

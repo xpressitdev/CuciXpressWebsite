@@ -6748,21 +6748,33 @@ export async function registerRoutes(app: Express): Promise<Server> {
         //    synthesize a B$0 "Unlimited Xpress" line and require the order
         //    to redeem an active *unlimited* membership (enforced in the
         //    redemption block below).
-        const isUnlimitedOneTap = !body.package_id;
+        const noPackage = !body.package_id;
+        // The streamlined subscription one-tap: no package + subscription
+        // payment redeems a free *unlimited* wash. The membership block below
+        // keys off this to require an unlimited (not pack) plan.
+        const isUnlimitedOneTap = noPackage && body.payment_method === 'subscription';
         let pkg: { id: string | null; name: string; price_cents: number };
-        if (isUnlimitedOneTap) {
-          if (body.payment_method !== 'subscription') {
-            throw new PosOrderError(400, 'package_required');
+        if (noPackage) {
+          if (body.payment_method === 'subscription') {
+            // The membership discount below zeroes the entire subtotal. With no
+            // package line, any attached add-ons would ride along for free —
+            // reject them so a packageless redemption can't be abused to give
+            // away paid extras. Paid add-ons must go through a normal package
+            // order (or be sold as a separate line).
+            if (body.addon_ids.length > 0) {
+              throw new PosOrderError(400, 'addons_not_allowed_on_unlimited');
+            }
+            pkg = { id: null, name: 'Unlimited Xpress', price_cents: 0 };
+          } else {
+            // Package-less retail order: a customer buying only add-ons
+            // (vouchers, wipers, interior-only cleaning, etc.) with no wash
+            // package. There must still be at least one add-on line, otherwise
+            // the order is empty and would total B$0.
+            if (body.addon_ids.length === 0) {
+              throw new PosOrderError(400, 'empty_order');
+            }
+            pkg = { id: null, name: 'No Package', price_cents: 0 };
           }
-          // The membership discount below zeroes the entire subtotal. With no
-          // package line, any attached add-ons would ride along for free —
-          // reject them so a packageless redemption can't be abused to give
-          // away paid extras. Paid add-ons must go through a normal package
-          // order (or be sold as a separate line).
-          if (body.addon_ids.length > 0) {
-            throw new PosOrderError(400, 'addons_not_allowed_on_unlimited');
-          }
-          pkg = { id: null, name: 'Unlimited Xpress', price_cents: 0 };
         } else {
           const pkgRows = (await tx.execute(sql`
             SELECT id, name, price_cents
