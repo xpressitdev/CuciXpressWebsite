@@ -2282,7 +2282,8 @@ export default function POS() {
                                 {o.ticket_code}
                               </span>
                               <span className="text-gray-500 text-xs truncate">
-                                {o.plate} · {formatTime(o.created_at)}
+                                {o.plate} · {formatTime(o.created_at)} ·{" "}
+                                {paymentDisplayLabel(o.payment_method, o.qr_provider ?? null)}
                               </span>
                               {isRefunded && o.refund_reason && (
                                 <span className="text-xs text-red-600 italic truncate">
