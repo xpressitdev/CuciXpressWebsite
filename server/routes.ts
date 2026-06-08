@@ -706,7 +706,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
         ref  AS (SELECT * FROM day_orders WHERE status =  'refunded')
         SELECT
           (SELECT COUNT(*)::int FROM day_orders)                                              AS today_transactions,
-          (SELECT COALESCE(SUM(total_cents),0)::bigint FROM paid)                             AS today_sales_cents,
+          (SELECT COALESCE(SUM(total_cents),0)::bigint FROM day_orders)                       AS today_sales_cents,
           (SELECT COUNT(*)::int FROM ref)                                                     AS today_refund_count,
           (SELECT COALESCE(SUM(total_cents),0)::bigint FROM ref)                              AS today_refund_total_cents,
           (SELECT COALESCE(SUM(1 + COALESCE(jsonb_array_length(addons),0)),0)::int FROM paid) AS today_items_sold,
@@ -718,7 +718,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
       const hourly = (await db.execute(sql`
         SELECT EXTRACT(HOUR FROM (created_at AT TIME ZONE 'Asia/Brunei'))::int AS hour,
-               COALESCE(SUM(CASE WHEN status <> 'refunded' THEN total_cents ELSE 0 END), 0)::bigint AS sales_cents,
+               COALESCE(SUM(total_cents), 0)::bigint AS sales_cents,
                COALESCE(SUM(CASE WHEN status =  'refunded' THEN total_cents ELSE 0 END), 0)::bigint AS refund_cents
           FROM orders
          WHERE ticket_day = ${targetDate}::date
@@ -772,7 +772,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
           today_refund_count: refundCount,
           today_refund_total_cents: refundTotal,
           today_avg_refund_cents: refundCount > 0 ? Math.round(refundTotal / refundCount) : 0,
-          today_net_sales_cents: sales,
+          today_net_sales_cents: sales - refundTotal,
           today_mdr_fee_cents: mdrFee,
           today_net_after_fees_cents: sales - refundTotal - mdrFee,
           today_active_staff: Number(tilesRow.today_active_staff ?? 0),
@@ -841,7 +841,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
       const totals = (await db.execute(sql`
         SELECT
           COUNT(*)::int                                                                                AS transactions,
-          COALESCE(SUM(CASE WHEN o.status <> 'refunded' THEN o.total_cents ELSE 0 END),0)::bigint      AS sales_cents,
+          COALESCE(SUM(o.total_cents),0)::bigint                                                        AS sales_cents,
           COUNT(*) FILTER (WHERE o.status = 'refunded')::int                                           AS refund_count,
           COALESCE(SUM(CASE WHEN o.status =  'refunded' THEN o.total_cents ELSE 0 END),0)::bigint      AS refund_total_cents,
           COALESCE(SUM(CASE WHEN o.status <> 'refunded' THEN 1 + COALESCE(jsonb_array_length(o.addons),0) ELSE 0 END),0)::int AS items_sold
@@ -911,11 +911,11 @@ export async function registerRoutes(app: Express): Promise<Server> {
           sales_cents: sales,
           refund_count: refCount,
           refund_total_cents: refundTotal,
-          net_sales_cents: sales,
+          net_sales_cents: sales - refundTotal,
           mdr_fee_cents: mdrFee,
           net_after_fees_cents: sales - refundTotal - mdrFee,
           items_sold: Number(totals.items_sold ?? 0),
-          avg_sales_cents: txCount - refCount > 0 ? Math.round(sales / paidCount) : 0,
+          avg_sales_cents: txCount - refCount > 0 ? Math.round((sales - refundTotal) / paidCount) : 0,
           avg_refund_cents: refCount > 0 ? Math.round(refundTotal / refCount) : 0,
         },
         page,
@@ -1166,7 +1166,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
           COUNT(*)::int                                                                            AS transactions,
           COUNT(*) FILTER (WHERE o.status <> 'refunded')::int                                      AS paid_count,
           COUNT(*) FILTER (WHERE o.status =  'refunded')::int                                      AS refund_count,
-          COALESCE(SUM(CASE WHEN o.status <> 'refunded' THEN o.total_cents ELSE 0 END),0)::bigint  AS sales_cents,
+          COALESCE(SUM(o.total_cents),0)::bigint                                                  AS sales_cents,
           COALESCE(SUM(CASE WHEN o.status =  'refunded' THEN o.total_cents ELSE 0 END),0)::bigint  AS refund_cents
           FROM orders o
          WHERE o.ticket_day BETWEEN ${from}::date AND ${to}::date
@@ -1184,7 +1184,9 @@ export async function registerRoutes(app: Express): Promise<Server> {
         const sales = Number(r.sales_cents ?? 0);
         const refund = Number(r.refund_cents ?? 0);
         const bps = mdrRateFor(rateMap, r.payment_method, r.qr_provider);
-        const fee = mdrFeeForGroup(bps, sales, refund);
+        // sales is now gross (includes refunded orders) — fee base is the full
+        // charged amount, so pass 0 refund to avoid adding it twice.
+        const fee = mdrFeeForGroup(bps, sales, 0);
         return {
           payment_method: r.payment_method,
           qr_provider: r.qr_provider,
@@ -7729,8 +7731,8 @@ export async function registerRoutes(app: Express): Promise<Server> {
     // (Progresif Ding vs Pocket QR vs Pocket Web are all 'qr_code').
     const rawRows = (await runner.execute(sql`
       SELECT payment_method, qr_provider,
-             COALESCE(SUM(CASE WHEN status <> 'refunded' THEN total_cents ELSE 0 END), 0)::int AS sales_cents,
-             COALESCE(SUM(CASE WHEN status <> 'refunded' THEN 1 ELSE 0 END), 0)::int          AS sales_count,
+             COALESCE(SUM(total_cents), 0)::int                                                AS sales_cents,
+             COUNT(*)::int                                                                     AS sales_count,
              COALESCE(SUM(CASE WHEN status =  'refunded' THEN total_cents ELSE 0 END), 0)::int AS refund_cents,
              COALESCE(SUM(CASE WHEN status =  'refunded' THEN 1 ELSE 0 END), 0)::int          AS refund_count
         FROM orders
@@ -7748,7 +7750,9 @@ export async function registerRoutes(app: Express): Promise<Server> {
     let cashSales = 0, cashRefunds = 0, mdrFeeCents = 0;
     const breakdown = rawRows.map((r) => {
       const bps = mdrRateFor(rateMap, r.payment_method, r.qr_provider);
-      const fee = mdrFeeForGroup(bps, r.sales_cents, r.refund_cents);
+      // sales_cents is now gross (includes refunded orders), so the fee base
+      // is already the full charged amount — pass 0 refund to avoid adding it twice.
+      const fee = mdrFeeForGroup(bps, r.sales_cents, 0);
       salesCents += r.sales_cents;
       salesCount += r.sales_count;
       refundCents += r.refund_cents;
