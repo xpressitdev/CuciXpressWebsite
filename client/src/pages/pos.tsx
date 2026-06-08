@@ -470,10 +470,14 @@ export default function POS() {
     }
   }, [paymentOptions, paymentKey]);
 
-  // Default to the first package as soon as the catalog loads.
+  // Default the package selection as soon as the catalog loads. Prefer the
+  // "Full Package" (the most common sale) and fall back to the first package.
   useEffect(() => {
     if (catalog && !packageId && catalog.packages.length > 0) {
-      setPackageId(catalog.packages[0].id);
+      const fullPackage = catalog.packages.find((p) =>
+        p.name.toLowerCase().includes("full package"),
+      );
+      setPackageId((fullPackage ?? catalog.packages[0]).id);
     }
   }, [catalog, packageId]);
 
