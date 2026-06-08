@@ -1702,9 +1702,14 @@ export default function POS() {
               {/* Package picker — Step 2 */}
               <Card>
                 <CardHeader>
-                  <div className="flex items-center gap-2">
+                  <div className="flex items-center gap-2 flex-wrap">
                     <StepNo n={2} />
                     <CardTitle className="text-base">Package</CardTitle>
+                    {activePackage?.description && (
+                      <p className="text-sm text-gray-500">
+                        {activePackage.description}
+                      </p>
+                    )}
                   </div>
                 </CardHeader>
                 <CardContent className="space-y-4">
@@ -1758,11 +1763,6 @@ export default function POS() {
                       </div>
                     ));
                   })()}
-                  {activePackage?.description && (
-                    <p className="text-sm text-gray-500">
-                      {activePackage.description}
-                    </p>
-                  )}
                 </CardContent>
               </Card>
 
