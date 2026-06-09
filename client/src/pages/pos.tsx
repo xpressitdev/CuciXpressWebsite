@@ -1375,6 +1375,26 @@ export default function POS() {
                 </Card>
               )}
 
+              {/* Lane control — moved to the top of the builder so lane staff
+                  see the wash + queue first, before starting a new order.
+                  Shows queued + washing cars for this branch with buttons to
+                  advance them through the wash lifecycle. Reads from the same
+                  /api/pos/orders/today query and filters client-side. */}
+              <LaneControl
+                orders={(todayData?.orders ?? []).filter(
+                  (o) => o.status === "queued" || o.status === "washing",
+                )}
+                branchId={branchId}
+                onChanged={() => {
+                  queryClient.invalidateQueries({
+                    queryKey: ["/api/pos/orders/today", branchId],
+                  });
+                  queryClient.invalidateQueries({
+                    queryKey: ["/api/queue/snapshot"],
+                  });
+                }}
+              />
+
               {/* Plate + customer — Step 1: identify the customer. The Scan
                   QR shortcut lives here as the alternate to typing the plate;
                   both resolve who the customer is (walk-in / subscriber /
@@ -2390,26 +2410,6 @@ export default function POS() {
               </Card>
             </div>
           </div>
-
-          {/* Phase 12d: Lane control. Full-width below the builder so lane
-              staff get a wide view of the wash + queue on desktop. Shows
-              the queued + washing cars for this branch with buttons to
-              advance them through the wash lifecycle. Reads from the same
-              /api/pos/orders/today query and filters client-side. */}
-          <LaneControl
-            orders={(todayData?.orders ?? []).filter(
-              (o) => o.status === "queued" || o.status === "washing",
-            )}
-            branchId={branchId}
-            onChanged={() => {
-              queryClient.invalidateQueries({
-                queryKey: ["/api/pos/orders/today", branchId],
-              });
-              queryClient.invalidateQueries({
-                queryKey: ["/api/queue/snapshot"],
-              });
-            }}
-          />
         </div>
       </main>
 
