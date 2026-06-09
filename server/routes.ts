@@ -6661,6 +6661,11 @@ export async function registerRoutes(app: Express): Promise<Server> {
     vehicle_id: z.number().int().positive().optional().nullable(),
     customer_phone: z.string().trim().min(4).max(40).optional().nullable(),
     customer_name: z.string().trim().min(1).max(120).optional().nullable(),
+    // First-time plate: the cashier records the car's brand + model so the
+    // new (or still-blank) cars row carries those details forward — when the
+    // customer later registers and claims the plate they're retained.
+    brand: z.string().trim().max(60).optional().nullable(),
+    model: z.string().trim().max(60).optional().nullable(),
     // Phase 2 (2026-05-04): wash-pack redemption. When the cashier
     // explicitly chooses payment_method='subscription', the client
     // sends the membership_id to redeem against. The server still
@@ -6896,20 +6901,38 @@ export async function registerRoutes(app: Express): Promise<Server> {
                       id DESC
              LIMIT 1
           `)).rows as any[];
+          // Normalise blank strings to NULL so a "blank-but-non-null" value
+          // can't block future enrichment via COALESCE.
+          const newBrand = body.brand?.trim() || null;
+          const newModel = body.model?.trim() || null;
           if (existing.length > 0) {
             const ex = existing[0];
+            // Fill brand/model only when the row is still blank — never
+            // overwrite details already on file (a matched car uses its own
+            // edit flow). COALESCE keeps existing values when present.
             await tx.execute(sql`
               UPDATE cars SET
                 customer_id  = COALESCE(customer_id, ${posCustomerId}),
+                brand        = COALESCE(brand, ${newBrand}),
+                model        = COALESCE(model, ${newModel}),
                 last_seen_at = now()
                WHERE id = ${ex.id}
             `);
             resolvedVehicleId = ex.id;
             if (!posCustomerId && ex.customer_id) posCustomerId = ex.customer_id;
           } else {
+            // Brand-new plate ("first timer", no data on file). The cashier
+            // must record the car's brand + model so the new cars row carries
+            // those details forward to the customer when they later claim the
+            // plate. Mirrors the client-side gate; enforced here so the rule
+            // can't be bypassed by a direct API call.
+            if (!newBrand || !newModel) {
+              throw new PosOrderError(400, 'car_details_required');
+            }
             const ins = (await tx.execute(sql`
-              INSERT INTO cars (license_plate, customer_id, last_seen_at)
-              VALUES (${plateUpper}, ${posCustomerId ?? null}, now())
+              INSERT INTO cars (license_plate, customer_id, brand, model, last_seen_at)
+              VALUES (${plateUpper}, ${posCustomerId ?? null},
+                      ${newBrand}, ${newModel}, now())
               RETURNING id
             `)).rows[0] as any;
             resolvedVehicleId = ins.id;

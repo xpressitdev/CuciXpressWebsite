@@ -16,6 +16,7 @@ import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { Link } from "wouter";
 import {
   ArrowLeft,
+  Car,
   CheckCircle2,
   Clock,
   History,
@@ -341,15 +342,16 @@ export default function POS() {
   // - `matchedVehicleId` is set when the cashier picks a suggestion from
   //   the autocomplete. Cleared when they edit the plate further (so a
   //   typo correction doesn't accidentally tag the order to the wrong car).
-  // - `customerPhone/Name` are optional. When provided, the server upserts
-  //   a customers row, links it to the vehicle if it has no owner yet,
-  //   and stores the name on the order for receipts.
+  // - For a first-time plate (no match) the cashier records the car's
+  //   brand + model. We don't ask for the customer's name/phone at POS —
+  //   we don't know them. The brand/model is stored on the cars row keyed
+  //   by plate, so when the customer later registers and claims the plate,
+  //   those details are retained (and they can edit them afterwards).
   const [matchedVehicleId, setMatchedVehicleId] = useState<number | null>(null);
   const [vehicleSuggestions, setVehicleSuggestions] = useState<VehicleSuggestion[]>([]);
   const [showSuggestions, setShowSuggestions] = useState<boolean>(false);
-  const [showCustomerForm, setShowCustomerForm] = useState<boolean>(false);
-  const [customerPhone, setCustomerPhone] = useState<string>("");
-  const [customerName, setCustomerName] = useState<string>("");
+  const [newCarBrand, setNewCarBrand] = useState<string>("");
+  const [newCarModel, setNewCarModel] = useState<string>("");
   // Inline edit of the matched car's brand/model when the cashier spots
   // wrong details on a plate lookup. Saving updates the single cars row,
   // which is reflected everywhere the car appears (customer dashboard,
@@ -739,11 +741,20 @@ export default function POS() {
       ? Math.max(0, cashReceivedCents - total)
       : 0;
 
+  // A first-time plate (no matched car on file) requires the cashier to
+  // record the car's brand + model so the cars row carries those details
+  // forward to the customer when they later claim the plate.
+  const isFirstTimerPlate = matchedVehicleId === null && plate.trim().length > 0;
+  const newCarDetailsComplete =
+    newCarBrand.trim().length > 0 && newCarModel.trim().length > 0;
+
   const canSubmit =
     !!activePackage &&
     packagePrice !== null &&
     plate.trim().length > 0 &&
     branchId !== null &&
+    // First-time plate: brand + model are mandatory before the sale.
+    (!isFirstTimerPlate || newCarDetailsComplete) &&
     // Cash payments must record how much cash was handed over (no blank /
     // "exact" shortcut) so the drawer reconciles and the receipt shows change.
     (paymentMethod !== "cash" || cashReceivedCents != null) &&
@@ -756,36 +767,26 @@ export default function POS() {
     // catching it client-side avoids a confusing 400 round-trip.
     (paymentMethod !== "subscription" || activeMembership !== null);
 
-  // When picking a suggestion, prefill plate + customer info (if any) so
-  // the cashier doesn't retype it. They can still edit before submitting.
+  // When picking a suggestion, prefill the plate so the cashier doesn't
+  // retype it. They can still edit before submitting.
   const pickVehicle = (v: VehicleSuggestion) => {
     setPlate(v.license_plate);
     setMatchedVehicleId(v.id);
     setEditingVehicle(false);
     setShowSuggestions(false);
     setVehicleSuggestions([]);
-    if (v.customer) {
-      // Keep the name + phone in state so they still ride along on the order
-      // (receipt + customer link), but don't pop open the manual form — the
-      // matched-vehicle card already shows this customer, so the form would
-      // just duplicate it.
-      setCustomerPhone(v.customer.phone);
-      setCustomerName(v.customer.name);
-      setShowCustomerForm(false);
-    } else {
-      // Picked a car with no customer on file — clear any leftover entry so
-      // we don't accidentally tag the wrong person.
-      setCustomerPhone("");
-      setCustomerName("");
-    }
+    // An existing car already has its details on file (and the server links
+    // the customer via the vehicle), so clear any first-timer brand/model
+    // entry — it only applies to brand-new plates.
+    setNewCarBrand("");
+    setNewCarModel("");
   };
 
   const clearMatchedVehicle = () => {
     setMatchedVehicleId(null);
     setEditingVehicle(false);
-    setShowCustomerForm(false);
-    setCustomerPhone("");
-    setCustomerName("");
+    setNewCarBrand("");
+    setNewCarModel("");
   };
 
   // ----- Edit a matched car's brand/model -----
@@ -914,8 +915,11 @@ export default function POS() {
         branch_id: branchId,
         item_notes: oneTap ? null : itemNotes.trim() || null,
         vehicle_id: matchedVehicleId,
-        customer_phone: oneTap ? null : customerPhone.trim() || null,
-        customer_name: oneTap ? null : customerName.trim() || null,
+        // First-time plate: send the car's brand + model so the server
+        // stores them on the new (or still-blank) cars row. Ignored when an
+        // existing vehicle is matched.
+        brand: oneTap ? null : newCarBrand.trim() || null,
+        model: oneTap ? null : newCarModel.trim() || null,
         membership_id:
           (oneTap || paymentMethod === "subscription") && activeMembership
             ? activeMembership.id
@@ -955,7 +959,9 @@ export default function POS() {
         title: "Could not create order",
         description: msg.includes("409")
           ? "Ticket collision — please try again."
-          : msg,
+          : msg.includes("car_details_required")
+            ? "First-time plate — enter the car's brand and model first."
+            : msg,
         variant: "destructive",
       });
     },
@@ -971,9 +977,8 @@ export default function POS() {
     setMatchedVehicleId(null);
     setVehicleSuggestions([]);
     setShowSuggestions(false);
-    setCustomerPhone("");
-    setCustomerName("");
-    setShowCustomerForm(false);
+    setNewCarBrand("");
+    setNewCarModel("");
     setDiscountId("none");
     setPromoInput("");
     setAppliedPromo(null);
@@ -1671,54 +1676,42 @@ export default function POS() {
                     </div>
                   )}
 
-                  {!vehicleHistory?.customer && !showCustomerForm && (
-                    <button
-                      type="button"
-                      onClick={() => setShowCustomerForm(true)}
-                      className="text-xs text-cuci-primary hover:underline inline-flex items-center gap-1"
-                      data-testid="button-show-customer-form"
-                    >
-                      <User className="w-3 h-3" />
-                      + Add customer info (optional)
-                    </button>
-                  )}
-
-                  {!vehicleHistory?.customer && showCustomerForm && (
+                  {/* First-time plate — no car on file yet. The cashier must
+                      record the brand + model so the new cars row carries
+                      those details forward to the customer when they later
+                      claim the plate. We don't ask for the customer's name or
+                      phone here — at the drive-thru we don't know them. */}
+                  {isFirstTimerPlate && (
                     <div className="space-y-2 pt-1 border-t border-gray-100">
-                      <div className="flex items-center justify-between">
+                      <div className="flex items-center gap-1.5">
+                        <Car className="w-3.5 h-3.5 text-gray-500" />
                         <Label className="text-xs text-gray-600">
-                          Customer (optional)
+                          New car details{" "}
+                          <span className="text-red-500">(required)</span>
                         </Label>
-                        <div className="flex items-center gap-3">
-                          <button
-                            type="button"
-                            onClick={() => {
-                              setShowCustomerForm(false);
-                              setCustomerPhone("");
-                              setCustomerName("");
-                            }}
-                            className="text-xs text-gray-400 hover:text-gray-700"
-                            data-testid="button-hide-customer-form"
-                          >
-                            Remove
-                          </button>
-                        </div>
                       </div>
                       <div className="grid grid-cols-2 gap-2">
                         <Input
-                          value={customerPhone}
-                          onChange={(e) => setCustomerPhone(e.target.value)}
-                          placeholder="Phone"
-                          inputMode="tel"
-                          data-testid="input-customer-phone"
+                          value={newCarBrand}
+                          onChange={(e) => setNewCarBrand(e.target.value)}
+                          placeholder="Brand (e.g. Toyota)"
+                          aria-label="Car brand"
+                          data-testid="input-new-car-brand"
                         />
                         <Input
-                          value={customerName}
-                          onChange={(e) => setCustomerName(e.target.value)}
-                          placeholder="Name"
-                          data-testid="input-customer-name"
+                          value={newCarModel}
+                          onChange={(e) => setNewCarModel(e.target.value)}
+                          placeholder="Model (e.g. Hilux)"
+                          aria-label="Car model"
+                          data-testid="input-new-car-model"
                         />
                       </div>
+                      {!newCarDetailsComplete && (
+                        <p className="text-xs text-gray-400">
+                          First-time plate — enter the car's brand and model to
+                          continue.
+                        </p>
+                      )}
                     </div>
                   )}
                 </CardContent>
