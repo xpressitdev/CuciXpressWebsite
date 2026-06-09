@@ -505,6 +505,11 @@ export default function POS() {
 
   const subtotal = (packagePrice ?? 0) + addonsTotal;
 
+  // Clicking a payment-method tile filters the transaction list below it to
+  // just that method. null = show everything. The filter key is the same
+  // display label used to build the tiles, so matching is exact.
+  const [methodFilter, setMethodFilter] = useState<string | null>(null);
+
   // Today's sales summary for the right-rail: net sales (excluding refunds),
   // refund total, and a per-payment-method breakdown so the cashier can see
   // how much came in via Cash / Bank Transfer / each wallet at a glance.
@@ -537,6 +542,29 @@ export default function POS() {
     );
     return { salesCents, salesCount, refundCents, refundCount, methods };
   }, [todayData]);
+
+  // Transaction list, filtered to the selected payment-method tile (if any).
+  const visibleTodayOrders = useMemo(() => {
+    const orders = todayData?.orders ?? [];
+    if (!methodFilter) return orders;
+    return orders.filter(
+      (o) =>
+        paymentDisplayLabel(o.payment_method, o.qr_provider ?? null) ===
+        methodFilter,
+    );
+  }, [todayData, methodFilter]);
+
+  // Drop a stale filter when its method no longer has a tile (e.g. the data
+  // refreshed, the branch changed, or that method's only order was refunded)
+  // so the list never stays silently filtered by an invisible selection.
+  useEffect(() => {
+    if (
+      methodFilter &&
+      !todaySummary.methods.some((m) => m.label === methodFilter)
+    ) {
+      setMethodFilter(null);
+    }
+  }, [todaySummary, methodFilter]);
 
   // Debounced plate autocomplete. Hits /api/pos/vehicles/search 200ms after
   // the user pauses typing. Skipped when a suggestion is already matched.
@@ -2230,23 +2258,40 @@ export default function POS() {
                   <CardContent className="pt-0">
                     {todaySummary.methods.length > 0 && (
                       <div className="grid gap-2 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
-                        {todaySummary.methods.map((m) => (
-                          <div
-                            key={m.label}
-                            className="flex items-center justify-between rounded-md border-2 border-black bg-gray-50 px-3 py-2 text-sm"
-                            data-testid={`tile-payment-${m.label}`}
-                          >
-                            <span className="min-w-0 truncate font-medium text-gray-700">
-                              {m.label}
-                              <span className="ml-1 text-xs text-gray-400">
-                                ×{m.count}
+                        {todaySummary.methods.map((m) => {
+                          const active = methodFilter === m.label;
+                          return (
+                            <button
+                              key={m.label}
+                              type="button"
+                              onClick={() =>
+                                setMethodFilter(active ? null : m.label)
+                              }
+                              aria-pressed={active}
+                              title={
+                                active
+                                  ? "Click to show all transactions"
+                                  : `Show only ${m.label} transactions`
+                              }
+                              className={`flex items-center justify-between rounded-md border-2 px-3 py-2 text-sm text-left transition-colors cursor-pointer ${
+                                active
+                                  ? "border-black bg-emerald-100 ring-2 ring-emerald-500"
+                                  : "border-black bg-gray-50 hover:bg-gray-100"
+                              }`}
+                              data-testid={`tile-payment-${m.label}`}
+                            >
+                              <span className="min-w-0 truncate font-medium text-gray-700">
+                                {m.label}
+                                <span className="ml-1 text-xs text-gray-400">
+                                  ×{m.count}
+                                </span>
                               </span>
-                            </span>
-                            <span className="ml-2 shrink-0 font-extrabold">
-                              {formatBND(m.cents)}
-                            </span>
-                          </div>
-                        ))}
+                              <span className="ml-2 shrink-0 font-extrabold">
+                                {formatBND(m.cents)}
+                              </span>
+                            </button>
+                          );
+                        })}
                       </div>
                     )}
                     {todaySummary.refundCount > 0 && (
@@ -2260,14 +2305,39 @@ export default function POS() {
                     )}
                   </CardContent>
                 )}
+                {methodFilter && (
+                  <CardContent className="pt-0 pb-2">
+                    <div className="flex items-center justify-between gap-2 rounded-md bg-emerald-50 border-2 border-emerald-500 px-3 py-1.5 text-sm">
+                      <span className="font-medium text-emerald-800 truncate">
+                        Showing {methodFilter} only ·{" "}
+                        {visibleTodayOrders.length}{" "}
+                        {visibleTodayOrders.length === 1
+                          ? "transaction"
+                          : "transactions"}
+                      </span>
+                      <Button
+                        type="button"
+                        variant="ghost"
+                        size="sm"
+                        className="h-6 px-2 text-xs text-emerald-700 hover:text-emerald-900 hover:bg-emerald-100 shrink-0"
+                        onClick={() => setMethodFilter(null)}
+                        data-testid="button-clear-payment-filter"
+                      >
+                        Clear filter
+                      </Button>
+                    </div>
+                  </CardContent>
+                )}
                 <CardContent className="max-h-96 overflow-y-auto">
-                  {!todayData || todayData.orders.length === 0 ? (
+                  {!todayData || visibleTodayOrders.length === 0 ? (
                     <p className="text-sm text-gray-500 text-center py-4">
-                      No orders yet today.
+                      {methodFilter
+                        ? `No ${methodFilter} transactions today.`
+                        : "No orders yet today."}
                     </p>
                   ) : (
                     <div className="grid gap-2 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
-                      {todayData.orders.map((o) => {
+                      {visibleTodayOrders.map((o) => {
                         const isRefunded = o.status === "refunded";
                         return (
                           <div
