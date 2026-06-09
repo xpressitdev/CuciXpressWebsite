@@ -3867,6 +3867,12 @@ export async function registerRoutes(app: Express): Promise<Server> {
       const plateNorm  = plateUpper.replace(/\s+/g, '');
       const phoneStr   = String(paymentData.phone).trim();
 
+      // Override the client-supplied amount with the server-authoritative
+      // package price so Pocket Pay is always charged the correct amount.
+      // This prevents an attacker from submitting a lower amount for an
+      // expensive package and still receiving a paid order.
+      paymentData.amount = priceCents / 100;
+
       // Process payment through Pocket Pay
       const result = await processPocketPayPayment(paymentData);
       
