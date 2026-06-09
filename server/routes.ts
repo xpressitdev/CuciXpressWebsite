@@ -1056,8 +1056,8 @@ export async function registerRoutes(app: Express): Promise<Server> {
       const dash = (v: any) => (v === null || v === undefined || v === '' ? '-' : v);
       const cents = (n: number | null | undefined) => (n == null ? 0 : n / 100);
 
-      const xlsxMod = await import('xlsx');
-      const XLSX = (xlsxMod as any).default ?? xlsxMod;
+      const ExcelJSMod = await import('exceljs');
+      const ExcelJS = (ExcelJSMod as any).default ?? ExcelJSMod;
 
       const HEADERS = [
         'Source.Name', 'ID', 'Receipt Date', 'Receipt Time', 'Store Name',
@@ -1068,10 +1068,18 @@ export async function registerRoutes(app: Express): Promise<Server> {
         'Item Notes', 'Extracted_Brand', 'Extracted_Model', 'License_Plate',
       ];
 
-      const aoa: any[][] = [HEADERS];
+      const wb = new ExcelJS.Workbook();
+      const ws = wb.addWorksheet('cuci xpress');
+
+      ws.columns = HEADERS.map((h: string) => ({
+        header: h,
+        key: h,
+        width: Math.min(28, Math.max(10, h.length + 2)),
+      }));
+
       for (const r of rows) {
         const { dateSerial, timeFrac } = excelDateParts(new Date(r.created_at));
-        aoa.push([
+        const excelRow = ws.addRow([
           'cucixpress_live_export',
           r.kedaipos_id ?? r.id,
           dateSerial,
@@ -1098,23 +1106,13 @@ export async function registerRoutes(app: Express): Promise<Server> {
           dash(r.car_model),
           dash(r.plate),
         ]);
+        // Format columns C (Receipt Date) and D (Receipt Time) as date/time
+        // so Power BI / Excel render them correctly.
+        excelRow.getCell(3).numFmt = 'yyyy-mm-dd';
+        excelRow.getCell(4).numFmt = 'hh:mm:ss';
       }
 
-      const ws = XLSX.utils.aoa_to_sheet(aoa);
-      // Format columns C (Receipt Date) and D (Receipt Time) as date/time
-      // so Power BI / Excel render them correctly.
-      const range = XLSX.utils.decode_range(ws['!ref']);
-      for (let R = 1; R <= range.e.r; R++) {
-        const dateCell = ws[XLSX.utils.encode_cell({ r: R, c: 2 })];
-        const timeCell = ws[XLSX.utils.encode_cell({ r: R, c: 3 })];
-        if (dateCell) { dateCell.t = 'n'; dateCell.z = 'yyyy-mm-dd'; }
-        if (timeCell) { timeCell.t = 'n'; timeCell.z = 'hh:mm:ss'; }
-      }
-      ws['!cols'] = HEADERS.map((h) => ({ wch: Math.min(28, Math.max(10, h.length + 2)) }));
-
-      const wb = XLSX.utils.book_new();
-      XLSX.utils.book_append_sheet(wb, ws, 'cuci xpress');
-      const buf: Buffer = XLSX.write(wb, { type: 'buffer', bookType: 'xlsx' });
+      const buf = Buffer.from(await wb.xlsx.writeBuffer());
 
       const pad = (n: number) => String(n).padStart(2, '0');
       const stamp = (() => {
