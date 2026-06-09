@@ -1306,6 +1306,12 @@ export default function POS() {
                 branchId={branchId}
                 canManage={canSwitchBranch}
               />
+              {/* Branch availability — pop-out button (open / closed /
+                  maintenance / busy). Lives up here with Open shift and
+                  Daily report since it's set occasionally, not per sale. */}
+              {branchId !== null && (
+                <BranchStatusControl branchId={branchId} />
+              )}
               <button
                 onClick={logout}
                 className="cuci-cta bg-white text-gray-900 px-4 py-2 rounded-full inline-flex items-center gap-2 text-sm"
@@ -1367,13 +1373,6 @@ export default function POS() {
                     </Select>
                   </CardContent>
                 </Card>
-              )}
-
-              {/* Branch availability — cashiers control their own branch's
-                  live status (open / closed / maintenance / busy) plus a
-                  short reason note shown to customers on the live queue. */}
-              {branchId !== null && (
-                <BranchStatusControl branchId={branchId} />
               )}
 
               {/* Plate + customer — Step 1: identify the customer. The Scan
@@ -2555,6 +2554,7 @@ function StepNo({ n }: { n: number }) {
 function BranchStatusControl({ branchId }: { branchId: number }) {
   const { toast } = useToast();
   const queryClient = useQueryClient();
+  const [open, setOpen] = useState(false);
 
   const { data: snapshot } = useQuery<{
     branches: Array<{ id: number; status?: string | null; status_note?: string | null }>;
@@ -2602,78 +2602,105 @@ function BranchStatusControl({ branchId }: { branchId: number }) {
 
   const dirty = status !== currentStatus || note.trim() !== currentNote.trim();
   const selected = BRANCH_STATUS_OPTIONS.find((o) => o.value === status);
-  const accent =
-    status === "open" ? "bg-green-600"
-    : status === "busy" ? "bg-amber-500"
-    : status === "maintenance" ? "bg-blue-600"
+  const accentFor = (s: typeof status) =>
+    s === "open" ? "bg-green-600"
+    : s === "busy" ? "bg-amber-500"
+    : s === "maintenance" ? "bg-blue-600"
     : "bg-gray-500";
+  const currentLabel =
+    BRANCH_STATUS_OPTIONS.find((o) => o.value === currentStatus)?.label ?? "Open";
 
   return (
-    <Card data-testid="card-branch-status">
-      <CardHeader>
-        <CardTitle className="text-base flex items-center gap-2">
-          <Activity className="w-4 h-4" />
-          Branch availability
-          <Badge className={`${accent} text-white ml-auto`}>
-            {BRANCH_STATUS_OPTIONS.find((o) => o.value === currentStatus)?.label ?? "Open"}
-          </Badge>
-        </CardTitle>
-      </CardHeader>
-      <CardContent className="space-y-3">
-        <p className="text-xs text-gray-500">
-          Tell customers what's happening at your branch right now. This shows on
-          the public live queue.
-        </p>
-        <div>
-          <Label className="text-xs">Status</Label>
-          <Select
-            value={status}
-            onValueChange={(v) => {
-              setTouched(true);
-              setStatus(v as typeof status);
-            }}
-          >
-            <SelectTrigger data-testid="select-branch-status">
-              <SelectValue />
-            </SelectTrigger>
-            <SelectContent>
-              {BRANCH_STATUS_OPTIONS.map((o) => (
-                <SelectItem key={o.value} value={o.value}>
-                  {o.label}
-                </SelectItem>
-              ))}
-            </SelectContent>
-          </Select>
-          {selected && (
-            <p className="text-[11px] text-gray-500 mt-1">{selected.hint}</p>
-          )}
-        </div>
-        <div>
-          <Label className="text-xs">Reason note (optional)</Label>
-          <Input
-            value={note}
-            maxLength={160}
-            placeholder="e.g. water supply issue, back by 3pm"
-            onChange={(e) => {
-              setTouched(true);
-              setNote(e.target.value);
-            }}
-            data-testid="input-branch-status-note"
-          />
-          <p className="text-[11px] text-gray-400 mt-1">
-            Shown to customers under your branch on the live queue.
-          </p>
-        </div>
-        <Button
-          className="w-full cuci-cta border-2 border-black"
-          disabled={!dirty || save.isPending}
-          onClick={() => save.mutate()}
-          data-testid="button-save-branch-status"
+    <>
+      <button
+        onClick={() => setOpen(true)}
+        className="cuci-cta bg-white text-gray-900 px-4 py-2 rounded-full inline-flex items-center gap-2 text-sm"
+        data-testid="button-branch-availability"
+      >
+        <Activity className="w-4 h-4" />
+        Branch
+        <Badge className={`${accentFor(currentStatus)} text-white`}>
+          {currentLabel}
+        </Badge>
+      </button>
+
+      <Dialog
+        open={open}
+        onOpenChange={(o) => {
+          setOpen(o);
+          // Drop unsaved edits when the cashier dismisses the dialog so the
+          // form re-syncs to the live server value next time it opens.
+          if (!o) setTouched(false);
+        }}
+      >
+        <DialogContent
+          className="cuci-card border-2 border-black sm:max-w-md"
+          data-testid="card-branch-status"
         >
-          {save.isPending ? "Saving…" : "Update status"}
-        </Button>
-      </CardContent>
-    </Card>
+          <DialogHeader>
+            <div className="cuci-eyebrow">Live status</div>
+            <DialogTitle className="text-2xl font-extrabold tracking-tight flex items-center gap-2">
+              <Activity className="w-5 h-5 text-cuci-primary" />
+              Branch <span className="text-cuci-primary">availability</span>
+            </DialogTitle>
+          </DialogHeader>
+          <div className="space-y-3">
+            <p className="text-xs text-gray-500">
+              Tell customers what's happening at your branch right now. This shows on
+              the public live queue.
+            </p>
+            <div>
+              <Label className="text-xs">Status</Label>
+              <Select
+                value={status}
+                onValueChange={(v) => {
+                  setTouched(true);
+                  setStatus(v as typeof status);
+                }}
+              >
+                <SelectTrigger data-testid="select-branch-status">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  {BRANCH_STATUS_OPTIONS.map((o) => (
+                    <SelectItem key={o.value} value={o.value}>
+                      {o.label}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+              {selected && (
+                <p className="text-[11px] text-gray-500 mt-1">{selected.hint}</p>
+              )}
+            </div>
+            <div>
+              <Label className="text-xs">Reason note (optional)</Label>
+              <Input
+                value={note}
+                maxLength={160}
+                placeholder="e.g. water supply issue, back by 3pm"
+                onChange={(e) => {
+                  setTouched(true);
+                  setNote(e.target.value);
+                }}
+                data-testid="input-branch-status-note"
+              />
+              <p className="text-[11px] text-gray-400 mt-1">
+                Shown to customers under your branch on the live queue.
+              </p>
+            </div>
+            <Button
+              className="w-full cuci-cta border-2 border-black"
+              disabled={!dirty || save.isPending}
+              onClick={() => save.mutate()}
+              data-testid="button-save-branch-status"
+            >
+              {save.isPending ? "Saving…" : "Update status"}
+            </Button>
+          </div>
+        </DialogContent>
+      </Dialog>
+    </>
   );
 }
 
