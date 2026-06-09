@@ -26,15 +26,14 @@ const REASON_TEXT: Record<string, string> = {
   invalid_request: "Please double-check the details and try again.",
   invalid_purpose: "This action is temporarily unavailable.",
   invalid_identifier: "That doesn't look like a valid phone or email.",
-  no_account: "We couldn't find an account. Try registering instead.",
+  no_account: "Incorrect code or identifier. Please check and try again.",
   no_active_code: "No active code. Please request a new one.",
   expired: "That code has expired. Please request a new one.",
   too_many_attempts: "Too many wrong tries. Request a new code.",
+  too_many_requests: "Too many attempts. Please wait a few minutes and try again.",
   wrong_code: "That code is incorrect.",
-  phone_taken: "This phone number is already registered. Try signing in.",
-  email_taken: "This email is already registered. Try signing in.",
-  plate_taken:
-    "This plate is already linked to another account. Contact us if this is an error.",
+  conflict:
+    "One of the details you entered is already linked to another account. Please sign in or contact us if you need help.",
   server_error: "Something went wrong on our side. Please retry.",
 };
 
@@ -56,14 +55,12 @@ export default function LoginPage() {
 
   // Sign-in form state
   const [identifier, setIdentifier] = useState("");
-  const [emailHint, setEmailHint] = useState("");
 
   // Register form state
   const [phone, setPhone] = useState("");
   const [name, setName] = useState("");
   const [email, setEmail] = useState("");
   const [plate, setPlate] = useState("");
-  const [plateSuggestions, setPlateSuggestions] = useState<string[]>([]);
 
   const [code, setCode] = useState("");
   const [busy, setBusy] = useState(false);
@@ -73,38 +70,8 @@ export default function LoginPage() {
     setTab(t);
     setStep("form");
     setCode("");
-    setEmailHint("");
   };
 
-  // Plate autocomplete for the Register tab.
-  useEffect(() => {
-    if (tab !== "register") return;
-    const q = plate.trim();
-    if (q.length < 2) {
-      setPlateSuggestions([]);
-      return;
-    }
-    const handle = setTimeout(async () => {
-      try {
-        const r = await fetch(
-          `/api/auth/customer/plate-suggest?q=${encodeURIComponent(q)}`,
-        );
-        if (!r.ok) return;
-        const data = (await r.json()) as { plates: { license_plate: string }[] };
-        const exact = data.plates.find(
-          (p) =>
-            p.license_plate.toUpperCase().replace(/\s+/g, "") ===
-            q.toUpperCase().replace(/\s+/g, ""),
-        );
-        setPlateSuggestions(
-          exact ? [] : data.plates.map((p) => p.license_plate),
-        );
-      } catch {
-        /* ignore */
-      }
-    }, 200);
-    return () => clearTimeout(handle);
-  }, [plate, tab]);
 
   const handleError = (data: any) => {
     toast({
@@ -127,10 +94,11 @@ export default function LoginPage() {
       });
       const data = await res.json();
       if (!res.ok || !data.ok) return handleError(data);
-      setEmailHint(data.emailHint ?? "");
+      // The server always returns 200 whether or not an account exists,
+      // so we can't confirm account existence here. Show a generic message.
       toast({
         title: "Code sent",
-        description: `We've emailed a 6-digit code to ${data.emailHint ?? "your email"}.`,
+        description: "If an account exists for that identifier, we've emailed a 6-digit code.",
       });
       setStep("code");
     } finally {
@@ -407,27 +375,6 @@ export default function LoginPage() {
                     className="border-2 border-black focus-visible:ring-cuci-primary uppercase tracking-wider"
                     data-testid="input-register-plate"
                   />
-                  {plateSuggestions.length > 0 && (
-                    <div
-                      className="absolute z-20 left-0 right-0 mt-1 max-h-44 overflow-y-auto rounded-md border-2 border-black bg-white shadow-lg"
-                      data-testid="popover-plate-suggestions"
-                    >
-                      {plateSuggestions.map((p) => (
-                        <button
-                          key={p}
-                          type="button"
-                          onClick={() => {
-                            setPlate(p);
-                            setPlateSuggestions([]);
-                          }}
-                          className="w-full text-left px-3 py-2 text-sm font-mono hover:bg-cuci-primary/10 border-b border-gray-100 last:border-0"
-                          data-testid={`option-plate-${p.replace(/\s+/g, "")}`}
-                        >
-                          {p}
-                        </button>
-                      ))}
-                    </div>
-                  )}
                 </div>
                 <Button
                   onClick={startRegister}
@@ -454,7 +401,7 @@ export default function LoginPage() {
                   <p className="text-sm text-gray-700">
                     Code sent to{" "}
                     <span className="font-bold text-cuci-primary">
-                      {tab === "signin" ? emailHint || "your email" : email}
+                      {tab === "signin" ? "your email" : email}
                     </span>
                   </p>
                 </div>

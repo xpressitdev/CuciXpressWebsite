@@ -4973,6 +4973,28 @@ export async function registerRoutes(app: Express): Promise<Server> {
   // Light email shape check; we don't try to be RFC-strict.
   const looksLikeValidEmail = (s: string) => /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(s);
 
+  /**
+   * Minimal in-memory rate limiter for the customer auth endpoints.
+   * Tracks hit counts per key inside a fixed time window. Entries are
+   * evicted lazily on the next check after the window expires, so memory
+   * stays bounded to the number of unique keys seen within one window.
+   *
+   * Not suitable as a cluster-wide solution, but sufficient for a single-
+   * process server: each dyno enforces its own window independently.
+   */
+  const _rl = new Map<string, { count: number; windowStart: number }>();
+  function checkRateLimit(key: string, maxHits: number, windowMs: number): boolean {
+    const now = Date.now();
+    const entry = _rl.get(key);
+    if (!entry || now - entry.windowStart >= windowMs) {
+      _rl.set(key, { count: 1, windowStart: now });
+      return true; // within limit
+    }
+    entry.count += 1;
+    if (entry.count > maxHits) return false; // exceeded
+    return true;
+  }
+
   const registerSchema = z.object({
     phone: z.string().min(7).max(20),
     name: z.string().min(1).max(100),
@@ -5021,6 +5043,13 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
   // POST /api/auth/customer/register/start
   app.post('/api/auth/customer/register/start', async (req, res) => {
+    const ip = req.ip ?? 'unknown';
+
+    // Per-IP: max 10 OTP send attempts per 10 minutes.
+    if (!checkRateLimit(`reg_start_ip:${ip}`, 10, 10 * 60 * 1000)) {
+      return res.status(429).json({ ok: false, reason: 'too_many_requests' });
+    }
+
     const parsed = registerSchema.safeParse(req.body);
     if (!parsed.success) {
       return res.status(400).json({ ok: false, reason: 'invalid_request' });
@@ -5032,8 +5061,23 @@ export async function registerRoutes(app: Express): Promise<Server> {
       return res.status(400).json({ ok: false, reason: 'invalid_request' });
     }
 
+    // Per-email: max 3 OTP sends per 15 minutes to avoid inbox flooding.
+    if (!checkRateLimit(`reg_start_id:${email}`, 3, 15 * 60 * 1000)) {
+      return res.status(429).json({ ok: false, reason: 'too_many_requests' });
+    }
+
     const conflict = await findRegistrationConflict({ phone, email, plateNorm });
-    if (conflict) return res.status(409).json({ ok: false, reason: conflict });
+
+    // If any field is already taken, do NOT send an OTP and do NOT reveal
+    // the conflict to the caller. Return the same 200-shaped response as a
+    // real send so the endpoint is non-oracular: an attacker probing which
+    // emails/phones/plates are registered gets an indistinguishable result.
+    // The user will learn about the conflict at verify time (no_active_code),
+    // which is only reached after submitting a 6-digit code and therefore
+    // cannot be used for unauthenticated enumeration.
+    if (conflict) {
+      return res.json({ ok: true, expiresAt: null, ttlSeconds: OTP_CONSTANTS.TTL_SECONDS });
+    }
 
     const result = await sendOtp({ identifier: email, purpose: 'verify_email', ip: req.ip ?? null });
     if (!result.ok) return res.status(400).json(result);
@@ -5165,15 +5209,36 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
   // POST /api/auth/customer/signin/start
   app.post('/api/auth/customer/signin/start', async (req, res) => {
+    const ip = req.ip ?? 'unknown';
+
+    // Per-IP: max 10 OTP send attempts per 10 minutes.
+    if (!checkRateLimit(`signin_start_ip:${ip}`, 10, 10 * 60 * 1000)) {
+      return res.status(429).json({ ok: false, reason: 'too_many_requests' });
+    }
+
     const parsed = signinStartSchema.safeParse(req.body);
     if (!parsed.success) {
       return res.status(400).json({ ok: false, reason: 'invalid_request' });
     }
-    const user = await findCustomerByIdentifier(parsed.data.identifier);
-    if (!user) {
-      // Distinct reason so the UI can nudge them to the Register tab.
-      return res.status(404).json({ ok: false, reason: 'no_account' });
+
+    const normIdentifier = parsed.data.identifier.trim().toLowerCase();
+
+    // Per-identifier: max 3 OTP sends per 15 minutes to prevent inbox flooding.
+    if (!checkRateLimit(`signin_start_id:${normIdentifier}`, 3, 15 * 60 * 1000)) {
+      return res.status(429).json({ ok: false, reason: 'too_many_requests' });
     }
+
+    const user = await findCustomerByIdentifier(parsed.data.identifier);
+
+    // Always return 200 regardless of whether the identifier matches an
+    // account. Returning a distinct 404/reason for unknown identifiers
+    // allows unauthenticated callers to enumerate which emails, phone
+    // numbers, and plates are registered. The UI should show a generic
+    // "if your account exists, an OTP was sent" message.
+    if (!user) {
+      return res.json({ ok: true, expiresAt: null, ttlSeconds: OTP_CONSTANTS.TTL_SECONDS });
+    }
+
     const result = await sendOtp({
       identifier: user.email.toLowerCase(),
       purpose: 'login',
@@ -5182,7 +5247,6 @@ export async function registerRoutes(app: Express): Promise<Server> {
     if (!result.ok) return res.status(400).json(result);
     res.json({
       ok: true,
-      emailHint: maskEmail(user.email),
       expiresAt: result.expiresAt,
       ttlSeconds: OTP_CONSTANTS.TTL_SECONDS,
     });
@@ -5219,29 +5283,12 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
-  // Public plate autocomplete for the customer login screen. Returns
-  // *only* the plate string and a coarse "we know this car" hint — no
-  // owner name, phone, or visit count — so an outsider can't fish for
-  // someone else's identity. Used by the login form to nudge a returning
-  // customer toward the exact plate spelling we have on file.
-  app.get('/api/auth/customer/plate-suggest', async (req, res) => {
-    const q = String(req.query.q ?? '').trim();
-    if (q.length < 2) return res.json({ plates: [] });
-    const norm = q.toUpperCase().replace(/\s+/g, '');
-    try {
-      const rows = (await db.execute(sql`
-        SELECT license_plate
-          FROM cars
-         WHERE UPPER(REGEXP_REPLACE(license_plate, '\\s+', '', 'g')) LIKE ${norm + '%'}
-         ORDER BY COALESCE(last_seen_at, 'epoch'::timestamptz) DESC, id DESC
-         LIMIT 8
-      `)).rows.map((r: any) => ({ license_plate: r.license_plate as string }));
-      res.json({ plates: rows });
-    } catch (err) {
-      console.error('[customer.plate-suggest] failed:', err);
-      res.json({ plates: [] });
-    }
-  });
+  // NOTE: The public plate-suggest endpoint has been removed.
+  // Returning raw stored license plates to unauthenticated callers
+  // constitutes an unauthorized disclosure of customer vehicle data —
+  // prefix throttling and minimum-length requirements only slow
+  // harvesting, they do not prevent it. Customers are expected to
+  // type their own plate directly; there is no autocomplete.
 
   // ---- Customer dashboard endpoints (Lucia-protected) ---------------
   app.get('/api/customer/me', requireLuciaUser, async (req, res) => {
