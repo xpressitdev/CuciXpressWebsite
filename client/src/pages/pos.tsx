@@ -1333,16 +1333,18 @@ export default function POS() {
           <div className="grid lg:grid-cols-3 gap-6">
             {/* --- Left: Order builder ----------------------------------- */}
             <div className="lg:col-span-2 space-y-4">
-              {/* Branch — switcher for owner/manager, locked badge for lane/cashier */}
-              <Card>
-                <CardHeader>
-                  <CardTitle className="text-base flex items-center gap-2">
-                    <MapPin className="w-4 h-4" />
-                    Branch
-                  </CardTitle>
-                </CardHeader>
-                <CardContent>
-                  {canSwitchBranch ? (
+              {/* Branch — switcher for owner/manager only. Cashiers/lanes are
+                  locked to their assigned branch (staff.branchId), so the
+                  card is hidden for them entirely — no branch to pick. */}
+              {canSwitchBranch && (
+                <Card>
+                  <CardHeader>
+                    <CardTitle className="text-base flex items-center gap-2">
+                      <MapPin className="w-4 h-4" />
+                      Branch
+                    </CardTitle>
+                  </CardHeader>
+                  <CardContent>
                     <Select
                       value={branchId !== null ? String(branchId) : ""}
                       onValueChange={(v) => handlePickBranch(Number(v))}
@@ -1358,18 +1360,9 @@ export default function POS() {
                         ))}
                       </SelectContent>
                     </Select>
-                  ) : (
-                    <div
-                      className="text-sm text-gray-700 bg-gray-50 border border-gray-200 rounded-md px-3 py-2"
-                      data-testid="text-locked-branch"
-                    >
-                      {branchId !== null
-                        ? BRANCH_NAME_BY_ID[branchId] ?? `Branch ${branchId}`
-                        : "No branch assigned"}
-                    </div>
-                  )}
-                </CardContent>
-              </Card>
+                  </CardContent>
+                </Card>
+              )}
 
               {/* Branch availability — cashiers control their own branch's
                   live status (open / closed / maintenance / busy) plus a
