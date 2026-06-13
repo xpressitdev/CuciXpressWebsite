@@ -1073,7 +1073,8 @@ interface OrdersReportResponse {
   rows: Array<{
     id: string; ticket_code: string; plate: string;
     ticket_day: string; created_at: string;
-    payment_method: string; package_name: string;
+    payment_method: string; qr_provider: string | null;
+    payment_label: string; package_name: string;
     total_cents: number; paid_amount_cents: number | null;
     change_cents: number | null; status: string;
     refunded_at: string | null; refund_reason: string | null;
@@ -1354,7 +1355,7 @@ function OrdersReportTab() {
                         <TableCell className="font-mono text-xs">{r.plate}</TableCell>
                         <TableCell className="text-xs truncate max-w-[140px]">{r.customer_name_walkin ?? "—"}</TableCell>
                         <TableCell className="text-xs truncate max-w-[160px]">{r.package_name}</TableCell>
-                        <TableCell className="text-xs">{paymentMethodLabels[r.payment_method] ?? r.payment_method}</TableCell>
+                        <TableCell className="text-xs">{r.payment_label ?? paymentMethodLabels[r.payment_method] ?? r.payment_method}</TableCell>
                         <TableCell className="text-xs">{r.staff_name ?? "—"}</TableCell>
                         <TableCell className={`text-right text-xs font-medium ${isRefunded ? "text-red-600" : ""}`}>
                           {isRefunded ? "−" : ""}{formatBND(r.total_cents)}
@@ -1440,6 +1441,8 @@ const qrProviderLabels: Record<string, string> = {
   baiduri_ms: "Baiduri MS",
   dst_easy: "DST Easy / Quickpay",
   quickpay: "Quickpay",
+  bibd: "BIBD",
+  baiduri: "Baiduri",
 };
 
 function PaymentMethodsTab() {

@@ -39,8 +39,20 @@ always allowed it: `orders.qr_provider` is free text and `payment_methods` only 
 **How to apply:** to add a wallet, just create it in the UI — no code change. When
 labeling an unknown non-NULL provider in reports/receipts, humanise the slug
 (`progresif_ding` → "Progresif Ding"); keep NULL provider as the legacy
-"Pocket Payment QR" default so old data isn't relabelled. A `qr_code` method must
-always carry a provider; non-`qr_code` methods must not set one.
+"Pocket Payment QR" default so old data isn't relabelled.
+
+# qr_provider also distinguishes Bank Transfer (BIBD vs Baiduri)
+
+`qr_provider` is NOT qr_code-only. Two configured `bank_transfer` methods ("Bank
+Transfer BIBD" `bibd`, "Bank Transfer Baiduri" `baiduri`) reuse the same column to
+discriminate banks, so `(method, qr_provider)` resolves to the owner's configured
+label in reports. The POS order INSERT historically stored `qr_provider` ONLY when
+`payment_method='qr_code'` — it now also stores it for `bank_transfer`. Legacy bank
+orders have NULL provider (bank unrecoverable) and fall back to generic "Bank
+Transfer". The Order Report resolves labels from a `payment_methods` config map
+keyed `${method}|${qr_provider??''}` (no JOIN, to avoid fan-out); humanise-the-slug
+fallback is scoped to `qr_code` only, because non-qr providers like
+`subscription|membership` / `voucher|loyalty` are semantic tags, not wallet names.
 
 # The pocket_pay unique-index landmine
 

@@ -859,7 +859,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
       const rows = (await db.execute(sql`
         SELECT o.id, o.ticket_code, o.plate, o.ticket_day, o.created_at,
-               o.payment_method, o.package_name, o.total_cents, o.paid_amount_cents,
+               o.payment_method, o.qr_provider, o.package_name, o.total_cents, o.paid_amount_cents,
                o.change_cents, o.status, o.refunded_at, o.refund_reason,
                o.customer_name_walkin, o.original_receipt_no, o.kedaipos_pos_name,
                o.branch_id, b.name AS branch_name,
@@ -902,6 +902,36 @@ export async function registerRoutes(app: Express): Promise<Server> {
       const refundTotal = Number(totals.refund_total_cents ?? 0);
       const paidCount = Math.max(1, txCount - refCount);
 
+      // Resolve each row's human label from the Payment Setup config so the
+      // report shows exactly what the owner named (e.g. "Bank Transfer BIBD",
+      // "Website cucixpress.com (Web Pocket QR)"). Keyed by (method, provider)
+      // — the same pair stored on the order. Falls back to a humanised slug or
+      // a generic base label when no config row matches (legacy rows, the
+      // online Pocket Pay gateway whose provider the config CHECK forbids).
+      const pmCfg = (await db.execute(sql`
+        SELECT method, qr_provider, label FROM payment_methods
+      `)).rows as Array<{ method: string; qr_provider: string | null; label: string }>;
+      const pmLabelMap = new Map(pmCfg.map((c) => [`${c.method}|${c.qr_provider ?? ''}`, c.label]));
+      const basePmLabels: Record<string, string> = {
+        cash: 'Cash', bank_transfer: 'Bank Transfer', card: 'Card', qr_code: 'QR',
+        baiduri_pay: 'Baiduripay', quick_pay: 'Quickpay', voucher: 'Voucher', subscription: 'Subscription',
+      };
+      const humanizeSlug = (s: string) => s.replace(/_/g, ' ').replace(/\b\w/g, (ch) => ch.toUpperCase());
+      const resolvePaymentLabel = (m: string, qp: string | null): string => {
+        const hit = pmLabelMap.get(`${m}|${qp ?? ''}`);
+        if (hit) return hit;
+        // Only the wallet-style qr_code methods carry a provider worth showing
+        // when unmatched (e.g. the online Pocket Pay gateway). For other methods
+        // the provider is a semantic tag (subscription→membership, voucher→
+        // loyalty) — fall back to the generic method label instead.
+        if (m === 'qr_code' && qp) return humanizeSlug(qp);
+        return basePmLabels[m] ?? m;
+      };
+      const rowsWithLabels = (rows as Array<any>).map((r) => ({
+        ...r,
+        payment_label: resolvePaymentLabel(r.payment_method, r.qr_provider ?? null),
+      }));
+
       res.json({
         filter: { branch_id: branchId, from, to, payment_method: paymentMethod, staff_id: staffParam, search },
         branches,
@@ -921,7 +951,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
         page,
         per_page: perPage,
         total_count: countRow.n,
-        rows,
+        rows: rowsWithLabels,
       });
     } catch (err) {
       console.error('[admin.reports.orders] failed:', err);
@@ -7162,7 +7192,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
             ${pkg.id}, ${pkg.name}, ${pkg.price_cents},
             ${JSON.stringify(addonSnapshots)}::jsonb, ${subtotal}, ${chargedTotal},
             ${discountCents}, ${promoDiscountCents}, ${appliedDiscountId}, ${appliedPromoId},
-            ${body.payment_method}, ${body.payment_method === 'qr_code' ? (body.qr_provider ?? null) : null}, ${body.payment_method === 'cash' ? null : (body.payment_ref ?? null)},
+            ${body.payment_method}, ${(body.payment_method === 'qr_code' || body.payment_method === 'bank_transfer') ? (body.qr_provider ?? null) : null}, ${body.payment_method === 'cash' ? null : (body.payment_ref ?? null)},
             ${paidAmountCents}, ${changeCents},
             ${ticketCode}, 'queued',
             ${body.order_notes ?? null}, ${body.item_notes ?? null},
