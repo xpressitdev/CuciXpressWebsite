@@ -160,6 +160,15 @@ function buildExcelRow(r: JoinedRow): (string | number | null)[] {
   const rawEventAt = isRefund && r.refunded_at ? r.refunded_at : r.created_at;
   const eventAt = rawEventAt instanceof Date ? rawEventAt : new Date(rawEventAt as any);
   const branchShort = shortBranch(r.branch_name);
+  // Refund lines mirror the original sale but with NEGATIVE money columns so a
+  // plain SUM in Power BI nets refunds out automatically (matches the historical
+  // KedaiPOS export convention, where refund rows carry negative amounts). The
+  // "Is Refund" (H) and "Original Receipt No" (I) columns still flag the line.
+  // Zero stays zero so we never emit a confusing -0.
+  const money = (c: number | null | undefined): number => {
+    const v = cents2(c);
+    return isRefund && v !== 0 ? -v : v;
+  };
   return [
     'cucixpress_pos',                                                  // A Source.Name
     r.order_id,                                                        // B ID (our internal order id)
@@ -173,14 +182,14 @@ function buildExcelRow(r: JoinedRow): (string | number | null)[] {
     r.cx_number,                                                       // J Order Number
     dashOr(r.customer_name ?? r.customer_name_walkin),                 // K Customer Name
     PAYMENT_METHOD_LABEL[r.payment_method] ?? r.payment_method,        // L Payment Type
-    cents2(r.subtotal_cents),                                          // M Subtotal
-    cents2(r.discount_cents),                                          // N Discount Total
-    cents2(r.promo_discount_cents),                                    // O Promocode Discount Total
-    cents2(r.service_charge_cents),                                    // P Service Charge Total
-    cents2(r.tax_cents),                                               // Q Tax Total
-    cents2(r.total_cents),                                             // R Order Total
-    cents2(r.paid_amount_cents ?? r.total_cents),                      // S Paid Amount
-    cents2(r.change_cents),                                            // T Change
+    money(r.subtotal_cents),                                           // M Subtotal       (negative on refund)
+    money(r.discount_cents),                                           // N Discount Total (negative on refund)
+    money(r.promo_discount_cents),                                     // O Promocode Discount Total (negative on refund)
+    money(r.service_charge_cents),                                     // P Service Charge Total (negative on refund)
+    money(r.tax_cents),                                                // Q Tax Total      (negative on refund)
+    money(r.total_cents),                                              // R Order Total    (negative on refund)
+    money(r.paid_amount_cents ?? r.total_cents),                       // S Paid Amount    (negative on refund)
+    money(r.change_cents),                                             // T Change         (negative on refund)
     dashOr(r.order_notes ?? r.package_name),                           // U Order Notes (cashier note, else package name)
     buildItemNotes(r.car_brand, r.car_model, r.plate),                 // V Item Notes ("BRAND MODEL PLATE")
     dashOr(r.car_brand),                                               // W Extracted_Brand
