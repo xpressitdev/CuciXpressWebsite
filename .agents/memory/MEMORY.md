@@ -16,5 +16,5 @@
 - [Add-on line quantity & category](addon-line-quantity.md) — bulk selling is per-add-on qty in the order addons jsonb (fallback ?? 1), not on orders; packages stay single-wash; orders.quantity column left in DB but unused.
 - [DB migration workflow](db-migration-workflow.md) — db:push/drizzle-kit are BLOCKED; change schema via raw idempotent SQL in migrations/manual applied to BOTH $DATABASE_URL and $STAGING_DATABASE_URL.
 - [POS first-timer car capture](pos-firsttimer-car-capture.md) — new plate at POS requires brand/model (not customer name/phone); claim-on-login keeps them via COALESCE, never overwrite.
-- [SharePoint refund row sign](sharepoint-refund-sign.md) — refund rows write NEGATIVE money (cols M–T) so Power BI SUM nets out; sales positive; negation lives only in buildExcelRow().
+- [Loyalty collection cutover](loyalty-collection-cutover.md) — "reset everyone's stamps, start today" = a date-cutoff constant on the 4 AUTO-count readers, NOT data deletion; manual stamps stay un-filtered.
 - [MDR fee rates](mdr-fee-rates.md) — fee table keyed by method|qr_provider (missing=0bps); MUST use COALESCE NULL-safe unique index or dup (card,NULL) rows break the rate map. Fee on GROSS; net-after-fees is headline.

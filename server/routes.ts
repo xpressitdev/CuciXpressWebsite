@@ -5664,6 +5664,14 @@ export async function registerRoutes(app: Express): Promise<Server> {
   // ─────────────────────────────────────────────────────────────
   const LOYALTY_PKG_ID         = 'pkg_basic_tyre_wax';
   const LOYALTY_REQUIRED_COUNT = 4;
+  // Loyalty collection restarted at the POS cutover: 2026-06-14 Brunei time
+  // (UTC+8) = 2026-06-13T16:00:00Z. Only paid qualifying washes created on/after
+  // this instant earn AUTO stamps; all historical + imported washes before it no
+  // longer count (this is how "clear everyone's stamps, start today" is enforced
+  // without deleting order history). Physical receipts from before the cutover
+  // are still creditable via the OWNER manual-stamp tool, which is intentionally
+  // NOT date-filtered — see /api/pos/loyalty/stamp and the `manual` CTEs below.
+  const LOYALTY_COLLECTION_START = '2026-06-13T16:00:00Z';
   // Snapshot name written onto the redeemed voucher ORDER row (order
   // summary / receipt / reports). package_id stays LOYALTY_PKG_ID so
   // eligibility counting + report linking are unaffected; only the
@@ -5706,6 +5714,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
              AND o.status               IN ('paid','queued','washing','done')
              AND NOT (o.payment_method  = 'voucher' AND o.qr_provider = 'loyalty')
              AND o.id NOT IN (SELECT order_id FROM membership_redemptions)
+             AND o.created_at           >= ${LOYALTY_COLLECTION_START}
            GROUP BY c.id
         ),
         -- Cashier-credited stamps (digital-receipt migration backstop). Same
@@ -5865,6 +5874,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
              AND status               IN ('paid','queued','washing','done')
              AND NOT (payment_method  = 'voucher' AND qr_provider = 'loyalty')
              AND id NOT IN (SELECT order_id FROM membership_redemptions)
+             AND created_at           >= ${LOYALTY_COLLECTION_START}
            ORDER BY created_at ASC
            LIMIT ${LOYALTY_REQUIRED_COUNT}
            FOR UPDATE
@@ -7548,6 +7558,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
            AND o.status               IN ('paid','queued','washing','done')
            AND NOT (o.payment_method  = 'voucher' AND o.qr_provider = 'loyalty')
            AND o.id NOT IN (SELECT order_id FROM membership_redemptions)
+           AND o.created_at           >= ${LOYALTY_COLLECTION_START}
            AND (
                  (${carId}::int IS NOT NULL AND o.vehicle_id = ${carId})
                  OR (o.vehicle_id IS NULL
@@ -7651,6 +7662,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
            AND o.status               IN ('paid','queued','washing','done')
            AND NOT (o.payment_method  = 'voucher' AND o.qr_provider = 'loyalty')
            AND o.id NOT IN (SELECT order_id FROM membership_redemptions)
+           AND o.created_at           >= ${LOYALTY_COLLECTION_START}
            AND (
                  (${vehicleId}::int IS NOT NULL AND o.vehicle_id = ${vehicleId})
                  OR (o.vehicle_id IS NULL
