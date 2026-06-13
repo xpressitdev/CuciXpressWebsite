@@ -230,6 +230,49 @@ export async function appendExcelRow(values: (string | number | null)[]): Promis
 }
 
 // ---------------------------------------------------------------------------
+// Read a single existing table row by its (0-based, data-body) index.
+// Used by the refund-sign backfill to verify a row's identity before it
+// overwrites it. Returns the row's values array (column A..Y order).
+// ---------------------------------------------------------------------------
+export async function getExcelRowValues(index: number): Promise<(string | number | null)[]> {
+  const cfg = loadSharePointConfig();
+  if (!cfg) throw new Error('sharepoint_not_configured');
+  const token = await getAccessToken(cfg);
+  const driveItemPath = await resolveDriveItemPath(cfg);
+  const url = `${driveItemPath}:/workbook/tables/${encodeURIComponent(cfg.tableName)}/rows/itemAt(index=${index})`;
+  const res = await fetch(url, { headers: { Authorization: `Bearer ${token}` } });
+  if (!res.ok) {
+    const text = await res.text();
+    if (res.status === 401) tokenCache = null;
+    throw new Error(`getrow_failed_${res.status}: ${text.slice(0, 400)}`);
+  }
+  const json = await res.json() as { values?: (string | number | null)[][] };
+  return json.values?.[0] ?? [];
+}
+
+// ---------------------------------------------------------------------------
+// Overwrite an existing table row by its (0-based, data-body) index.
+// `values` MUST be the full row in column A..Y order. Throws on failure.
+// ---------------------------------------------------------------------------
+export async function updateExcelRow(index: number, values: (string | number | null)[]): Promise<void> {
+  const cfg = loadSharePointConfig();
+  if (!cfg) throw new Error('sharepoint_not_configured');
+  const token = await getAccessToken(cfg);
+  const driveItemPath = await resolveDriveItemPath(cfg);
+  const url = `${driveItemPath}:/workbook/tables/${encodeURIComponent(cfg.tableName)}/rows/itemAt(index=${index})`;
+  const res = await fetch(url, {
+    method: 'PATCH',
+    headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
+    body: JSON.stringify({ values: [values] }),
+  });
+  if (!res.ok) {
+    const text = await res.text();
+    if (res.status === 401) tokenCache = null;
+    throw new Error(`updaterow_failed_${res.status}: ${text.slice(0, 400)}`);
+  }
+}
+
+// ---------------------------------------------------------------------------
 // Test connection — used by /api/admin/integrations/sharepoint/test
 // ---------------------------------------------------------------------------
 export interface ConnectionStatus {

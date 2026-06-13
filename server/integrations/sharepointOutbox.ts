@@ -23,6 +23,8 @@ import { sql } from 'drizzle-orm';
 import { db } from '../db';
 import {
   appendExcelRow,
+  getExcelRowValues,
+  updateExcelRow,
   dateToExcelSerial,
   timeToExcelFraction,
   isSharePointConfigured,
@@ -199,6 +201,53 @@ function buildExcelRow(r: JoinedRow): (string | number | null)[] {
 }
 
 // ---------------------------------------------------------------------------
+// Hydrate one outbox row into the joined shape buildExcelRow() expects.
+// Shared by the drain worker and the refund-sign backfill.
+// ---------------------------------------------------------------------------
+async function hydrateJoinedRow(id: string | number): Promise<JoinedRow | undefined> {
+  const rowRes = await db.execute(sql`
+    SELECT
+      sob.id::text                    AS outbox_id,
+      sob.op                          AS op,
+      sob.cx_number                   AS cx_number,
+      o.id                            AS order_id,
+      o.status                        AS status,
+      o.payment_method                AS payment_method,
+      o.package_name                  AS package_name,
+      o.total_cents                   AS total_cents,
+      o.subtotal_cents                AS subtotal_cents,
+      o.service_charge_cents          AS service_charge_cents,
+      o.tax_cents                     AS tax_cents,
+      o.discount_cents                AS discount_cents,
+      o.promo_discount_cents          AS promo_discount_cents,
+      o.paid_amount_cents             AS paid_amount_cents,
+      o.change_cents                  AS change_cents,
+      o.plate                         AS plate,
+      o.customer_name_walkin          AS customer_name_walkin,
+      o.order_notes                   AS order_notes,
+      o.item_notes                    AS item_notes,
+      o.created_at                    AS created_at,
+      o.refunded_at                   AS refunded_at,
+      b.name                          AS branch_name,
+      st.name                         AS staff_name,
+      c.name                          AS customer_name,
+      car.brand                       AS car_brand,
+      car.model                       AS car_model,
+      (SELECT cx_number FROM sharepoint_outbox
+        WHERE order_id = o.id AND op = 'sale'
+        ORDER BY id ASC LIMIT 1)      AS original_cx_number
+    FROM sharepoint_outbox sob
+    JOIN orders     o   ON o.id = sob.order_id
+    LEFT JOIN branches b   ON b.id  = o.branch_id
+    LEFT JOIN staff    st  ON st.id = o.staff_id
+    LEFT JOIN customers c  ON c.id  = o.customer_id
+    LEFT JOIN cars     car ON car.id = o.vehicle_id
+    WHERE sob.id = ${id}
+  `);
+  return rowRes.rows[0] as unknown as JoinedRow | undefined;
+}
+
+// ---------------------------------------------------------------------------
 // Drain a single batch. Public so the admin "drain now" button can call it.
 // ---------------------------------------------------------------------------
 export async function drainOnce(): Promise<{ picked: number; sent: number; failed: number }> {
@@ -248,46 +297,7 @@ export async function drainOnce(): Promise<{ picked: number; sent: number; faile
 
   for (const { id, lease } of claimed) {
     // Hydrate the joined row.
-    const rowRes = await db.execute(sql`
-      SELECT
-        sob.id::text                    AS outbox_id,
-        sob.op                          AS op,
-        sob.cx_number                   AS cx_number,
-        o.id                            AS order_id,
-        o.status                        AS status,
-        o.payment_method                AS payment_method,
-        o.package_name                  AS package_name,
-        o.total_cents                   AS total_cents,
-        o.subtotal_cents                AS subtotal_cents,
-        o.service_charge_cents          AS service_charge_cents,
-        o.tax_cents                     AS tax_cents,
-        o.discount_cents                AS discount_cents,
-        o.promo_discount_cents          AS promo_discount_cents,
-        o.paid_amount_cents             AS paid_amount_cents,
-        o.change_cents                  AS change_cents,
-        o.plate                         AS plate,
-        o.customer_name_walkin          AS customer_name_walkin,
-        o.order_notes                   AS order_notes,
-        o.item_notes                    AS item_notes,
-        o.created_at                    AS created_at,
-        o.refunded_at                   AS refunded_at,
-        b.name                          AS branch_name,
-        st.name                         AS staff_name,
-        c.name                          AS customer_name,
-        car.brand                       AS car_brand,
-        car.model                       AS car_model,
-        (SELECT cx_number FROM sharepoint_outbox
-          WHERE order_id = o.id AND op = 'sale'
-          ORDER BY id ASC LIMIT 1)      AS original_cx_number
-      FROM sharepoint_outbox sob
-      JOIN orders     o   ON o.id = sob.order_id
-      LEFT JOIN branches b   ON b.id  = o.branch_id
-      LEFT JOIN staff    st  ON st.id = o.staff_id
-      LEFT JOIN customers c  ON c.id  = o.customer_id
-      LEFT JOIN cars     car ON car.id = o.vehicle_id
-      WHERE sob.id = ${id}
-    `);
-    const r = rowRes.rows[0] as unknown as JoinedRow | undefined;
+    const r = await hydrateJoinedRow(id);
     if (!r) {
       // Outbox row missing — shouldn't happen, mark failed to avoid re-pick.
       await db.execute(sql`
@@ -363,6 +373,96 @@ export async function drainOnce(): Promise<{ picked: number; sent: number; faile
   }
 
   return { picked: claimed.length, sent, failed };
+}
+
+// ---------------------------------------------------------------------------
+// One-off backfill: rewrite already-sent refund rows in Excel so their money
+// columns (M..T) are NEGATIVE, matching the post-fix buildExcelRow() output.
+//
+// Rows appended before the refund-sign fix carry POSITIVE amounts, which
+// overstate Power BI totals. This re-builds each sent refund row from the
+// current DB state and PATCHes the existing Excel row in place.
+//
+// Safety: before overwriting, we GET the live Excel row and verify its
+// identity (col B = our order_id, col H = "Yes", col J = the same CX-N). If
+// the row doesn't match (e.g. the sheet was manually re-sorted so the stored
+// index drifted) we SKIP it rather than risk corrupting an unrelated row.
+// Rows already negative (M < 0) are skipped as no-ops.
+// ---------------------------------------------------------------------------
+export interface RefundBackfillResult {
+  total: number;
+  updated: number;
+  alreadyNegative: number;
+  skippedMismatch: number;
+  errors: Array<{ cx_number: string; excel_row_id: string; error: string }>;
+}
+
+export async function backfillSentRefundRows(dryRun = false): Promise<RefundBackfillResult> {
+  const result: RefundBackfillResult = {
+    total: 0, updated: 0, alreadyNegative: 0, skippedMismatch: 0, errors: [],
+  };
+  if (!isSharePointConfigured()) {
+    throw new Error('sharepoint_not_configured');
+  }
+
+  const res = await db.execute(sql`
+    SELECT id, cx_number, order_id, excel_row_id
+      FROM sharepoint_outbox
+     WHERE op = 'refund'
+       AND status = 'sent'
+       AND excel_row_id IS NOT NULL
+       AND excel_row_id NOT IN ('', 'dry-run')
+     ORDER BY id ASC
+  `);
+  const rows = res.rows as Array<{ id: number; cx_number: string; order_id: string; excel_row_id: string }>;
+  result.total = rows.length;
+
+  for (const row of rows) {
+    const idx = Number(row.excel_row_id);
+    try {
+      if (!Number.isInteger(idx) || idx < 0) {
+        result.errors.push({ cx_number: row.cx_number, excel_row_id: row.excel_row_id, error: 'invalid_excel_row_id' });
+        continue;
+      }
+      const r = await hydrateJoinedRow(row.id);
+      if (!r) {
+        result.errors.push({ cx_number: row.cx_number, excel_row_id: row.excel_row_id, error: 'outbox_row_vanished' });
+        continue;
+      }
+
+      // Verify the live Excel row is the one we think it is before overwriting.
+      const live = await getExcelRowValues(idx);
+      const liveId = String(live[1] ?? '');     // B ID
+      const liveRefund = String(live[7] ?? '');  // H Is Refund
+      const liveCx = String(live[9] ?? '');      // J Order Number
+      const liveSubtotal = Number(live[12] ?? 0); // M Subtotal
+      if (liveId !== r.order_id || liveRefund.toLowerCase() !== 'yes' || liveCx !== row.cx_number) {
+        result.skippedMismatch++;
+        console.warn(`[refund-backfill] SKIP ${row.cx_number} @${idx}: identity mismatch (id="${liveId}" refund="${liveRefund}" cx="${liveCx}")`);
+        continue;
+      }
+      if (liveSubtotal < 0) {
+        result.alreadyNegative++;
+        continue;
+      }
+
+      const values = buildExcelRow(r); // op='refund' => negative money columns
+      if (dryRun) {
+        console.log(`[refund-backfill] DRY RUN would update ${row.cx_number} @${idx}: M ${liveSubtotal} -> ${values[12]}, R -> ${values[17]}`);
+        result.updated++;
+        continue;
+      }
+      await updateExcelRow(idx, values);
+      console.log(`[refund-backfill] updated ${row.cx_number} @${idx}: M ${liveSubtotal} -> ${values[12]}`);
+      result.updated++;
+    } catch (err: any) {
+      const msg = String(err?.message ?? err).slice(0, 300);
+      result.errors.push({ cx_number: row.cx_number, excel_row_id: row.excel_row_id, error: msg });
+      console.error(`[refund-backfill] ERROR ${row.cx_number} @${idx}: ${msg}`);
+    }
+  }
+
+  return result;
 }
 
 // ---------------------------------------------------------------------------
