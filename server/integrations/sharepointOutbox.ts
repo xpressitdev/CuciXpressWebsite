@@ -162,12 +162,16 @@ function buildExcelRow(r: JoinedRow): (string | number | null)[] {
   const rawEventAt = isRefund && r.refunded_at ? r.refunded_at : r.created_at;
   const eventAt = rawEventAt instanceof Date ? rawEventAt : new Date(rawEventAt as any);
   const branchShort = shortBranch(r.branch_name);
-  // Refund lines mirror the original sale but with NEGATIVE money columns so a
-  // plain SUM in Power BI nets refunds out automatically (matches the historical
-  // KedaiPOS export convention, where refund rows carry negative amounts). The
-  // "Is Refund" (H) and "Original Receipt No" (I) columns still flag the line.
+  // Refund lines mirror the original sale. Only the "Order Total" (R) column flips
+  // NEGATIVE on a refund, so a plain SUM of Order Total in Power BI nets refunds out
+  // automatically. The breakdown columns (Subtotal, Discount, Promo, Service Charge,
+  // Tax) and the settlement columns (Paid Amount, Change) keep their natural POSITIVE
+  // sign — the row describes the original sale being reversed, with Order Total as the
+  // single directional figure (matches the previous POS export the owner relies on).
+  // The "Is Refund" (H) and "Original Receipt No" (I) columns still flag the line.
   // Zero stays zero so we never emit a confusing -0.
-  const money = (c: number | null | undefined): number => {
+  const money = (c: number | null | undefined): number => cents2(c);
+  const orderTotalMoney = (c: number | null | undefined): number => {
     const v = cents2(c);
     return isRefund && v !== 0 ? -v : v;
   };
@@ -184,14 +188,14 @@ function buildExcelRow(r: JoinedRow): (string | number | null)[] {
     r.cx_number,                                                       // J Order Number
     dashOr(r.customer_name ?? r.customer_name_walkin),                 // K Customer Name
     PAYMENT_METHOD_LABEL[r.payment_method] ?? r.payment_method,        // L Payment Type
-    money(r.subtotal_cents),                                           // M Subtotal       (negative on refund)
-    money(r.discount_cents),                                           // N Discount Total (negative on refund)
-    money(r.promo_discount_cents),                                     // O Promocode Discount Total (negative on refund)
-    money(r.service_charge_cents),                                     // P Service Charge Total (negative on refund)
-    money(r.tax_cents),                                                // Q Tax Total      (negative on refund)
-    money(r.total_cents),                                              // R Order Total    (negative on refund)
-    money(r.paid_amount_cents ?? r.total_cents),                       // S Paid Amount    (negative on refund)
-    money(r.change_cents),                                             // T Change         (negative on refund)
+    money(r.subtotal_cents),                                           // M Subtotal       (stays positive on refund)
+    money(r.discount_cents),                                           // N Discount Total (stays positive on refund)
+    money(r.promo_discount_cents),                                     // O Promocode Discount Total (stays positive on refund)
+    money(r.service_charge_cents),                                     // P Service Charge Total (stays positive on refund)
+    money(r.tax_cents),                                                // Q Tax Total      (stays positive on refund)
+    orderTotalMoney(r.total_cents),                                    // R Order Total    (NEGATIVE on refund)
+    money(r.paid_amount_cents ?? r.total_cents),                       // S Paid Amount    (stays positive on refund)
+    money(r.change_cents),                                             // T Change         (stays positive on refund)
     dashOr(r.order_notes ?? r.package_name),                           // U Order Notes (cashier note, else package name)
     buildItemNotes(r.car_brand, r.car_model, r.plate),                 // V Item Notes ("BRAND MODEL PLATE")
     dashOr(r.car_brand),                                               // W Extracted_Brand
@@ -376,30 +380,33 @@ export async function drainOnce(): Promise<{ picked: number; sent: number; faile
 }
 
 // ---------------------------------------------------------------------------
-// One-off backfill: rewrite already-sent refund rows in Excel so their money
-// columns (M..T) are NEGATIVE, matching the post-fix buildExcelRow() output.
+// One-off backfill: rewrite already-sent refund rows in Excel so they match the
+// current buildExcelRow() convention — POSITIVE breakdown/settlement columns and
+// a NEGATIVE "Order Total" (R). An earlier fix had made every money column (M..T)
+// negative; the owner only wants Order Total negative, so this re-corrects the
+// rows written under the old all-negative convention.
 //
-// Rows appended before the refund-sign fix carry POSITIVE amounts, which
-// overstate Power BI totals. This re-builds each sent refund row from the
-// current DB state and PATCHes the existing Excel row in place.
+// This re-builds each sent refund row from the current DB state and PATCHes the
+// existing Excel row in place.
 //
 // Safety: before overwriting, we GET the live Excel row and verify its
 // identity (col B = our order_id, col H = "Yes", col J = the same CX-N). If
 // the row doesn't match (e.g. the sheet was manually re-sorted so the stored
 // index drifted) we SKIP it rather than risk corrupting an unrelated row.
-// Rows already negative (M < 0) are skipped as no-ops.
+// Rows already in the current convention (Subtotal > 0 AND Order Total < 0) are
+// skipped as no-ops.
 // ---------------------------------------------------------------------------
 export interface RefundBackfillResult {
   total: number;
   updated: number;
-  alreadyNegative: number;
+  alreadyCorrect: number;
   skippedMismatch: number;
   errors: Array<{ cx_number: string; excel_row_id: string; error: string }>;
 }
 
 export async function backfillSentRefundRows(dryRun = false): Promise<RefundBackfillResult> {
   const result: RefundBackfillResult = {
-    total: 0, updated: 0, alreadyNegative: 0, skippedMismatch: 0, errors: [],
+    total: 0, updated: 0, alreadyCorrect: 0, skippedMismatch: 0, errors: [],
   };
   if (!isSharePointConfigured()) {
     throw new Error('sharepoint_not_configured');
@@ -435,18 +442,22 @@ export async function backfillSentRefundRows(dryRun = false): Promise<RefundBack
       const liveId = String(live[1] ?? '');     // B ID
       const liveRefund = String(live[7] ?? '');  // H Is Refund
       const liveCx = String(live[9] ?? '');      // J Order Number
-      const liveSubtotal = Number(live[12] ?? 0); // M Subtotal
+      const liveSubtotal = Number(live[12] ?? 0);   // M Subtotal
+      const liveOrderTotal = Number(live[17] ?? 0); // R Order Total
       if (liveId !== r.order_id || liveRefund.toLowerCase() !== 'yes' || liveCx !== row.cx_number) {
         result.skippedMismatch++;
         console.warn(`[refund-backfill] SKIP ${row.cx_number} @${idx}: identity mismatch (id="${liveId}" refund="${liveRefund}" cx="${liveCx}")`);
         continue;
       }
-      if (liveSubtotal < 0) {
-        result.alreadyNegative++;
+      // Already in the current convention: Subtotal non-negative, Order Total
+      // non-positive. Covers normal refunds (Subtotal > 0, Order Total < 0) and
+      // zero-amount refunds (both 0) so re-runs are idempotent.
+      if (liveSubtotal >= 0 && liveOrderTotal <= 0) {
+        result.alreadyCorrect++;
         continue;
       }
 
-      const values = buildExcelRow(r); // op='refund' => negative money columns
+      const values = buildExcelRow(r); // op='refund' => positive breakdown, negative Order Total
       if (dryRun) {
         console.log(`[refund-backfill] DRY RUN would update ${row.cx_number} @${idx}: M ${liveSubtotal} -> ${values[12]}, R -> ${values[17]}`);
         result.updated++;

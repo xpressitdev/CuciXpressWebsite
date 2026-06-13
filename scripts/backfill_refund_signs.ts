@@ -1,6 +1,6 @@
-// One-off: rewrite already-sent SharePoint refund rows so their money columns
-// are NEGATIVE (matches the refund-sign fix in buildExcelRow). Forward-only
-// emission was fixed separately; this corrects the rows appended before it.
+// One-off: rewrite already-sent SharePoint refund rows to the current convention
+// (positive breakdown columns, NEGATIVE Order Total) — matches buildExcelRow().
+// Corrects rows written under the earlier all-negative convention.
 //
 // Run with DRY=1 to preview without writing:
 //   DRY=1 tsx scripts/backfill_refund_signs.ts

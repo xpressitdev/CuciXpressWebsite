@@ -4,6 +4,7 @@
 - [Payment methods & qr_provider](payment-methods-qr-provider.md) — wallet methods are qr_code + qr_provider (not new enums); manual Pocket QR must use `pocket_pay_qr`, never `pocket_pay` (unique-index landmine).
 - [WhatsApp receipt file share](whatsapp-receipt-share.md) — wa.me link is text-only; attach files via navigator.share, probe canShare synchronously or the fallback popup gets blocked.
 - [Tailwind dynamic classes](tailwind-dynamic-classes.md) — class strings from API/DB/concatenation render unstyled (JIT can't see them); use literal class strings in source and index in.
+- [SharePoint refund row sign](sharepoint-refund-sign.md) — refund rows in the Power BI Excel master negate ONLY Order Total (R); Subtotal + all other money columns stay positive.
 - [SharePoint history import + chart refresh](sharepoint-history-import.md) — re-importing the master Excel: run import script then recompute_vip_tiers; charts are live (no cache); run long imports via a temp workflow (detached procs get killed).
 - [Staging DB schema drift](staging-db-schema-drift.md) — STAGING_DATABASE_URL is an older snapshot; apply migrations/manual/*.sql (idempotent) before running DB-backed tests, never patch dev/prod.
 - [Neon = ANY array gotcha](neon-array-any-gotcha.md) — raw `= ANY(${jsArray})` 500s with "malformed array literal" under neon; use `IN (${sql.join(...)})` or `inArray()`.
