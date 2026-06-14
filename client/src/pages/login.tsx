@@ -465,7 +465,7 @@ export default function LoginPage() {
           {/* ===== RIGHT — Brand panel ===== */}
           <div className="hidden lg:flex flex-col justify-between rounded-2xl border-2 border-black bg-gradient-to-br from-purple-600 via-violet-500 to-orange-500 text-white p-8 shadow-[8px_8px_0_0_rgba(0,0,0,1)]">
             <div>
-              <p className="cuci-eyebrow text-white/90">Why an account?</p>
+              <p className="text-xs uppercase tracking-wider font-semibold text-white/90">Why an account?</p>
               <h2 className="text-3xl font-black mt-2 leading-tight">
                 Everything about your car, in one place.
               </h2>
