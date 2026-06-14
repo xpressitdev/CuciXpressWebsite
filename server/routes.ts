@@ -4020,7 +4020,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
             let vehicleId: number | null = null;
             const existing = (await tx.execute(sql`
               SELECT id FROM cars
-               WHERE UPPER(REGEXP_REPLACE(license_plate, '\s+', '', 'g')) = ${plateNorm}
+               WHERE UPPER(REGEXP_REPLACE(license_plate, '\\s+', '', 'g')) = ${plateNorm}
                ORDER BY (CASE WHEN customer_id = ${customerId ?? -1} THEN 0 ELSE 1 END) ASC,
                         COALESCE(last_seen_at, 'epoch'::timestamptz) DESC,
                         id DESC
@@ -7063,7 +7063,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
           const existing = (await tx.execute(sql`
             SELECT id, user_id, customer_id
               FROM cars
-             WHERE UPPER(REGEXP_REPLACE(license_plate, '\s+', '', 'g')) = ${plateNorm}
+             WHERE UPPER(REGEXP_REPLACE(license_plate, '\\s+', '', 'g')) = ${plateNorm}
              ORDER BY (CASE WHEN customer_id = ${posCustomerId ?? -1} THEN 0 ELSE 1 END) ASC,
                       COALESCE(last_seen_at, 'epoch'::timestamptz) DESC,
                       id DESC
@@ -8894,7 +8894,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
       const existingRows = (await db.execute(sql`
         SELECT id, user_id, customer_id
           FROM cars
-         WHERE UPPER(REGEXP_REPLACE(license_plate, '\s+', '', 'g')) = ${norm}
+         WHERE UPPER(REGEXP_REPLACE(license_plate, '\\s+', '', 'g')) = ${norm}
          ORDER BY (CASE WHEN customer_id = ${customer_id ?? -1} THEN 0 ELSE 1 END) ASC,
                   COALESCE(last_seen_at, 'epoch'::timestamptz) DESC,
                   id DESC
