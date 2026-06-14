@@ -1957,6 +1957,71 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
+  // GET /api/admin/accounts/stats
+  // Powers the "Accounts & Logins" panel on the Dashboard tab: app account
+  // sign-ups (users) + customer login activity (auth_sessions).
+  // "Today"/"this month" are Brunei-local (Asia/Brunei). Note users.created_at
+  // is a naive UTC timestamp, so it is shifted UTC->Brunei; auth_sessions
+  // .created_at is timestamptz, so AT TIME ZONE alone converts it.
+  app.get('/api/admin/accounts/stats', requireStaff, requireStaffRole('owner', 'manager'), async (_req, res) => {
+    try {
+      const row = (await db.execute(sql`
+        SELECT
+          (SELECT COUNT(*)::int FROM users) AS total_accounts,
+          (SELECT COUNT(*)::int FROM users
+             WHERE (created_at AT TIME ZONE 'UTC' AT TIME ZONE 'Asia/Brunei')::date
+                   = (now() AT TIME ZONE 'Asia/Brunei')::date) AS registered_today,
+          (SELECT COUNT(*)::int FROM users
+             WHERE date_trunc('month', created_at AT TIME ZONE 'UTC' AT TIME ZONE 'Asia/Brunei')
+                   = date_trunc('month', now() AT TIME ZONE 'Asia/Brunei')) AS registered_this_month,
+          (SELECT COUNT(DISTINCT user_id)::int FROM auth_sessions
+             WHERE user_type = 'customer'
+               AND (created_at AT TIME ZONE 'Asia/Brunei')::date
+                   = (now() AT TIME ZONE 'Asia/Brunei')::date) AS logins_today,
+          (SELECT COUNT(DISTINCT user_id)::int FROM auth_sessions
+             WHERE user_type = 'customer' AND expires_at > now()) AS currently_logged_in,
+          (SELECT COUNT(DISTINCT user_id)::int FROM auth_sessions
+             WHERE user_type = 'customer') AS ever_logged_in
+      `)).rows[0] as any;
+
+      const recent = (await db.execute(sql`
+        SELECT s.created_at AS at,
+               NULLIF(TRIM(CONCAT(u.first_name, ' ', u.last_name)), '') AS name
+        FROM auth_sessions s
+        JOIN users u ON u.id::text = s.user_id
+        WHERE s.user_type = 'customer'
+        ORDER BY s.created_at DESC
+        LIMIT 8
+      `)).rows as Array<{ at: string; name: string | null }>;
+
+      const months = (await db.execute(sql`
+        SELECT to_char(date_trunc('month', created_at AT TIME ZONE 'UTC' AT TIME ZONE 'Asia/Brunei'), 'YYYY-MM') AS month,
+               COUNT(*)::int AS count
+        FROM users
+        WHERE created_at AT TIME ZONE 'UTC' AT TIME ZONE 'Asia/Brunei'
+              >= date_trunc('month', now() AT TIME ZONE 'Asia/Brunei') - INTERVAL '11 months'
+        GROUP BY 1 ORDER BY 1
+      `)).rows as Array<{ month: string; count: number }>;
+
+      const recentMapped = recent.map((r) => ({ at: r.at, name: r.name || 'Customer' }));
+
+      res.json({
+        total_accounts:        Number(row.total_accounts ?? 0),
+        registered_today:      Number(row.registered_today ?? 0),
+        registered_this_month: Number(row.registered_this_month ?? 0),
+        logins_today:          Number(row.logins_today ?? 0),
+        currently_logged_in:   Number(row.currently_logged_in ?? 0),
+        ever_logged_in:        Number(row.ever_logged_in ?? 0),
+        last_login:            recentMapped[0] ?? null,
+        recent_logins:         recentMapped,
+        signups_by_month:      months.map((m) => ({ month: m.month, count: Number(m.count) })),
+      });
+    } catch (err) {
+      console.error('[admin.accounts.stats] failed:', err);
+      res.status(500).json({ error: 'stats_failed' });
+    }
+  });
+
   // GET /api/admin/customers/export.csv — Phase 12b-2.
   // Same filters as list (search/branch/segment) but no pagination.
   // Streams a CSV the user can open in Excel / Google Sheets.

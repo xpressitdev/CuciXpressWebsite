@@ -24,3 +24,4 @@
 - [Customer auth email](customer-auth-email.md) — "no OTP arrived" is usually a wrong/unregistered email (login id = users.email, not customers); change email staff-side only, never auto-merge by typed phone (takeover).
 - [Main db transactions](db-transactions.md) — main `db` is neon-serverless Pool/WebSocket, so `db.transaction()` is real BEGIN/COMMIT; the "Neon HTTP autocommits" note is a different driver.
 - [MDR fee rates](mdr-fee-rates.md) — fee table keyed by method|qr_provider (missing=0bps); MUST use COALESCE NULL-safe unique index or dup (card,NULL) rows break the rate map. Fee on GROSS; net-after-fees is headline.
+- [Admin DashboardTab role gating](admin-dashboard-role-gating.md) — DashboardTab is shown to ALL staff incl cashiers; owner/manager-only widgets there must be UI-gated or they 401-error.

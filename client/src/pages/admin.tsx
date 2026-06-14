@@ -926,6 +926,8 @@ interface DashboardResponse {
 }
 
 function DashboardTab() {
+  const { staff } = useStaffAuth();
+  const canSeeAccounts = staff?.role === "owner" || staff?.role === "manager";
   const [branchId, setBranchId] = useState<string>("all");
   const [date, setDate] = useState<string>(todayBNT());
 
@@ -1086,7 +1088,168 @@ function DashboardTab() {
           )}
         </CardContent>
       </Card>
+
+      {canSeeAccounts && <AccountsLoginsCard />}
     </div>
+  );
+}
+
+// =====================================================================
+// Accounts & Logins panel (Dashboard tab)
+// App account sign-ups (users table) + customer login activity
+// (auth_sessions). "Today" / "this month" are Brunei-local.
+// =====================================================================
+
+interface AccountsStats {
+  total_accounts: number;
+  registered_today: number;
+  registered_this_month: number;
+  logins_today: number;
+  currently_logged_in: number;
+  ever_logged_in: number;
+  last_login: { at: string; name: string } | null;
+  recent_logins: Array<{ at: string; name: string }>;
+  signups_by_month: Array<{ month: string; count: number }>;
+}
+
+const MONTH_ABBR = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
+
+function fmtLoginTime(iso: string | null): string {
+  if (!iso) return "—";
+  return new Date(iso).toLocaleString("en-GB", {
+    day: "2-digit", month: "short", hour: "2-digit", minute: "2-digit",
+    hour12: true, timeZone: "Asia/Brunei",
+  });
+}
+
+function AccountsLoginsCard() {
+  const { data, isLoading, isFetching, error, refetch } = useQuery<AccountsStats>({
+    queryKey: ["/api/admin/accounts/stats"],
+    queryFn: async () => {
+      const res = await fetch("/api/admin/accounts/stats", { credentials: "include" });
+      if (!res.ok) throw new Error("accounts_stats_failed");
+      return res.json();
+    },
+  });
+
+  const toneClass: Record<string, string> = {
+    green: "bg-emerald-50 text-emerald-700 ring-emerald-200",
+    blue: "bg-sky-50 text-sky-700 ring-sky-200",
+    purple: "bg-violet-50 text-violet-700 ring-violet-200",
+    pink: "bg-pink-50 text-pink-700 ring-pink-200",
+    amber: "bg-amber-50 text-amber-800 ring-amber-200",
+  };
+
+  const tileDefs: Array<{ label: string; value: string; tone: keyof typeof toneClass; testId: string }> =
+    data
+      ? [
+          { label: "Total Accounts",       value: data.total_accounts.toLocaleString(), tone: "blue",   testId: "tile-acct-total" },
+          { label: "Registered Today",     value: String(data.registered_today),        tone: "green",  testId: "tile-acct-reg-today" },
+          { label: "New Sign-ups (Month)", value: String(data.registered_this_month),   tone: "purple", testId: "tile-acct-reg-month" },
+          { label: "Logged In Today",      value: String(data.logins_today),            tone: "pink",   testId: "tile-acct-login-today" },
+          { label: "Currently Signed In",  value: String(data.currently_logged_in),     tone: "amber",  testId: "tile-acct-active" },
+          { label: "Ever Logged In",       value: String(data.ever_logged_in),          tone: "blue",   testId: "tile-acct-ever" },
+        ]
+      : [];
+
+  const chartData = (data?.signups_by_month ?? []).map((m) => {
+    const [y, mo] = m.month.split("-");
+    return { label: `${MONTH_ABBR[Number(mo) - 1]} ${y.slice(2)}`, count: m.count };
+  });
+
+  return (
+    <Card>
+      <CardHeader>
+        <CardTitle className="text-base flex items-center justify-between gap-3">
+          <span className="flex items-center gap-2"><Users className="w-4 h-4" /> Accounts &amp; Logins</span>
+          <Button
+            variant="outline"
+            size="icon"
+            onClick={() => refetch()}
+            disabled={isFetching}
+            data-testid="button-accounts-refresh"
+          >
+            <RefreshCw className={`w-4 h-4 ${isFetching ? "animate-spin" : ""}`} />
+          </Button>
+        </CardTitle>
+      </CardHeader>
+      <CardContent>
+        {error ? (
+          <p className="text-sm text-red-600 py-4">Failed to load account stats.</p>
+        ) : isLoading ? (
+          <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-3">
+            {Array.from({ length: 6 }).map((_, i) => (
+              <div key={i} className="h-24 rounded-lg bg-gray-100 animate-pulse" />
+            ))}
+          </div>
+        ) : (
+          <div className="space-y-6">
+            <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-3">
+              {tileDefs.map((t) => (
+                <div key={t.label} className="cuci-kpi flex flex-col gap-2" data-testid={t.testId}>
+                  <span className="cuci-eyebrow">{t.label}</span>
+                  <span className={`inline-flex w-fit items-center rounded-full px-3 py-1 text-sm font-extrabold border-2 border-black ${toneClass[t.tone]}`}>
+                    {t.value}
+                  </span>
+                </div>
+              ))}
+            </div>
+
+            {data?.last_login && (
+              <p className="text-sm text-gray-600" data-testid="text-last-login">
+                <span className="font-semibold text-gray-800">Last login:</span>{" "}
+                {data.last_login.name} · {fmtLoginTime(data.last_login.at)}
+              </p>
+            )}
+
+            <div className="grid md:grid-cols-2 gap-6">
+              <div>
+                <p className="cuci-eyebrow mb-2">Recent logins</p>
+                {!data || data.recent_logins.length === 0 ? (
+                  <p className="text-sm text-gray-500">No logins yet.</p>
+                ) : (
+                  <Table>
+                    <TableHeader>
+                      <TableRow>
+                        <TableHead>Customer</TableHead>
+                        <TableHead className="text-right">When (Brunei)</TableHead>
+                      </TableRow>
+                    </TableHeader>
+                    <TableBody>
+                      {data.recent_logins.map((r, i) => (
+                        <TableRow key={i} data-testid={`row-recent-login-${i}`}>
+                          <TableCell className="font-medium">{r.name}</TableCell>
+                          <TableCell className="text-right text-gray-600">{fmtLoginTime(r.at)}</TableCell>
+                        </TableRow>
+                      ))}
+                    </TableBody>
+                  </Table>
+                )}
+              </div>
+
+              <div>
+                <p className="cuci-eyebrow mb-2">Sign-ups per month</p>
+                {chartData.length === 0 ? (
+                  <p className="text-sm text-gray-500">No data.</p>
+                ) : (
+                  <div className="h-56 w-full">
+                    <ResponsiveContainer width="100%" height="100%">
+                      <BarChart data={chartData} margin={{ left: 0, right: 8, top: 8, bottom: 0 }}>
+                        <CartesianGrid strokeDasharray="3 3" stroke="#e5e7eb" vertical={false} />
+                        <XAxis dataKey="label" tick={{ fontSize: 11 }} />
+                        <YAxis tick={{ fontSize: 11 }} allowDecimals={false} />
+                        <RTooltip formatter={(v: number) => [String(v), "Sign-ups"]} />
+                        <Bar dataKey="count" fill="#8b5cf6" radius={[4, 4, 0, 0]} />
+                      </BarChart>
+                    </ResponsiveContainer>
+                  </div>
+                )}
+              </div>
+            </div>
+          </div>
+        )}
+      </CardContent>
+    </Card>
   );
 }
 
