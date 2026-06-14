@@ -72,6 +72,16 @@ export default function LoginPage() {
     setCode("");
   };
 
+  // Send a confused returning customer over to the Sign In tab, carrying
+  // over whatever identifier they already typed. This nudge is shown to
+  // EVERYONE (never conditioned on whether an account actually exists), so
+  // it can't be used by a stranger to detect which emails/phones/plates are
+  // already registered.
+  const goSignIn = (prefill?: string) => {
+    switchTab("signin");
+    if (prefill?.trim()) setIdentifier(prefill.trim());
+  };
+
 
   const handleError = (data: any) => {
     toast({
@@ -152,8 +162,8 @@ export default function LoginPage() {
       const data = await res.json();
       if (!res.ok || !data.ok) return handleError(data);
       toast({
-        title: "Code sent",
-        description: `Check ${email.trim()} for a 6-digit code.`,
+        title: "Check your email",
+        description: `If your details are new, we've emailed a 6-digit code to ${email.trim()}. Already have an account? Use Sign in instead.`,
       });
       setStep("code");
     } finally {
@@ -391,6 +401,17 @@ export default function LoginPage() {
                 <p className="text-[11px] text-gray-400 text-center pt-1">
                   By continuing you agree to our Terms and Privacy Policy.
                 </p>
+                <p className="text-sm text-gray-600 text-center pt-1">
+                  Already have an account?{" "}
+                  <button
+                    type="button"
+                    onClick={() => goSignIn(email || phone)}
+                    className="font-bold text-cuci-primary hover:underline"
+                    data-testid="link-register-to-signin"
+                  >
+                    Sign in instead
+                  </button>
+                </p>
               </div>
             )}
 
@@ -405,6 +426,20 @@ export default function LoginPage() {
                     </span>
                   </p>
                 </div>
+                {tab === "register" && (
+                  <p className="text-xs text-gray-500 text-center">
+                    Didn't get a code? You may already have an account —{" "}
+                    <button
+                      type="button"
+                      onClick={() => goSignIn(email)}
+                      className="font-bold text-cuci-primary hover:underline"
+                      data-testid="link-code-to-signin"
+                    >
+                      sign in instead
+                    </button>
+                    .
+                  </p>
+                )}
                 <div className="space-y-1">
                   <label className="cuci-eyebrow flex items-center gap-1">
                     <KeyRound className="w-3 h-3" /> 6-digit code
