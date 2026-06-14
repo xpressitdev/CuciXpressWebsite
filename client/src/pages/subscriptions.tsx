@@ -93,6 +93,9 @@ const PLANS: Plan[] = [
   },
 ];
 
+// Subscriptions go live 19 June 2026, 7:00 PM Brunei time (UTC+8).
+const LAUNCH_TS = new Date("2026-06-19T19:00:00+08:00").getTime();
+
 type CustomerMe = {
   profile: {
     email: string | null;
@@ -109,15 +112,20 @@ export default function Subscriptions() {
   const [phone, setPhone] = useState("");
   const [carPlate, setCarPlate] = useState("");
 
-  // Live founding-member scarcity — how many of the 200 spots remain.
-  const { data: founding } = useQuery<{
-    claimed: number;
-    total: number;
-    remaining: number;
-  }>({
-    queryKey: ["/api/subscription-signup/founding-status"],
-    retry: false,
-  });
+  // Live countdown to the subscription launch (ticks every second).
+  const [now, setNow] = useState(() => Date.now());
+  useEffect(() => {
+    const id = setInterval(() => setNow(Date.now()), 1000);
+    return () => clearInterval(id);
+  }, []);
+  const msLeft = Math.max(0, LAUNCH_TS - now);
+  const launched = msLeft === 0;
+  const countdown = {
+    days: Math.floor(msLeft / 86_400_000),
+    hours: Math.floor((msLeft % 86_400_000) / 3_600_000),
+    minutes: Math.floor((msLeft % 3_600_000) / 60_000),
+    seconds: Math.floor((msLeft % 60_000) / 1_000),
+  };
 
   // Prefill when logged in. /api/customer/me returns 401 if not logged in —
   // react-query just leaves data undefined and we keep the inputs empty.
@@ -257,42 +265,51 @@ export default function Subscriptions() {
                     <span className="font-extrabold">BND 60/mo</span> — no exceptions.
                   </p>
                 </div>
-                {/* Spots-remaining meter */}
-                <div className="flex-shrink-0 w-full md:w-64 rounded-xl border-2 border-black bg-white/95 p-4">
-                  <div className="flex items-baseline justify-between mb-1.5">
-                    <span
-                      className="text-3xl font-black text-cuci-primary leading-none"
-                      data-testid="text-founding-remaining"
-                    >
-                      {founding ? founding.remaining : 200}
-                    </span>
+                {/* Launch countdown */}
+                <div
+                  className="flex-shrink-0 w-full md:w-72 rounded-xl border-2 border-black bg-white/95 p-4"
+                  data-testid="countdown-launch"
+                >
+                  <div className="flex items-center justify-between mb-2.5">
                     <span className="text-xs font-bold text-gray-500 uppercase tracking-wide">
-                      spots left
+                      {launched ? "Now live" : "Launching in"}
+                    </span>
+                    <span className="text-[11px] font-bold text-cuci-primary uppercase tracking-wide">
+                      19 Jun · 7PM BNT
                     </span>
                   </div>
-                  <div className="h-2.5 w-full rounded-full bg-gray-200 overflow-hidden border border-black/10">
-                    <div
-                      className="h-full bg-gradient-to-r from-cuci-primary to-cuci-secondary transition-all"
-                      style={{
-                        width: `${
-                          founding
-                            ? Math.max(
-                                3,
-                                Math.min(
-                                  100,
-                                  Math.round((founding.claimed / founding.total) * 100),
-                                ),
-                              )
-                            : 0
-                        }%`,
-                      }}
-                    />
-                  </div>
-                  <p className="text-[11px] text-gray-500 mt-2 font-medium">
-                    {founding
-                      ? `${founding.claimed} of ${founding.total} founding memberships claimed`
-                      : "Limited to 200 founding memberships"}
-                  </p>
+                  {launched ? (
+                    <p
+                      className="text-2xl font-black text-cuci-primary leading-tight"
+                      data-testid="text-launch-live"
+                    >
+                      Subscriptions are live! 🎉
+                    </p>
+                  ) : (
+                    <div className="grid grid-cols-4 gap-1.5 text-center">
+                      {[
+                        { label: "Days", value: countdown.days },
+                        { label: "Hrs", value: countdown.hours },
+                        { label: "Min", value: countdown.minutes },
+                        { label: "Sec", value: countdown.seconds },
+                      ].map((u) => (
+                        <div
+                          key={u.label}
+                          className="rounded-lg border border-black/10 bg-gray-50 py-2"
+                        >
+                          <div
+                            className="text-2xl font-black text-cuci-primary leading-none tabular-nums"
+                            data-testid={`countdown-${u.label.toLowerCase()}`}
+                          >
+                            {String(u.value).padStart(2, "0")}
+                          </div>
+                          <div className="text-[10px] font-bold text-gray-400 uppercase tracking-wide mt-1">
+                            {u.label}
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  )}
                 </div>
               </div>
             </motion.div>
