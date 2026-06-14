@@ -198,8 +198,17 @@ export default function Subscriptions() {
       });
       return;
     }
-    // Family plans cover up to 3 cars: car 1 is the required base, cars 2 & 3
-    // are optional. All plates go into the single carPlate field, comma-joined.
+    if (openPlan.id === "family" && !carPlate2.trim()) {
+      toast({
+        title: "Second car plate required",
+        description:
+          "The Multi-Car Family plan covers at least 2 cars — add the plate for car 2.",
+        variant: "destructive",
+      });
+      return;
+    }
+    // Family plans cover 2-3 cars: cars 1 & 2 are required, car 3 is optional.
+    // All plates go into the single carPlate field, comma-joined.
     const extraPlates =
       openPlan.id === "family"
         ? [carPlate2, carPlate3].map((p) => p.trim()).filter(Boolean)
@@ -739,15 +748,13 @@ export default function Subscriptions() {
                   />
                 </div>
                 <div className="space-y-1.5">
-                  <Label htmlFor="sub-plate-2">
-                    Car 2 plate{" "}
-                    <span className="text-gray-400 font-normal">(optional)</span>
-                  </Label>
+                  <Label htmlFor="sub-plate-2">Car 2 plate</Label>
                   <Input
                     id="sub-plate-2"
                     value={carPlate2}
                     onChange={(e) => setCarPlate2(e.target.value.toUpperCase())}
                     placeholder="e.g. BAB 5678"
+                    required
                     disabled={subscribeMutation.isPending}
                     data-testid="input-subscribe-plate-2"
                   />
@@ -767,7 +774,7 @@ export default function Subscriptions() {
                   />
                 </div>
                 <p className="text-xs text-gray-400">
-                  Register up to 3 cars in your household on this family plan.
+                  At least 2 cars, up to 3, in one household. Car 3 is optional.
                 </p>
               </div>
             )}

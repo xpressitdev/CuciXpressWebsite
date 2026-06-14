@@ -444,18 +444,61 @@ export async function registerRoutes(app: Express): Promise<Server> {
         .where(eq(subscriptionSignups.email, data.email))
         .limit(1);
 
-      // Normalise the plate the same way POS does (trimmed + uppercased) so a
-      // founding signup is easy to match to a vehicle later.
-      const carPlate = data.carPlate?.trim().toUpperCase() || null;
+      const existingSignup = existing.length > 0 ? existing[0] : null;
+
+      // Normalise the plate(s) the same way POS does (trimmed + uppercased) so a
+      // founding signup is easy to match to a vehicle later. Family plans submit
+      // 2-3 comma-joined plates; normalise each, drop blanks/dupes, then re-join.
+      const normalisePlates = (raw: string | null | undefined) =>
+        Array.from(
+          new Set(
+            (raw ?? "")
+              .split(",")
+              .map((p) => p.trim().toUpperCase())
+              .filter(Boolean),
+          ),
+        );
+
+      const newPlates = normalisePlates(data.carPlate);
+      // The value that will actually be persisted: new plates win, else keep prev.
+      const carPlate =
+        newPlates.length > 0 ? newPlates.join(", ") : existingSignup?.carPlate ?? null;
+
+      // Validate against the effective plan + stored plate value, not just this
+      // request's fields. Otherwise a known email with an existing family plan
+      // could omit `plan` and submit one plate to bypass the checks below.
+      const effectivePlan = data.plan ?? existingSignup?.plan ?? null;
+      const effectivePlates = normalisePlates(carPlate);
 
       // Self-serve plan intents must include the car plate (Corporate fleets are
       // handled manually, so they're exempt). Enforced server-side too — the
       // client check alone is bypassable.
-      if (data.plan && ["unlimited", "family"].includes(data.plan) && !carPlate) {
+      if (
+        effectivePlan &&
+        ["unlimited", "family"].includes(effectivePlan) &&
+        !carPlate
+      ) {
         return res.status(400).json({
           success: false,
           message: "Car plate is required for this plan.",
         });
+      }
+
+      // Multi-Car Family covers at least 2 cars, up to 3. Enforce the count
+      // server-side since the client guard is bypassable.
+      if (effectivePlan === "family") {
+        if (effectivePlates.length < 2) {
+          return res.status(400).json({
+            success: false,
+            message: "The Multi-Car Family plan needs at least 2 car plates.",
+          });
+        }
+        if (effectivePlates.length > 3) {
+          return res.status(400).json({
+            success: false,
+            message: "The Multi-Car Family plan covers up to 3 cars.",
+          });
+        }
       }
 
       let signup;

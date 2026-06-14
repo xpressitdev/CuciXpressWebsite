@@ -829,15 +829,26 @@ export default function Admin() {
                                   </a>
                                 </p>
                                 <div className="mt-1 flex flex-wrap items-center gap-x-4 gap-y-1 text-sm text-gray-500">
-                                  {signup.carPlate && (
-                                    <span
-                                      className="flex items-center font-semibold text-gray-700"
-                                      data-testid={`text-signup-plate-${signup.id}`}
-                                    >
-                                      <Car className="w-3.5 h-3.5 mr-1 text-cuci-primary" />
-                                      {signup.carPlate}
-                                    </span>
-                                  )}
+                                  {signup.carPlate &&
+                                    signup.carPlate
+                                      .split(",")
+                                      .map((p) => p.trim())
+                                      .filter(Boolean)
+                                      .map((p, idx) => (
+                                        <span
+                                          key={`${signup.id}-plate-${idx}`}
+                                          className="flex items-center font-semibold text-gray-700"
+                                          data-testid={`text-signup-plate-${signup.id}-${idx}`}
+                                        >
+                                          <Car className="w-3.5 h-3.5 mr-1 text-cuci-primary" />
+                                          {signup.plan === "family" && (
+                                            <span className="text-gray-400 mr-1">
+                                              Car {idx + 1}:
+                                            </span>
+                                          )}
+                                          {p}
+                                        </span>
+                                      ))}
                                   {signup.phone && (
                                     <a
                                       href={`tel:${signup.phone}`}
