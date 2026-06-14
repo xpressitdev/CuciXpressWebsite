@@ -1,0 +1,35 @@
+Three changes to the Unlimited Xpress founding-member launch page and its 
+signup modal. This is still a no-charge waitlist — do not touch billing.
+
+FIRST, before editing: search the codebase and show me every file/line where 
+these appear, then wait for nothing — just make the changes after listing them:
+"60", "$60", "BND 60", "45", "BND 45", and any countdown/timer/"launching in" 
+component. List them so I can confirm nothing was missed.
+
+CHANGE 1 — Pricing structure (Model B: founding $39, standard $45).
+The page currently shows the Unlimited Xpress plan as "BND 60" struck through 
+with "BND 45" as the price, and founding copy that reverts to BND 60. Change to:
+- Price display: strike through "BND 45" and show "BND 39" as the active price 
+  (founding rate). The standard price is now 45, not 60.
+- Founding banner text: change "Founding members lock in BND 45/mo ... returns 
+  to its regular BND 60/mo" to "Founding members lock in BND 39/mo ... returns 
+  to its regular BND 45/mo once all 200 spots are claimed."
+- Anywhere the standard/revert price is written as 60, change it to 45.
+- Leave Multi-Car Family (BND 105) and Corporate (Custom) unchanged.
+
+CHANGE 2 — Remove the countdown timer.
+Delete the "LAUNCHING IN / DAYS HRS MIN SEC" countdown component from the 
+founding offer section entirely. Remove the component and any timer state/
+interval logic behind it so nothing is left running. Do not replace it with 
+anything yet — leave that area clean. (A live "spots claimed" counter comes 
+later as a separate change.)
+
+CHANGE 3 — Update the signup modal copy.
+The modal plan card currently reads "BND 60  BND 45 / month". Change it to 
+"BND 45" struck through next to "BND 39 / month". If the modal subtitle or 
+title references the old prices, align them to founding BND 39 / standard BND 45.
+
+After all changes, show me: the updated pricing card(s), the founding banner 
+text, confirmation the countdown component and its timer logic are fully 
+removed, and the updated modal. Then re-grep for "60" to confirm no stale 
+price strings remain.

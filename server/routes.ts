@@ -526,10 +526,10 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
-  // Public founding-member status — how many of the 200 founding spots remain.
+  // Public founding-member status — how many of the 250 founding spots remain.
   // Drives the scarcity copy on the /subscriptions page. Aggregate count only,
   // so there's no PII exposure. "Claimed" = signups that picked a plan.
-  const FOUNDING_TOTAL = 200;
+  const FOUNDING_TOTAL = 250;
   app.get("/api/subscription-signup/founding-status", async (_req, res) => {
     try {
       const [row] = await db

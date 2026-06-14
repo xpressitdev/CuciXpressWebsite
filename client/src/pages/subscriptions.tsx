@@ -59,8 +59,8 @@ const PLANS: Plan[] = [
   {
     id: "unlimited",
     name: "Unlimited Xpress",
-    price: "BND 45",
-    oldPrice: "BND 60",
+    price: "BND 39",
+    oldPrice: "BND 45",
     cadence: "/ month",
     tagline: "Single car · all branches",
     features: [
@@ -252,17 +252,17 @@ export default function Subscriptions() {
               <div className="relative flex flex-col md:flex-row md:items-center md:justify-between gap-5">
                 <div className="text-white max-w-2xl">
                   <div className="inline-flex items-center gap-1.5 rounded-full border-2 border-black bg-[#FFE89E] text-black px-3 py-1 text-xs font-extrabold uppercase tracking-wider mb-3">
-                    <Sparkles className="w-3.5 h-3.5" /> Founding offer · 200 spots only
+                    <Sparkles className="w-3.5 h-3.5" /> Founding offer · 250 spots only
                   </div>
                   <h2 className="text-2xl md:text-3xl font-extrabold tracking-tight mb-2">
-                    Be one of the first 200. Keep founding rates for life.
+                    Be one of the first 250. Keep founding rates for life.
                   </h2>
                   <p className="text-sm md:text-base text-white/90 leading-relaxed">
                     Founding members lock in{" "}
-                    <span className="font-extrabold">BND 45/mo</span> and keep it for as
-                    long as they stay subscribed. Once all 200 spots are claimed,
+                    <span className="font-extrabold">BND 39/mo</span> and keep it for as
+                    long as they stay subscribed. Once all 250 spots are claimed,
                     Unlimited Xpress returns to its regular{" "}
-                    <span className="font-extrabold">BND 60/mo</span> — no exceptions.
+                    <span className="font-extrabold">BND 45/mo</span> — no exceptions.
                   </p>
                 </div>
                 {/* Launch countdown */}
