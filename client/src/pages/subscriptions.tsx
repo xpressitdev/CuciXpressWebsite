@@ -25,6 +25,7 @@ type Plan = {
   id: "unlimited" | "family" | "corporate";
   name: string;
   price: string;
+  oldPrice?: string; // founding-member discount: struck-through "was" price
   cadence: string;
   tagline: string;
   features: string[];
@@ -42,6 +43,7 @@ const PLANS: Plan[] = [
     id: "family",
     name: "Multi-Car Family",
     price: "BND 105",
+    oldPrice: "BND 150",
     cadence: "/ month",
     tagline: "Up to 3 cars in one household",
     features: [
@@ -58,6 +60,7 @@ const PLANS: Plan[] = [
     id: "unlimited",
     name: "Unlimited Xpress",
     price: "BND 45",
+    oldPrice: "BND 60",
     cadence: "/ month",
     tagline: "Single car · all branches",
     features: [
@@ -318,6 +321,20 @@ export default function Subscriptions() {
 
                         {/* Price — big & bold per spec */}
                         <div className="flex items-baseline justify-center gap-2 mb-7">
+                          {plan.oldPrice && (
+                            <span
+                              style={{
+                                fontSize: 26,
+                                fontWeight: 700,
+                                color: "rgba(255,255,255,0.6)",
+                                textDecoration: "line-through",
+                                lineHeight: 1,
+                              }}
+                              data-testid={`text-oldprice-${plan.id}`}
+                            >
+                              {plan.oldPrice}
+                            </span>
+                          )}
                           <span
                             style={{
                               fontSize: 64,
@@ -401,6 +418,14 @@ export default function Subscriptions() {
                     </h3>
                     <p className="text-sm text-gray-500 mb-5">{plan.tagline}</p>
                     <div className="flex items-baseline justify-center gap-1 mb-6">
+                      {plan.oldPrice && (
+                        <span
+                          className="text-2xl font-bold text-gray-400 line-through mr-1"
+                          data-testid={`text-oldprice-${plan.id}`}
+                        >
+                          {plan.oldPrice}
+                        </span>
+                      )}
                       <span className="text-5xl font-black tracking-tight text-cuci-primary">
                         {plan.price}
                       </span>
@@ -543,6 +568,11 @@ export default function Subscriptions() {
                 <div className="flex items-center justify-between">
                   <span className="font-bold text-gray-900">{openPlan.name}</span>
                   <span className="font-extrabold text-cuci-primary">
+                    {openPlan.oldPrice && (
+                      <span className="text-gray-400 line-through font-semibold mr-1">
+                        {openPlan.oldPrice}
+                      </span>
+                    )}
                     {openPlan.price}
                     <span className="text-xs font-medium text-gray-500 ml-1">
                       {openPlan.cadence}

@@ -289,6 +289,12 @@ function InactiveUnlimitedCard() {
         Unlimited Xpress
       </h2>
       <p className="text-sm mt-1" style={{ color: "rgba(255,255,255,0.55)" }}>
+        <span
+          className="line-through mr-1"
+          style={{ color: "rgba(255,255,255,0.4)" }}
+        >
+          BND 60
+        </span>
         BND 45/mo · Single car · all branches
       </p>
 
@@ -381,7 +387,11 @@ function UpsellCard({
         data-testid="card-subscription-add-car"
       >
         <h3 className="text-lg font-bold text-gray-900">
-          Cover the whole family for BND 105/mo
+          Cover the whole family for{" "}
+          <span className="text-gray-400 line-through font-semibold">
+            BND 150
+          </span>{" "}
+          BND 105/mo
         </h3>
         <p className="text-sm text-gray-500 mt-1">
           Family plan covers up to 3 vehicles on one membership. Add a second
@@ -424,7 +434,9 @@ function UpsellCard({
       </h3>
       <p className="text-sm text-gray-500 mt-1">
         You have {carsCount} vehicles registered. Family plan covers up to 3
-        cars for BND 105/mo.
+        cars for{" "}
+        <span className="text-gray-400 line-through font-semibold">BND 150</span>{" "}
+        BND 105/mo.
       </p>
       <div className="mt-4 bg-purple-50 rounded-lg p-3">
         <p className="text-[11px] uppercase font-bold text-purple-700">
