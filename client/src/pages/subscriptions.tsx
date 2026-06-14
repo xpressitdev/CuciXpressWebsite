@@ -42,12 +42,12 @@ const PLANS: Plan[] = [
   {
     id: "family",
     name: "Multi-Car Family",
-    price: "BND 105",
-    oldPrice: "BND 150",
+    price: "BND 99",
+    oldPrice: "BND 105",
     cadence: "/ month",
     tagline: "Up to 3 cars in one household",
     features: [
-      "Base car + up to 2 more (B$45 + B$30/car)",
+      "Base car + up to 2 more (B$39 + B$30/car)",
       "1 wash per day per vehicle",
       "Unlimited monthly washes",
       "Shared plan management",
@@ -111,6 +111,8 @@ export default function Subscriptions() {
   const [email, setEmail] = useState("");
   const [phone, setPhone] = useState("");
   const [carPlate, setCarPlate] = useState("");
+  const [carPlate2, setCarPlate2] = useState("");
+  const [carPlate3, setCarPlate3] = useState("");
 
   // Live countdown to the subscription launch (ticks every second).
   const [now, setNow] = useState(() => Date.now());
@@ -165,6 +167,8 @@ export default function Subscriptions() {
       setEmail("");
       setPhone("");
       setCarPlate("");
+      setCarPlate2("");
+      setCarPlate3("");
     },
     onError: (error: any) => {
       toast({
@@ -194,11 +198,18 @@ export default function Subscriptions() {
       });
       return;
     }
+    // Family plans cover up to 3 cars: car 1 is the required base, cars 2 & 3
+    // are optional. All plates go into the single carPlate field, comma-joined.
+    const extraPlates =
+      openPlan.id === "family"
+        ? [carPlate2, carPlate3].map((p) => p.trim()).filter(Boolean)
+        : [];
+    const allPlates = [carPlate.trim(), ...extraPlates].filter(Boolean).join(", ");
     subscribeMutation.mutate({
       email: email.trim(),
       phone: phone.trim(),
       plan: openPlan.id,
-      carPlate: carPlate.trim(),
+      carPlate: allPlates,
     });
   };
 
@@ -696,7 +707,7 @@ export default function Subscriptions() {
                 data-testid="input-subscribe-phone"
               />
             </div>
-            {openPlan && !openPlan.custom && (
+            {openPlan && !openPlan.custom && openPlan.id !== "family" && (
               <div className="space-y-1.5">
                 <Label htmlFor="sub-plate">Car plate</Label>
                 <Input
@@ -710,6 +721,53 @@ export default function Subscriptions() {
                 />
                 <p className="text-xs text-gray-400">
                   The car you want registered on this membership.
+                </p>
+              </div>
+            )}
+            {openPlan && openPlan.id === "family" && (
+              <div className="space-y-3">
+                <div className="space-y-1.5">
+                  <Label htmlFor="sub-plate">Car 1 plate</Label>
+                  <Input
+                    id="sub-plate"
+                    value={carPlate}
+                    onChange={(e) => setCarPlate(e.target.value.toUpperCase())}
+                    placeholder="e.g. BAA 1234"
+                    required
+                    disabled={subscribeMutation.isPending}
+                    data-testid="input-subscribe-plate"
+                  />
+                </div>
+                <div className="space-y-1.5">
+                  <Label htmlFor="sub-plate-2">
+                    Car 2 plate{" "}
+                    <span className="text-gray-400 font-normal">(optional)</span>
+                  </Label>
+                  <Input
+                    id="sub-plate-2"
+                    value={carPlate2}
+                    onChange={(e) => setCarPlate2(e.target.value.toUpperCase())}
+                    placeholder="e.g. BAB 5678"
+                    disabled={subscribeMutation.isPending}
+                    data-testid="input-subscribe-plate-2"
+                  />
+                </div>
+                <div className="space-y-1.5">
+                  <Label htmlFor="sub-plate-3">
+                    Car 3 plate{" "}
+                    <span className="text-gray-400 font-normal">(optional)</span>
+                  </Label>
+                  <Input
+                    id="sub-plate-3"
+                    value={carPlate3}
+                    onChange={(e) => setCarPlate3(e.target.value.toUpperCase())}
+                    placeholder="e.g. BAC 9012"
+                    disabled={subscribeMutation.isPending}
+                    data-testid="input-subscribe-plate-3"
+                  />
+                </div>
+                <p className="text-xs text-gray-400">
+                  Register up to 3 cars in your household on this family plan.
                 </p>
               </div>
             )}
