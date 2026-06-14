@@ -28,3 +28,9 @@ sending from an authenticated domain, not anything in the OTP logic.
   and never print the key.
 - If OTP/email "stops working" after this, first check whether SendGrid's "from"
   domain/sender is still verified before touching the OTP flow.
+- **Account-level gotcha:** domain auth being valid is NOT enough — the SendGrid
+  account must also have sending allowance. A free account whose allowance lapsed
+  returns 401 `Maximum credits exceeded` (`/v3/user/credits` total/remain = 0) and
+  every send silently falls back to Gmail. Fixed by upgrading to a paid plan
+  (`/v3/user/account` type=`paid`). Verify end-to-end with a real send and expect
+  HTTP 202; check `/v3/user/account` type + `/v3/user/credits` if sends fail.
