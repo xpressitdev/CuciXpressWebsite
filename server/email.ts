@@ -1,10 +1,23 @@
 import nodemailer from 'nodemailer';
+import sgMail from '@sendgrid/mail';
 
 const GMAIL_USER = 'cucixpress.bn@gmail.com';
 const GMAIL_APP_PASSWORD = process.env.GMAIL_APP_PASSWORD;
+const SENDGRID_API_KEY = process.env.SENDGRID_API_KEY;
 
+// "From" identity for all outbound mail. For best inbox delivery this must be an
+// address on a SendGrid domain-authenticated domain (e.g. noreply@cucixpress.com).
+// Override with the MAIL_FROM env var if you authenticate a different address.
+const MAIL_FROM = process.env.MAIL_FROM || 'noreply@cucixpress.com';
+const MAIL_FROM_NAME = 'Cuci Xpress';
+
+if (SENDGRID_API_KEY) {
+  sgMail.setApiKey(SENDGRID_API_KEY);
+} else {
+  console.log('SENDGRID_API_KEY not set - SendGrid disabled, will use Gmail fallback');
+}
 if (!GMAIL_APP_PASSWORD) {
-  console.log('GMAIL_APP_PASSWORD not set - email notifications disabled');
+  console.log('GMAIL_APP_PASSWORD not set - Gmail fallback disabled');
 }
 
 function createTransporter() {
@@ -15,6 +28,65 @@ function createTransporter() {
       pass: GMAIL_APP_PASSWORD,
     },
   });
+}
+
+/**
+ * Single outbound-mail path for the whole app. Prefers SendGrid (a
+ * transactional provider with domain authentication delivers reliably to the
+ * inbox), and falls back to Gmail SMTP so mail keeps flowing if SendGrid is not
+ * usable yet (e.g. before the cucixpress.com domain is authenticated). Returns
+ * true if any provider accepted the message.
+ */
+async function sendEmail(opts: {
+  to: string;
+  subject: string;
+  html: string;
+  text?: string;
+  replyTo?: string;
+}): Promise<boolean> {
+  // 1. Preferred: SendGrid.
+  if (SENDGRID_API_KEY) {
+    try {
+      await sgMail.send({
+        to: opts.to,
+        from: { email: MAIL_FROM, name: MAIL_FROM_NAME },
+        subject: opts.subject,
+        html: opts.html,
+        ...(opts.text ? { text: opts.text } : {}),
+        ...(opts.replyTo ? { replyTo: opts.replyTo } : {}),
+      });
+      return true;
+    } catch (err: any) {
+      // Common reason before DNS setup: the domain/sender isn't verified yet.
+      // Log the SendGrid error detail and fall through to Gmail.
+      console.error(
+        '[email] SendGrid send failed, falling back to Gmail:',
+        err?.response?.body?.errors ?? err?.message ?? err
+      );
+    }
+  }
+
+  // 2. Fallback: Gmail SMTP (legacy path).
+  if (GMAIL_APP_PASSWORD) {
+    try {
+      const transporter = createTransporter();
+      await transporter.sendMail({
+        from: `"${MAIL_FROM_NAME}" <${GMAIL_USER}>`,
+        to: opts.to,
+        subject: opts.subject,
+        html: opts.html,
+        ...(opts.text ? { text: opts.text } : {}),
+        ...(opts.replyTo ? { replyTo: opts.replyTo } : {}),
+      });
+      return true;
+    } catch (err) {
+      console.error('[email] Gmail send failed:', err);
+      return false;
+    }
+  }
+
+  console.log('[email] no email provider configured — email not sent');
+  return false;
 }
 
 interface PaymentConfirmationData {
@@ -28,8 +100,8 @@ interface PaymentConfirmationData {
 }
 
 export async function sendPaymentConfirmation(data: PaymentConfirmationData): Promise<boolean> {
-  if (!GMAIL_APP_PASSWORD) {
-    console.log('Gmail not configured - skipping payment confirmation email');
+  if (!GMAIL_APP_PASSWORD && !SENDGRID_API_KEY) {
+    console.log('No email provider configured - skipping payment confirmation email');
     return false;
   }
 
@@ -152,27 +224,19 @@ Need help? Call +673 838 7000 or visit cucixpress.com
 Cuci Xpress | 120,000+ cars cleaned | BND 1M+ revenue | 5 branches
   `;
 
-  try {
-    const transporter = createTransporter();
-    await transporter.sendMail({
-      from: `"Cuci Xpress" <${GMAIL_USER}>`,
-      to: data.customerEmail,
-      subject: `Payment Confirmed ✅ – ${data.service} at ${branchDisplay}`,
-      text: emailText,
-      html: emailHtml,
-    });
-
-    console.log(`Payment confirmation email sent to ${data.customerEmail}`);
-    return true;
-  } catch (error) {
-    console.error('Gmail email error:', error);
-    return false;
-  }
+  const ok = await sendEmail({
+    to: data.customerEmail,
+    subject: `Payment Confirmed ✅ – ${data.service} at ${branchDisplay}`,
+    text: emailText,
+    html: emailHtml,
+  });
+  if (ok) console.log(`Payment confirmation email sent to ${data.customerEmail}`);
+  return ok;
 }
 
 export async function sendCollaborationEmail(data: any): Promise<boolean> {
-  if (!GMAIL_APP_PASSWORD) {
-    console.log('Gmail not configured - skipping collaboration email');
+  if (!GMAIL_APP_PASSWORD && !SENDGRID_API_KEY) {
+    console.log('No email provider configured - skipping collaboration email');
     return false;
   }
 
@@ -199,21 +263,14 @@ export async function sendCollaborationEmail(data: any): Promise<boolean> {
   </html>
   `;
 
-  try {
-    const transporter = createTransporter();
-    await transporter.sendMail({
-      from: `"Cuci Xpress Website" <${GMAIL_USER}>`,
-      to: GMAIL_USER,
-      replyTo: data.email,
-      subject: `New Collaboration Inquiry from ${data.name}`,
-      html: emailHtml,
-    });
-    console.log('Collaboration email sent');
-    return true;
-  } catch (error) {
-    console.error('Gmail collaboration email error:', error);
-    return false;
-  }
+  const ok = await sendEmail({
+    to: GMAIL_USER,
+    replyTo: data.email,
+    subject: `New Collaboration Inquiry from ${data.name}`,
+    html: emailHtml,
+  });
+  if (ok) console.log('Collaboration email sent');
+  return ok;
 }
 
 // ============================================================
@@ -226,8 +283,8 @@ export async function sendOtpEmail(args: {
   ttlMinutes: number;
   purpose: 'register' | 'signin';
 }): Promise<boolean> {
-  if (!GMAIL_APP_PASSWORD) {
-    console.log(`[email] GMAIL_APP_PASSWORD not set — would have sent OTP ${args.code} to ${args.to}`);
+  if (!GMAIL_APP_PASSWORD && !SENDGRID_API_KEY) {
+    console.log(`[email] no email provider configured — would have sent OTP to ${args.to}`);
     return false;
   }
 
@@ -264,21 +321,15 @@ export async function sendOtpEmail(args: {
 
   const text = `Cuci Xpress — ${heading}\n\n${blurb}\n\nYour code: ${args.code}\n\nExpires in ${args.ttlMinutes} minutes.\nIf you didn't request this, ignore this email.`;
 
-  try {
-    const transporter = createTransporter();
-    await transporter.sendMail({
-      from: `"Cuci Xpress" <${GMAIL_USER}>`,
-      to: args.to,
-      subject: `${args.code} is your Cuci Xpress code`,
-      text,
-      html,
-    });
-    console.log(`[email] OTP sent to ${args.to}`);
-    return true;
-  } catch (err) {
-    console.error('[email] OTP send failed:', err);
-    return false;
-  }
+  const ok = await sendEmail({
+    to: args.to,
+    subject: `${args.code} is your Cuci Xpress code`,
+    text,
+    html,
+  });
+  if (ok) console.log(`[email] OTP sent to ${args.to}`);
+  else console.error(`[email] OTP send failed to ${args.to}`);
+  return ok;
 }
 
 interface SubscriptionNotificationData {
@@ -287,8 +338,8 @@ interface SubscriptionNotificationData {
 }
 
 export async function sendSubscriptionNotification(data: SubscriptionNotificationData): Promise<boolean> {
-  if (!GMAIL_APP_PASSWORD) {
-    console.log('Gmail not configured - skipping subscription email');
+  if (!GMAIL_APP_PASSWORD && !SENDGRID_API_KEY) {
+    console.log('No email provider configured - skipping subscription email');
     return false;
   }
 
@@ -322,18 +373,11 @@ export async function sendSubscriptionNotification(data: SubscriptionNotificatio
   </html>
   `;
 
-  try {
-    const transporter = createTransporter();
-    await transporter.sendMail({
-      from: `"Cuci Xpress" <${GMAIL_USER}>`,
-      to: data.email,
-      subject: 'Welcome to Cuci Xpress – You\'re on the subscription list! 🚗',
-      html: emailHtml,
-    });
-    console.log(`Subscription notification sent to ${data.email}`);
-    return true;
-  } catch (error) {
-    console.error('Gmail subscription email error:', error);
-    return false;
-  }
+  const ok = await sendEmail({
+    to: data.email,
+    subject: 'Welcome to Cuci Xpress – You\'re on the subscription list! 🚗',
+    html: emailHtml,
+  });
+  if (ok) console.log(`Subscription notification sent to ${data.email}`);
+  return ok;
 }

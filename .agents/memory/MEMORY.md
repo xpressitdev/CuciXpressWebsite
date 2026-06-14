@@ -20,4 +20,5 @@
 - [Loyalty collection cutover](loyalty-collection-cutover.md) — "reset everyone's stamps, start today" = a date-cutoff constant on the 4 AUTO-count readers, NOT data deletion; manual stamps stay un-filtered.
 - [Dev server has no watch](dev-server-no-watch.md) — `server/**` edits don't hot-reload (tsx, no watch); restart the workflow before curl-testing backend changes. Client edits do reload.
 - [Plate regex escaping](plate-regex-escaping.md) — in drizzle `sql` templates, plate-normalize `\s` cooks to `s` (strips letters); use `\\s+` to match cars_plate_normalized_unique or POS upserts 500.
+- [Email delivery: SendGrid + Gmail fallback](email-sendgrid-delivery.md) — missed OTPs = deliverability, not code; SendGrid-first needs cucixpress.com domain auth (3 CNAMEs valid), else 403→Gmail.
 - [MDR fee rates](mdr-fee-rates.md) — fee table keyed by method|qr_provider (missing=0bps); MUST use COALESCE NULL-safe unique index or dup (card,NULL) rows break the rate map. Fee on GROSS; net-after-fees is headline.
