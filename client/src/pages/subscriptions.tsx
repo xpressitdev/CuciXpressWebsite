@@ -153,10 +153,10 @@ export default function Subscriptions() {
     onSuccess: async (res: any) => {
       const data = await res.json().catch(() => ({}));
       toast({
-        title: openPlan?.custom ? "Thanks — we'll be in touch" : "You're on the list",
+        title: openPlan?.custom ? "Thanks — we'll be in touch" : "Your founding spot is reserved",
         description:
           data?.message ||
-          "Got it — we'll text you within 24 hours to activate your plan.",
+          "You're in. We'll text you at launch (19 June) to activate your plan and book your first wash.",
       });
       setOpenPlan(null);
       setEmail("");
@@ -643,7 +643,7 @@ export default function Subscriptions() {
             <DialogDescription>
               {openPlan?.custom
                 ? "Drop your details and our team will reach out within one business day."
-                : "Drop your details — our team will text you within 24 hours to activate the plan and arrange your first wash."}
+                : "Reserve your founding spot now and lock in this price for life. We launch 19 June — we'll text you at launch to activate your plan and book your first wash."}
             </DialogDescription>
           </DialogHeader>
           <form onSubmit={handleSubmit} className="space-y-4">

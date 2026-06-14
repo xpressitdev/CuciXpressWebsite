@@ -505,7 +505,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
       res.json({
         success: true,
         message: data.plan
-          ? "Got it — we'll text you within 24 hours to activate your plan."
+          ? "You're in. Your founding spot is reserved — we'll text you at launch (19 June) to activate your plan and book your first wash."
           : "Thank you! We'll notify you when our subscription service launches.",
       });
     } catch (error) {
