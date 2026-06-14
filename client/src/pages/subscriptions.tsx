@@ -127,6 +127,9 @@ export default function Subscriptions() {
     seconds: Math.floor((msLeft % 60_000) / 1_000),
   };
 
+  // The founding offer is the popular (Unlimited) plan — the banner CTA opens it.
+  const foundingPlan = PLANS.find((p) => p.popular) ?? null;
+
   // Prefill when logged in. /api/customer/me returns 401 if not logged in —
   // react-query just leaves data undefined and we keep the inputs empty.
   const { data: me } = useQuery<CustomerMe>({
@@ -265,54 +268,73 @@ export default function Subscriptions() {
                     <span className="font-extrabold">BND 45/mo</span> — no exceptions.
                   </p>
                 </div>
-                {/* Launch countdown */}
-                <div
-                  className="flex-shrink-0 w-full md:w-72 rounded-xl border-2 border-black bg-white/95 p-4"
-                  data-testid="countdown-launch"
-                >
-                  <div className="flex items-center justify-between mb-2.5">
-                    <span className="text-xs font-bold text-gray-500 uppercase tracking-wide">
-                      {launched ? "Now live" : "Launching in"}
-                    </span>
-                    <span className="text-[11px] font-bold text-cuci-primary uppercase tracking-wide">
-                      19 Jun · 7PM BNT
-                    </span>
-                  </div>
-                  {launched ? (
-                    <p
-                      className="text-2xl font-black text-cuci-primary leading-tight"
-                      data-testid="text-launch-live"
-                    >
-                      Subscriptions are live! 🎉
-                    </p>
-                  ) : (
-                    <div className="grid grid-cols-4 gap-1.5 text-center">
-                      {[
-                        { label: "Days", value: countdown.days },
-                        { label: "Hrs", value: countdown.hours },
-                        { label: "Min", value: countdown.minutes },
-                        { label: "Sec", value: countdown.seconds },
-                      ].map((u) => (
-                        <div
-                          key={u.label}
-                          className="rounded-lg border border-black/10 bg-gray-50 py-2"
-                        >
-                          <div
-                            className="text-2xl font-black text-cuci-primary leading-none tabular-nums"
-                            data-testid={`countdown-${u.label.toLowerCase()}`}
-                          >
-                            {String(u.value).padStart(2, "0")}
-                          </div>
-                          <div className="text-[10px] font-bold text-gray-400 uppercase tracking-wide mt-1">
-                            {u.label}
-                          </div>
-                        </div>
-                      ))}
-                    </div>
-                  )}
+                {/* Founding CTA — opens the Unlimited founding plan dialog */}
+                <div className="flex-shrink-0 w-full md:w-auto flex flex-col items-stretch md:items-end gap-2">
+                  <Button
+                    onClick={() => foundingPlan && setOpenPlan(foundingPlan)}
+                    className="cuci-cta rounded-lg px-6 py-6 text-base"
+                    style={{ background: "#fff", color: "#7C5CE7" }}
+                    data-testid="button-banner-claim"
+                  >
+                    <span className="mr-1">✦</span>
+                    Claim founding price
+                    <ArrowRight className="w-4 h-4 ml-1" />
+                  </Button>
+                  <span className="text-xs font-semibold text-white/90 text-center md:text-right">
+                    Lock in BND 39/mo for life
+                  </span>
                 </div>
               </div>
             </motion.div>
+
+            {/* Launch countdown — sits just above the plan cards */}
+            <div className="flex justify-center mb-8">
+              <div
+                className="w-full max-w-lg rounded-xl border-2 border-black bg-white p-4 shadow-[4px_4px_0_0_rgba(0,0,0,0.9)]"
+                data-testid="countdown-launch"
+              >
+                <div className="flex items-center justify-between mb-2.5">
+                  <span className="text-xs font-bold text-gray-500 uppercase tracking-wide">
+                    {launched ? "Now live" : "Launching in"}
+                  </span>
+                  <span className="text-[11px] font-bold text-cuci-primary uppercase tracking-wide">
+                    19 Jun · 7PM BNT
+                  </span>
+                </div>
+                {launched ? (
+                  <p
+                    className="text-2xl font-black text-cuci-primary leading-tight text-center"
+                    data-testid="text-launch-live"
+                  >
+                    Subscriptions are live! 🎉
+                  </p>
+                ) : (
+                  <div className="grid grid-cols-4 gap-2 text-center">
+                    {[
+                      { label: "Days", value: countdown.days },
+                      { label: "Hrs", value: countdown.hours },
+                      { label: "Min", value: countdown.minutes },
+                      { label: "Sec", value: countdown.seconds },
+                    ].map((u) => (
+                      <div
+                        key={u.label}
+                        className="rounded-lg border border-black/10 bg-gray-50 py-3"
+                      >
+                        <div
+                          className="text-3xl font-black text-cuci-primary leading-none tabular-nums"
+                          data-testid={`countdown-${u.label.toLowerCase()}`}
+                        >
+                          {String(u.value).padStart(2, "0")}
+                        </div>
+                        <div className="text-[10px] font-bold text-gray-400 uppercase tracking-wide mt-1">
+                          {u.label}
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
+            </div>
             <div className="grid md:grid-cols-3 gap-6">
               {PLANS.map((plan, i) => {
                 const Icon = plan.icon;
