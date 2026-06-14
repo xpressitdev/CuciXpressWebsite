@@ -2066,7 +2066,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
           customer: {
             id, phone: null, name: car.license_plate, notes: null,
             user_id: null, created_at: car.last_seen_at,
-            kind: 'ghost', has_account: false,
+            kind: 'ghost', has_account: false, email: null,
           },
           vehicles: [{
             id: car.id, license_plate: car.license_plate, brand: car.brand, model: car.model,
@@ -2100,9 +2100,12 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
     try {
       const cust = (await db.execute(sql`
-        SELECT id, phone, name, notes, user_id, created_at,
-               'customer'::text AS kind, (user_id IS NOT NULL) AS has_account
-          FROM customers WHERE id = ${id} LIMIT 1
+        SELECT c.id, c.phone, c.name, c.notes, c.user_id, c.created_at,
+               'customer'::text AS kind, (c.user_id IS NOT NULL) AS has_account,
+               u.email AS email
+          FROM customers c
+          LEFT JOIN users u ON u.id = c.user_id
+         WHERE c.id = ${id} LIMIT 1
       `)).rows[0] as any;
       if (!cust) return res.status(404).json({ error: 'not_found' });
 
@@ -2209,22 +2212,60 @@ export async function registerRoutes(app: Express): Promise<Server> {
     const schema = z.object({
       name: z.string().trim().min(1).max(120).optional(),
       notes: z.string().trim().max(2000).nullable().optional(),
+      email: z.string().trim().email().max(254).optional(),
     });
     const parsed = schema.safeParse(req.body);
     if (!parsed.success) return res.status(400).json({ error: 'invalid_request', details: parsed.error.flatten() });
     const { name, notes } = parsed.data;
+    const email = parsed.data.email?.toLowerCase();
+
+    // Sentinel for "return this HTTP status from inside the transaction".
+    // Thrown (not returned) so the transaction rolls back — we never want a
+    // partial commit where name/notes save but the email change is rejected.
+    const httpErr = (status: number, body: unknown) =>
+      Object.assign(new Error('http_result'), { __http: { status, body } });
+
     try {
-      const rows = (await db.execute(sql`
-        UPDATE customers SET
-          name       = COALESCE(${name ?? null}, name),
-          notes      = CASE WHEN ${notes === undefined} THEN notes ELSE ${notes ?? null} END,
-          updated_at = NOW()
-         WHERE id = ${id}
-        RETURNING id, phone, name, notes, user_id, created_at, updated_at
-      `)).rows;
-      if (rows.length === 0) return res.status(404).json({ error: 'not_found' });
-      res.json({ customer: rows[0] });
-    } catch (err) {
+      const customer = await db.transaction(async (tx) => {
+        const rows = (await tx.execute(sql`
+          UPDATE customers SET
+            name       = COALESCE(${name ?? null}, name),
+            notes      = CASE WHEN ${notes === undefined} THEN notes ELSE ${notes ?? null} END,
+            updated_at = NOW()
+           WHERE id = ${id}
+          RETURNING id, phone, name, notes, user_id, created_at, updated_at
+        `)).rows;
+        if (rows.length === 0) throw httpErr(404, { error: 'not_found' });
+        const row = rows[0] as any;
+
+        // Optional email change. Email lives on the linked users row, not on
+        // customers, so this is only valid for customers who actually have an
+        // account. The new address must be free (case-insensitive) to avoid
+        // colliding with another user's login identifier.
+        if (email !== undefined) {
+          if (!row.user_id) throw httpErr(400, { error: 'no_account' });
+          const clash = (await tx.execute(sql`
+            SELECT id FROM users WHERE LOWER(email) = ${email} AND id <> ${row.user_id} LIMIT 1
+          `)).rows[0];
+          if (clash) throw httpErr(409, { error: 'email_taken' });
+          await tx.execute(sql`UPDATE users SET email = ${email} WHERE id = ${row.user_id}`);
+          row.email = email;
+        } else if (row.user_id) {
+          const u = (await tx.execute(sql`
+            SELECT email FROM users WHERE id = ${row.user_id} LIMIT 1
+          `)).rows[0] as any;
+          row.email = u?.email ?? null;
+        } else {
+          row.email = null;
+        }
+        return row;
+      });
+      res.json({ customer });
+    } catch (err: any) {
+      if (err?.__http) return res.status(err.__http.status).json(err.__http.body);
+      // Race fallback: a concurrent writer grabbed the email between our
+      // check and update and the DB rejected the duplicate.
+      if (err?.code === '23505') return res.status(409).json({ error: 'email_taken' });
       console.error('[admin.customers.update] failed:', err);
       res.status(500).json({ error: 'update_failed' });
     }

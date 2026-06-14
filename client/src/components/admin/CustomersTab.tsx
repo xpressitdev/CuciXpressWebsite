@@ -16,7 +16,7 @@ import {
 import { Separator } from "@/components/ui/separator";
 import {
   Search, Phone, Car as CarIcon, Receipt, ChevronLeft, ChevronRight,
-  Pencil, Save, X, MapPin, Globe, Clock, AlertTriangle, CheckCircle2,
+  Pencil, Save, X, MapPin, Globe, Clock, AlertTriangle, CheckCircle2, Mail,
   Download, Crown, AlertCircle, Building2, Sparkles, Users, History,
   TrendingUp, Award, Medal, UserPlus, Trash2,
 } from "lucide-react";
@@ -132,7 +132,7 @@ const SEGMENT_OPTIONS = [
 interface CustomerDetailResp {
   customer: {
     id: number; phone: string | null; name: string; notes: string | null;
-    user_id: number | null; created_at: string;
+    user_id: number | null; created_at: string; email: string | null;
     kind?: "customer" | "ghost"; has_account?: boolean;
   };
   vehicles: Array<{
@@ -1036,10 +1036,11 @@ function CustomerDetail({ id, onDeleted }: { id: number; onDeleted?: () => void 
   const [editing, setEditing] = useState(false);
   const [editName, setEditName] = useState("");
   const [editNotes, setEditNotes] = useState("");
+  const [editEmail, setEditEmail] = useState("");
   const [confirmDelete, setConfirmDelete] = useState(false);
 
   const update = useMutation({
-    mutationFn: async (body: { name?: string; notes?: string | null }) => {
+    mutationFn: async (body: { name?: string; notes?: string | null; email?: string }) => {
       return apiRequest("PATCH", `/api/admin/customers/${id}`, body);
     },
     onSuccess: () => {
@@ -1047,7 +1048,18 @@ function CustomerDetail({ id, onDeleted }: { id: number; onDeleted?: () => void 
       toast({ title: "Saved", description: "Customer updated." });
       setEditing(false);
     },
-    onError: () => toast({ title: "Failed to save", variant: "destructive" }),
+    onError: (err: any) => {
+      const msg = String(err?.message ?? err);
+      toast({
+        title: "Failed to save",
+        description: msg.includes("email_taken")
+          ? "That email is already used by another account."
+          : msg.includes("no_account")
+          ? "This customer has no account yet, so an email can't be set."
+          : undefined,
+        variant: "destructive",
+      });
+    },
   });
 
   const remove = useMutation({
@@ -1081,6 +1093,7 @@ function CustomerDetail({ id, onDeleted }: { id: number; onDeleted?: () => void 
   const startEdit = () => {
     setEditName(customer.name);
     setEditNotes(customer.notes ?? "");
+    setEditEmail(customer.email ?? "");
     setEditing(true);
   };
 
@@ -1091,6 +1104,21 @@ function CustomerDetail({ id, onDeleted }: { id: number; onDeleted?: () => void 
         {editing ? (
           <>
             <Input value={editName} onChange={(e) => setEditName(e.target.value)} placeholder="Name" data-testid="input-edit-name" />
+            {customer.user_id != null && (
+              <div className="space-y-1">
+                <Input
+                  type="email"
+                  value={editEmail}
+                  onChange={(e) => setEditEmail(e.target.value)}
+                  placeholder="Login email"
+                  data-testid="input-edit-email"
+                />
+                <p className="text-xs text-gray-500">
+                  Login email — sign-in codes are sent here. Only change this if the
+                  customer confirms it's their address.
+                </p>
+              </div>
+            )}
             <textarea
               className="w-full border-2 border-black rounded-md p-2 text-sm"
               rows={3}
@@ -1104,7 +1132,21 @@ function CustomerDetail({ id, onDeleted }: { id: number; onDeleted?: () => void 
                 size="sm"
                 className="cuci-cta border-2 border-black"
                 disabled={update.isPending || editName.trim().length === 0}
-                onClick={() => update.mutate({ name: editName.trim(), notes: editNotes.trim() || null })}
+                onClick={() => {
+                  const payload: { name: string; notes: string | null; email?: string } = {
+                    name: editName.trim(),
+                    notes: editNotes.trim() || null,
+                  };
+                  const nextEmail = editEmail.trim();
+                  if (
+                    customer.user_id != null &&
+                    nextEmail &&
+                    nextEmail.toLowerCase() !== (customer.email ?? "").toLowerCase()
+                  ) {
+                    payload.email = nextEmail;
+                  }
+                  update.mutate(payload);
+                }}
                 data-testid="button-save-customer"
               >
                 <Save className="w-4 h-4 mr-1" /> Save
@@ -1128,6 +1170,16 @@ function CustomerDetail({ id, onDeleted }: { id: number; onDeleted?: () => void 
                     <span className="italic">No phone on file — legacy plate only</span>
                   )}
                 </div>
+                {customer.user_id != null && (
+                  <div className="text-xs text-gray-500 flex items-center gap-1 mt-0.5 truncate">
+                    <Mail className="w-3 h-3 shrink-0" />
+                    {customer.email ? (
+                      <span className="truncate">{customer.email}</span>
+                    ) : (
+                      <span className="italic">No email on file</span>
+                    )}
+                  </div>
+                )}
               </div>
               {!isGhost && (
                 <div className="flex gap-1.5 shrink-0">
