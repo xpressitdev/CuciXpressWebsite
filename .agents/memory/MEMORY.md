@@ -12,6 +12,7 @@
 - [Loyalty manual stamps](loyalty-manual-stamps.md) — manual stamps ADD ON TOP of auto-counted orders; one attribution rule (vehicle_id wins, plate-norm fallback when null) must match across lookup/customer-card/redeem.
 - [Loyalty voucher reward label](loyalty-voucher-label.md) — redeemed free wash shows "5th Free Wash" but keeps qualifying package_id; API splits reward_name vs qualifying package_name; best-selling B$0 split is intentional.
 - [Shift totals = shared drawer](shift-totals-shared-drawer.md) — cash reports scope by branch+day (not shift_id); each branch = one shared drawer banked daily. Orders keep shift_id for audit only.
+- [Business day = Brunei not UTC](business-day-timezone.md) — "today" reports must use Brunei created_at day; UTC ticket_day rolls at 08:00 Brunei and leaks yesterday into the pre-8am cash report.
 - [Sales/refund accounting](sales-refund-accounting.md) — report "sales_cents" must be GROSS (incl refunded) so net=sales-refunds ties out; excl-refunded + subtracting refunds double-counts.
 - [Add-on line quantity & category](addon-line-quantity.md) — bulk selling is per-add-on qty in the order addons jsonb (fallback ?? 1), not on orders; packages stay single-wash; orders.quantity column left in DB but unused.
 - [DB migration workflow](db-migration-workflow.md) — db:push/drizzle-kit are BLOCKED; change schema via raw idempotent SQL in migrations/manual applied to BOTH $DATABASE_URL and $STAGING_DATABASE_URL.

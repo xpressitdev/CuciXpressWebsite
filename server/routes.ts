@@ -7784,7 +7784,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
                refunded_at, refund_reason, queue_position
           FROM orders
          WHERE branch_id = ${branchId}
-           AND ticket_day = (now() AT TIME ZONE 'UTC')::date
+           AND date(created_at AT TIME ZONE 'Asia/Brunei') = (now() AT TIME ZONE 'Asia/Brunei')::date
          ORDER BY created_at DESC
          LIMIT 50
       `)).rows;
@@ -7814,10 +7814,9 @@ export async function registerRoutes(app: Express): Promise<Server> {
   // staff (or which shift) rang them up. Returns sales, refunds, expected
   // cash, and a per-payment-method breakdown. Reused by the running view
   // (today), the close screen (today), and the admin detail (the shift's
-  // own day). `day` is a 'YYYY-MM-DD' string in the same UTC convention
-  // used to bucket orders into ticket_day on insert. Pass `null` for the
-  // live "today" view so the day is derived in DB time — this avoids any
-  // app-vs-DB clock drift around the UTC midnight boundary.
+  // own day). `day` is a 'YYYY-MM-DD' Brunei (UTC+8) calendar-day string.
+  // Pass `null` for the live "today" view so the day is derived in DB time —
+  // this avoids any app-vs-DB clock drift around the day boundary.
   // --- MDR (merchant transaction fee) helpers --------------------------
   // Rate map keyed by `${payment_method}|${qr_provider ?? ''}` -> basis points.
   // Missing keys (cash, bank transfer, unconfigured wallets) = 0% fee.
@@ -7849,9 +7848,14 @@ export async function registerRoutes(app: Express): Promise<Server> {
     day: string | null,
     openingFloatCents: number,
   ) {
+    // Business day = Brunei (UTC+8, no DST) calendar day. Orders are bucketed
+    // to the day they were created in Brunei wall-clock time, NOT the UTC date.
+    // UTC midnight is 08:00 Brunei, so a shift opening at ~07:45 used to resolve
+    // "today" to the previous UTC date and fold the prior day's sales/refunds
+    // into the live report. Derived in DB time to avoid app-vs-DB clock drift.
     const dayFilter = day === null
-      ? sql`ticket_day = (now() AT TIME ZONE 'UTC')::date`
-      : sql`ticket_day = ${day}::date`;
+      ? sql`date(created_at AT TIME ZONE 'Asia/Brunei') = (now() AT TIME ZONE 'Asia/Brunei')::date`
+      : sql`date(created_at AT TIME ZONE 'Asia/Brunei') = ${day}::date`;
     // Group by (payment_method, qr_provider) — MDR rates differ per wallet
     // (Progresif Ding vs Pocket QR vs Pocket Web are all 'qr_code').
     const rawRows = (await runner.execute(sql`
@@ -8171,9 +8175,11 @@ export async function registerRoutes(app: Express): Promise<Server> {
       `)).rows as any[];
       if (rows.length === 0) return res.status(404).json({ error: 'not_found' });
       const shift = rows[0];
-      // Shared drawer: show this branch's whole-day totals for the day this
-      // shift was opened (UTC bucket, matching ticket_day on the orders).
-      const shiftDay = new Date(shift.opened_at).toISOString().slice(0, 10);
+      // Shared drawer: show this branch's whole-day totals for the Brunei
+      // (UTC+8, no DST) calendar day this shift was opened. Matches the live
+      // report's Brunei-day bucketing in computeShiftTotals.
+      const shiftDay = new Date(new Date(shift.opened_at).getTime() + 8 * 60 * 60 * 1000)
+        .toISOString().slice(0, 10);
       const totals = await computeShiftTotals(db, shift.branch_id, shiftDay, shift.opening_float_cents);
       res.json({ shift, totals });
     } catch (err) {
