@@ -63,7 +63,7 @@ const serviceOptions: ServiceOption[] = [
       "Rain re-wash guarantee",
       "All locations included",
       "Family & corporate plans",
-      "Starting from BND 60/month",
+      "Starting from BND 45/month",
       "Sign up for early access!"
     ]
   }

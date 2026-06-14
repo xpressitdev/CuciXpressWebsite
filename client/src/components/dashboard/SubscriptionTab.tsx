@@ -289,7 +289,7 @@ function InactiveUnlimitedCard() {
         Unlimited Xpress
       </h2>
       <p className="text-sm mt-1" style={{ color: "rgba(255,255,255,0.55)" }}>
-        BND 60/mo · Single car · all branches
+        BND 45/mo · Single car · all branches
       </p>
 
       <div
@@ -325,7 +325,7 @@ function InactiveUnlimitedCard() {
           }}
           data-testid="link-see-plans"
         >
-          Subscribe — BND 60/mo
+          Subscribe — BND 45/mo
           <ArrowRight className="w-4 h-4" />
         </Link>
         <p
@@ -381,7 +381,7 @@ function UpsellCard({
         data-testid="card-subscription-add-car"
       >
         <h3 className="text-lg font-bold text-gray-900">
-          Cover the whole family for BND 150/mo
+          Cover the whole family for BND 105/mo
         </h3>
         <p className="text-sm text-gray-500 mt-1">
           Family plan covers up to 3 vehicles on one membership. Add a second
@@ -424,13 +424,13 @@ function UpsellCard({
       </h3>
       <p className="text-sm text-gray-500 mt-1">
         You have {carsCount} vehicles registered. Family plan covers up to 3
-        cars for BND 150/mo.
+        cars for BND 105/mo.
       </p>
       <div className="mt-4 bg-purple-50 rounded-lg p-3">
         <p className="text-[11px] uppercase font-bold text-purple-700">
           Difference
         </p>
-        <p className="text-2xl font-black text-cuci-primary">+BND 90/mo</p>
+        <p className="text-2xl font-black text-cuci-primary">+BND 60/mo</p>
         <p className="text-[11px] text-gray-500 mt-1">
           Adds {cars[1]?.brand ?? "another car"} to your plan
         </p>

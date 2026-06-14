@@ -41,11 +41,11 @@ const PLANS: Plan[] = [
   {
     id: "family",
     name: "Multi-Car Family",
-    price: "BND 150",
+    price: "BND 105",
     cadence: "/ month",
     tagline: "Up to 3 cars in one household",
     features: [
-      "Up to 3 vehicles covered",
+      "Base car + up to 2 more (B$45 + B$30/car)",
       "1 wash per day per vehicle",
       "Unlimited monthly washes",
       "Shared plan management",
@@ -57,10 +57,11 @@ const PLANS: Plan[] = [
   {
     id: "unlimited",
     name: "Unlimited Xpress",
-    price: "BND 60",
+    price: "BND 45",
     cadence: "/ month",
     tagline: "Single car · all branches",
     features: [
+      "Founding member price — locked in while subscribed",
       "Unlimited exterior washes",
       "1 registered vehicle",
       "Rain re-wash guarantee",

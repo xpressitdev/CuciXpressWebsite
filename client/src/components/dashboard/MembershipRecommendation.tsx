@@ -10,7 +10,7 @@ interface Props {
   memberships: MembershipRow[];
 }
 
-const UNLIMITED_PRICE_CENTS = 6000; // BND 60 / month — see /subscriptions catalog.
+const UNLIMITED_PRICE_CENTS = 4500; // BND 45 / month — see /subscriptions catalog.
 const BREAK_EVEN_WASHES = 5;        // ≥5 paid washes/month → Unlimited usually wins.
 
 // Average per-wash spend across the customer's recent pay-as-you-go orders.
@@ -89,7 +89,7 @@ export function MembershipRecommendation({ me, orders, memberships }: Props) {
                 You wash about <strong>{forecastWashes}× / month</strong> at{" "}
                 <strong>{formatBND(avgCents)}</strong> average. That's{" "}
                 <strong>{formatBND(projectedSpendCents)}</strong>{" "}
-                pay-as-you-go vs <strong>BND 60</strong> on Unlimited — for the
+                pay-as-you-go vs <strong>BND 45</strong> on Unlimited — for the
                 same car, all 5 branches.
               </p>
             </>
@@ -105,7 +105,7 @@ export function MembershipRecommendation({ me, orders, memberships }: Props) {
               <p className="text-sm text-gray-600 mt-1">
                 Right now you wash about <strong>{forecastWashes}×/month</strong>.
                 Once you hit ~{Math.ceil(UNLIMITED_PRICE_CENTS / avgCents)} a
-                month, Unlimited Xpress at <strong>BND 60/mo</strong> starts
+                month, Unlimited Xpress at <strong>BND 45/mo</strong> starts
                 paying for itself.
               </p>
             </>
