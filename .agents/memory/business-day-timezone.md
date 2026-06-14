@@ -14,14 +14,20 @@ will, when viewed between 00:00–08:00 Brunei, resolve "today" to the *previous
 calendar date and show the whole prior Brunei day's sales/refunds. A cashier
 opening a shift at ~07:45 Brunei saw yesterday's totals in the live cash report.
 
-**The fix pattern (already applied to the POS daily/shift cash report + today's
-orders list + admin shift detail):** scope by Brunei calendar day off
-`created_at`, never `ticket_day`:
-`date(created_at AT TIME ZONE 'Asia/Brunei') = (now() AT TIME ZONE 'Asia/Brunei')::date`.
-For a JS-side day string from a timestamp, use `opened_at + 8h` then ISO date.
+**The fix pattern (applied to the POS daily/shift cash report, today's orders
+list, admin shift detail, AND all admin date-range reports — dashboard,
+orders, export, payment-methods, best-selling, trends incl. the daily-series
+join):** scope by Brunei calendar day off `created_at`, never `ticket_day`:
+`date(created_at AT TIME ZONE 'Asia/Brunei') = (now() AT TIME ZONE 'Asia/Brunei')::date`
+(or `BETWEEN from AND to`). For a JS-side day string from a timestamp, use
+`opened_at + 8h` then ISO date.
 
-**How to apply / still-latent:** the admin date-range analytics still filter
-`ticket_day BETWEEN from AND to` (UTC), so they keep the same ≤8h boundary skew
-for orders created 00:00–08:00 Brunei. Leave ticket_day insert + ticket-code
-numbering on UTC unless you also handle the daily-uniqueness constraint
-(`orders_branch_ticket_day_uniq`) during the transition.
+**Still on UTC (intentional):** `ticket_day` insert + ticket-code daily
+numbering (don't change without handling the `orders_branch_ticket_day_uniq`
+constraint during transition). The reports' SELECT of `ticket_day` is display-
+only and unused by the frontend (it renders `created_at`).
+
+**Note:** can't build an expression index on `date(created_at AT TIME ZONE
+'Asia/Brunei')` — `AT TIME ZONE` is STABLE not IMMUTABLE, Postgres rejects it.
+For sargability use a UTC range on `created_at` (Brunei-midnight bounds shifted
+−8h) instead. At ~68k orders the functional predicate is fine for admin reports.

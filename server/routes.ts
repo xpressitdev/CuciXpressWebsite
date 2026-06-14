@@ -699,7 +699,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
         WITH day_orders AS (
           SELECT *
             FROM orders
-           WHERE ticket_day = ${targetDate}::date
+           WHERE date(created_at AT TIME ZONE 'Asia/Brunei') = ${targetDate}::date
              ${branchFilter}
         ),
         paid AS (SELECT * FROM day_orders WHERE status <> 'refunded'),
@@ -721,7 +721,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
                COALESCE(SUM(total_cents), 0)::bigint AS sales_cents,
                COALESCE(SUM(CASE WHEN status =  'refunded' THEN total_cents ELSE 0 END), 0)::bigint AS refund_cents
           FROM orders
-         WHERE ticket_day = ${targetDate}::date
+         WHERE date(created_at AT TIME ZONE 'Asia/Brunei') = ${targetDate}::date
            ${branchFilter}
          GROUP BY 1
          ORDER BY 1
@@ -747,7 +747,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
                COALESCE(SUM(CASE WHEN status <> 'refunded' THEN total_cents ELSE 0 END),0)::int AS sales_cents,
                COALESCE(SUM(CASE WHEN status =  'refunded' THEN total_cents ELSE 0 END),0)::int AS refund_cents
           FROM orders
-         WHERE ticket_day = ${targetDate}::date
+         WHERE date(created_at AT TIME ZONE 'Asia/Brunei') = ${targetDate}::date
            ${branchFilter}
          GROUP BY payment_method, qr_provider
       `)).rows as Array<{ payment_method: string; qr_provider: string | null; sales_cents: number; refund_cents: number }>;
@@ -846,14 +846,14 @@ export async function registerRoutes(app: Express): Promise<Server> {
           COALESCE(SUM(CASE WHEN o.status =  'refunded' THEN o.total_cents ELSE 0 END),0)::bigint      AS refund_total_cents,
           COALESCE(SUM(CASE WHEN o.status <> 'refunded' THEN 1 + COALESCE(jsonb_array_length(o.addons),0) ELSE 0 END),0)::int AS items_sold
           FROM orders o
-         WHERE o.ticket_day BETWEEN ${from}::date AND ${to}::date
+         WHERE date(o.created_at AT TIME ZONE 'Asia/Brunei') BETWEEN ${from}::date AND ${to}::date
            ${branchFilter} ${pmFilter} ${staffFilter} ${searchFilter}
       `)).rows[0] as any;
 
       const countRow = (await db.execute(sql`
         SELECT COUNT(*)::int AS n
           FROM orders o
-         WHERE o.ticket_day BETWEEN ${from}::date AND ${to}::date
+         WHERE date(o.created_at AT TIME ZONE 'Asia/Brunei') BETWEEN ${from}::date AND ${to}::date
            ${branchFilter} ${pmFilter} ${staffFilter} ${searchFilter}
       `)).rows[0] as { n: number };
 
@@ -867,7 +867,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
           FROM orders o
           LEFT JOIN branches b ON b.id = o.branch_id
           LEFT JOIN staff    s ON s.id = o.staff_id
-         WHERE o.ticket_day BETWEEN ${from}::date AND ${to}::date
+         WHERE date(o.created_at AT TIME ZONE 'Asia/Brunei') BETWEEN ${from}::date AND ${to}::date
            ${branchFilter} ${pmFilter} ${staffFilter} ${searchFilter}
          ORDER BY o.created_at DESC
          LIMIT ${perPage} OFFSET ${offset}
@@ -887,7 +887,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
                COALESCE(SUM(CASE WHEN o.status <> 'refunded' THEN o.total_cents ELSE 0 END),0)::int AS sales_cents,
                COALESCE(SUM(CASE WHEN o.status =  'refunded' THEN o.total_cents ELSE 0 END),0)::int AS refund_cents
           FROM orders o
-         WHERE o.ticket_day BETWEEN ${from}::date AND ${to}::date
+         WHERE date(o.created_at AT TIME ZONE 'Asia/Brunei') BETWEEN ${from}::date AND ${to}::date
            ${branchFilter} ${pmFilter} ${staffFilter} ${searchFilter}
          GROUP BY o.payment_method, o.qr_provider
       `)).rows as Array<{ payment_method: string; qr_provider: string | null; sales_cents: number; refund_cents: number }>;
@@ -1008,7 +1008,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
       const countRow = (await db.execute(sql`
         SELECT COUNT(*)::int AS n
           FROM orders o
-         WHERE o.ticket_day BETWEEN ${from}::date AND ${to}::date
+         WHERE date(o.created_at AT TIME ZONE 'Asia/Brunei') BETWEEN ${from}::date AND ${to}::date
            ${branchFilter} ${pmFilter} ${staffFilter} ${searchFilter}
       `)).rows[0] as { n: number };
 
@@ -1039,7 +1039,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
           LEFT JOIN branches b ON b.id = o.branch_id
           LEFT JOIN staff    s ON s.id = o.staff_id
           LEFT JOIN cars     c ON c.id = o.vehicle_id
-         WHERE o.ticket_day BETWEEN ${from}::date AND ${to}::date
+         WHERE date(o.created_at AT TIME ZONE 'Asia/Brunei') BETWEEN ${from}::date AND ${to}::date
            ${branchFilter} ${pmFilter} ${staffFilter} ${searchFilter}
          ORDER BY o.created_at ASC
       `)).rows as Array<any>;
@@ -1197,7 +1197,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
           COALESCE(SUM(o.total_cents),0)::bigint                                                  AS sales_cents,
           COALESCE(SUM(CASE WHEN o.status =  'refunded' THEN o.total_cents ELSE 0 END),0)::bigint  AS refund_cents
           FROM orders o
-         WHERE o.ticket_day BETWEEN ${from}::date AND ${to}::date
+         WHERE date(o.created_at AT TIME ZONE 'Asia/Brunei') BETWEEN ${from}::date AND ${to}::date
            ${branchFilter}
          GROUP BY 1, 2
          ORDER BY sales_cents DESC
@@ -1286,7 +1286,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
           SELECT id, package_id, package_name, total_cents, COALESCE(addons,'[]'::jsonb) AS addons
             FROM orders
            WHERE status <> 'refunded'
-             AND ticket_day BETWEEN ${from}::date AND ${to}::date
+             AND date(created_at AT TIME ZONE 'Asia/Brunei') BETWEEN ${from}::date AND ${to}::date
              ${branchFilter}
         ),
         pkg_items AS (
@@ -1330,7 +1330,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
           COALESCE(SUM(total_cents),0)::bigint                             AS revenue_cents
           FROM orders
          WHERE status <> 'refunded'
-           AND ticket_day BETWEEN ${from}::date AND ${to}::date
+           AND date(created_at AT TIME ZONE 'Asia/Brunei') BETWEEN ${from}::date AND ${to}::date
            ${branchFilter}
       `)).rows[0] as { items_sold: number; revenue_cents: number };
 
@@ -1409,7 +1409,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
                COUNT(o.id) FILTER (WHERE o.status <> 'refunded')::int AS transactions
           FROM days
           LEFT JOIN orders o
-            ON o.ticket_day = d
+            ON date(o.created_at AT TIME ZONE 'Asia/Brunei') = d
             ${branchFilter}
          GROUP BY d
          ORDER BY d
@@ -1424,7 +1424,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
           FROM branches b
           LEFT JOIN orders o
             ON o.branch_id = b.id
-           AND o.ticket_day BETWEEN ${from}::date AND ${to}::date
+           AND date(o.created_at AT TIME ZONE 'Asia/Brunei') BETWEEN ${from}::date AND ${to}::date
          ${branchId !== null ? sql`WHERE b.id = ${branchId}` : sql``}
          GROUP BY b.id, b.name
          ORDER BY sales_cents DESC, b.name
@@ -1437,7 +1437,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
                COUNT(*)::int AS transactions,
                COALESCE(SUM(o.total_cents), 0)::bigint AS sales_cents
           FROM orders o
-         WHERE o.ticket_day BETWEEN ${from}::date AND ${to}::date
+         WHERE date(o.created_at AT TIME ZONE 'Asia/Brunei') BETWEEN ${from}::date AND ${to}::date
            AND o.status <> 'refunded'
            ${branchFilter}
          GROUP BY 1, 2
@@ -1451,7 +1451,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
                COUNT(*) FILTER (WHERE o.status <> 'refunded')::int AS transactions,
                COUNT(*) FILTER (WHERE o.status =  'refunded')::int AS refund_count
           FROM orders o
-         WHERE o.ticket_day BETWEEN ${from}::date AND ${to}::date
+         WHERE date(o.created_at AT TIME ZONE 'Asia/Brunei') BETWEEN ${from}::date AND ${to}::date
            ${branchFilter}
       `)).rows[0] as any;
 
