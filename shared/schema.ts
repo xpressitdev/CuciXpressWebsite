@@ -195,6 +195,9 @@ export const subscriptionSignups = pgTable("subscription_signups", {
   // Phase 11: subscriptions product page captures plan + phone + (optional) user_id
   plan: text("plan"),
   phone: text("phone"),
+  // Founding-member signup also captures the car plate so staff can match the
+  // membership to a vehicle on follow-up. Nullable: legacy waitlist rows have none.
+  carPlate: text("car_plate"),
   userId: integer("user_id").references(() => users.id),
 });
 

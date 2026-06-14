@@ -1,7 +1,7 @@
 import { useEffect, useState } from "react";
 import { useMutation, useQuery } from "@tanstack/react-query";
 import { motion } from "framer-motion";
-import { Check, Crown, Users, Building2, ShieldCheck, ArrowRight } from "lucide-react";
+import { Check, Crown, Users, Building2, ShieldCheck, ArrowRight, Sparkles } from "lucide-react";
 import Navigation from "@/components/Navigation";
 import Footer from "@/components/Footer";
 import { AppShell } from "@/components/dashboard/AppShell";
@@ -107,6 +107,17 @@ export default function Subscriptions() {
   const [openPlan, setOpenPlan] = useState<Plan | null>(null);
   const [email, setEmail] = useState("");
   const [phone, setPhone] = useState("");
+  const [carPlate, setCarPlate] = useState("");
+
+  // Live founding-member scarcity — how many of the 200 spots remain.
+  const { data: founding } = useQuery<{
+    claimed: number;
+    total: number;
+    remaining: number;
+  }>({
+    queryKey: ["/api/subscription-signup/founding-status"],
+    retry: false,
+  });
 
   // Prefill when logged in. /api/customer/me returns 401 if not logged in —
   // react-query just leaves data undefined and we keep the inputs empty.
@@ -125,8 +136,12 @@ export default function Subscriptions() {
   }, [openPlan, me]);
 
   const subscribeMutation = useMutation({
-    mutationFn: (payload: { email: string; phone: string; plan: string }) =>
-      apiRequest("POST", "/api/subscription-signup", payload),
+    mutationFn: (payload: {
+      email: string;
+      phone: string;
+      plan: string;
+      carPlate: string;
+    }) => apiRequest("POST", "/api/subscription-signup", payload),
     onSuccess: async (res: any) => {
       const data = await res.json().catch(() => ({}));
       toast({
@@ -138,6 +153,7 @@ export default function Subscriptions() {
       setOpenPlan(null);
       setEmail("");
       setPhone("");
+      setCarPlate("");
     },
     onError: (error: any) => {
       toast({
@@ -159,10 +175,19 @@ export default function Subscriptions() {
       });
       return;
     }
+    if (!openPlan.custom && !carPlate.trim()) {
+      toast({
+        title: "Car plate required",
+        description: "Add the plate of the car you want to register for this plan.",
+        variant: "destructive",
+      });
+      return;
+    }
     subscribeMutation.mutate({
       email: email.trim(),
       phone: phone.trim(),
       plan: openPlan.id,
+      carPlate: carPlate.trim(),
     });
   };
 
@@ -202,6 +227,75 @@ export default function Subscriptions() {
         {/* --- Plan grid --- */}
         <section className="pb-12">
           <div className="max-w-6xl mx-auto px-4 sm:px-6 lg:px-8">
+            {/* Founding-member scarcity banner */}
+            <motion.div
+              initial={{ opacity: 0, y: 20 }}
+              whileInView={{ opacity: 1, y: 0 }}
+              transition={{ duration: 0.5 }}
+              viewport={{ once: true }}
+              className="relative overflow-hidden rounded-2xl border-2 border-black mb-8 p-6 md:p-8"
+              style={{
+                background:
+                  "linear-gradient(135deg, #7C5CE7 0%, #B47CF7 55%, #FF9500 100%)",
+                boxShadow: "6px 6px 0 0 rgba(0,0,0,0.92)",
+              }}
+              data-testid="banner-founding"
+            >
+              <div className="relative flex flex-col md:flex-row md:items-center md:justify-between gap-5">
+                <div className="text-white max-w-2xl">
+                  <div className="inline-flex items-center gap-1.5 rounded-full border-2 border-black bg-[#FFE89E] text-black px-3 py-1 text-xs font-extrabold uppercase tracking-wider mb-3">
+                    <Sparkles className="w-3.5 h-3.5" /> Founding offer · 200 spots only
+                  </div>
+                  <h2 className="text-2xl md:text-3xl font-extrabold tracking-tight mb-2">
+                    Be one of the first 200. Keep founding rates for life.
+                  </h2>
+                  <p className="text-sm md:text-base text-white/90 leading-relaxed">
+                    Founding members lock in{" "}
+                    <span className="font-extrabold">BND 45/mo</span> and keep it for as
+                    long as they stay subscribed. Once all 200 spots are claimed,
+                    Unlimited Xpress returns to its regular{" "}
+                    <span className="font-extrabold">BND 60/mo</span> — no exceptions.
+                  </p>
+                </div>
+                {/* Spots-remaining meter */}
+                <div className="flex-shrink-0 w-full md:w-64 rounded-xl border-2 border-black bg-white/95 p-4">
+                  <div className="flex items-baseline justify-between mb-1.5">
+                    <span
+                      className="text-3xl font-black text-cuci-primary leading-none"
+                      data-testid="text-founding-remaining"
+                    >
+                      {founding ? founding.remaining : 200}
+                    </span>
+                    <span className="text-xs font-bold text-gray-500 uppercase tracking-wide">
+                      spots left
+                    </span>
+                  </div>
+                  <div className="h-2.5 w-full rounded-full bg-gray-200 overflow-hidden border border-black/10">
+                    <div
+                      className="h-full bg-gradient-to-r from-cuci-primary to-cuci-secondary transition-all"
+                      style={{
+                        width: `${
+                          founding
+                            ? Math.max(
+                                3,
+                                Math.min(
+                                  100,
+                                  Math.round((founding.claimed / founding.total) * 100),
+                                ),
+                              )
+                            : 0
+                        }%`,
+                      }}
+                    />
+                  </div>
+                  <p className="text-[11px] text-gray-500 mt-2 font-medium">
+                    {founding
+                      ? `${founding.claimed} of ${founding.total} founding memberships claimed`
+                      : "Limited to 200 founding memberships"}
+                  </p>
+                </div>
+              </div>
+            </motion.div>
             <div className="grid md:grid-cols-3 gap-6">
               {PLANS.map((plan, i) => {
                 const Icon = plan.icon;
@@ -388,7 +482,7 @@ export default function Subscriptions() {
                           data-testid={`button-subscribe-${plan.id}`}
                         >
                           <span className="mr-1">✦</span>
-                          Subscribe
+                          Claim founding price
                           <ArrowRight className="w-4 h-4 ml-1" />
                         </Button>
                         </div>
@@ -449,7 +543,7 @@ export default function Subscriptions() {
                       className="w-full cuci-cta bg-cuci-primary text-white rounded-lg"
                       data-testid={`button-subscribe-${plan.id}`}
                     >
-                      {plan.custom ? "Contact sales" : "Subscribe"}
+                      {plan.custom ? "Contact sales" : "Claim founding price"}
                       <ArrowRight className="w-4 h-4 ml-1" />
                     </Button>
                   </motion.div>
@@ -563,6 +657,23 @@ export default function Subscriptions() {
                 data-testid="input-subscribe-phone"
               />
             </div>
+            {openPlan && !openPlan.custom && (
+              <div className="space-y-1.5">
+                <Label htmlFor="sub-plate">Car plate</Label>
+                <Input
+                  id="sub-plate"
+                  value={carPlate}
+                  onChange={(e) => setCarPlate(e.target.value.toUpperCase())}
+                  placeholder="e.g. BAA 1234"
+                  required
+                  disabled={subscribeMutation.isPending}
+                  data-testid="input-subscribe-plate"
+                />
+                <p className="text-xs text-gray-400">
+                  The car you want registered on this membership.
+                </p>
+              </div>
+            )}
             {openPlan && !openPlan.custom && (
               <div className="rounded-lg bg-gray-50 border border-gray-200 px-4 py-3 text-sm">
                 <div className="flex items-center justify-between">

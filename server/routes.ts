@@ -444,16 +444,31 @@ export async function registerRoutes(app: Express): Promise<Server> {
         .where(eq(subscriptionSignups.email, data.email))
         .limit(1);
 
+      // Normalise the plate the same way POS does (trimmed + uppercased) so a
+      // founding signup is easy to match to a vehicle later.
+      const carPlate = data.carPlate?.trim().toUpperCase() || null;
+
+      // Self-serve plan intents must include the car plate (Corporate fleets are
+      // handled manually, so they're exempt). Enforced server-side too — the
+      // client check alone is bypassable.
+      if (data.plan && ["unlimited", "family"].includes(data.plan) && !carPlate) {
+        return res.status(400).json({
+          success: false,
+          message: "Car plate is required for this plan.",
+        });
+      }
+
       let signup;
       let isNew = false;
       if (existing.length > 0) {
-        // Upsert: keep the email, update plan/phone/user_id if newly provided.
+        // Upsert: keep the email, update plan/phone/car_plate/user_id if newly provided.
         const prev = existing[0];
         const [updated] = await db
           .update(subscriptionSignups)
           .set({
             plan: data.plan ?? prev.plan,
             phone: data.phone ?? prev.phone,
+            carPlate: carPlate ?? prev.carPlate,
             userId: userId ?? prev.userId,
           })
           .where(eq(subscriptionSignups.id, prev.id))
@@ -462,7 +477,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
       } else {
         const [created] = await db
           .insert(subscriptionSignups)
-          .values({ ...data, userId: userId ?? data.userId ?? null })
+          .values({ ...data, carPlate, userId: userId ?? data.userId ?? null })
           .returning();
         signup = created;
         isNew = true;
@@ -508,6 +523,25 @@ export async function registerRoutes(app: Express): Promise<Server> {
           message: "Internal server error" 
         });
       }
+    }
+  });
+
+  // Public founding-member status — how many of the 200 founding spots remain.
+  // Drives the scarcity copy on the /subscriptions page. Aggregate count only,
+  // so there's no PII exposure. "Claimed" = signups that picked a plan.
+  const FOUNDING_TOTAL = 200;
+  app.get("/api/subscription-signup/founding-status", async (_req, res) => {
+    try {
+      const [row] = await db
+        .select({ claimed: sql<number>`count(*)::int` })
+        .from(subscriptionSignups)
+        .where(sql`${subscriptionSignups.plan} is not null`);
+      const claimed = Math.min(row?.claimed ?? 0, FOUNDING_TOTAL);
+      const remaining = Math.max(0, FOUNDING_TOTAL - claimed);
+      res.json({ claimed, total: FOUNDING_TOTAL, remaining });
+    } catch (error) {
+      console.error("Error fetching founding status:", error);
+      res.status(500).json({ error: "Failed to fetch founding status" });
     }
   });
 

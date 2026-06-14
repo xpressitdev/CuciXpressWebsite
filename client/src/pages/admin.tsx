@@ -58,6 +58,7 @@ import {
   Tag,
   Wallet,
   Stamp,
+  Car,
 } from "lucide-react";
 import { Link } from "wouter";
 import { motion } from "framer-motion";
@@ -812,28 +813,56 @@ export default function Admin() {
                     >
                       <Card className="hover:shadow-md transition-all duration-200">
                         <CardContent className="p-4">
-                          <div className="flex items-center justify-between">
-                            <div className="flex items-center gap-4">
-                              <div className="w-10 h-10 bg-cuci-primary/10 rounded-full flex items-center justify-center">
+                          <div className="flex items-start justify-between gap-4">
+                            <div className="flex items-start gap-4 min-w-0">
+                              <div className="w-10 h-10 bg-cuci-primary/10 rounded-full flex items-center justify-center flex-shrink-0">
                                 <Mail className="w-5 h-5 text-cuci-primary" />
                               </div>
-                              <div>
-                                <p className="font-medium text-gray-900">
+                              <div className="min-w-0">
+                                <p className="font-medium text-gray-900 truncate">
                                   <a
                                     href={`mailto:${signup.email}`}
                                     className="text-cuci-primary hover:text-cuci-primary-dark"
+                                    data-testid={`link-signup-email-${signup.id}`}
                                   >
                                     {signup.email}
                                   </a>
                                 </p>
-                                <p className="text-sm text-gray-500 flex items-center">
-                                  <Calendar className="w-3 h-3 mr-1" />
-                                  {formatDate(signup.createdAt.toString())}
-                                </p>
+                                <div className="mt-1 flex flex-wrap items-center gap-x-4 gap-y-1 text-sm text-gray-500">
+                                  {signup.carPlate && (
+                                    <span
+                                      className="flex items-center font-semibold text-gray-700"
+                                      data-testid={`text-signup-plate-${signup.id}`}
+                                    >
+                                      <Car className="w-3.5 h-3.5 mr-1 text-cuci-primary" />
+                                      {signup.carPlate}
+                                    </span>
+                                  )}
+                                  {signup.phone && (
+                                    <a
+                                      href={`tel:${signup.phone}`}
+                                      className="flex items-center hover:text-cuci-primary"
+                                      data-testid={`link-signup-phone-${signup.id}`}
+                                    >
+                                      <Phone className="w-3.5 h-3.5 mr-1" />
+                                      {signup.phone}
+                                    </a>
+                                  )}
+                                  <span className="flex items-center">
+                                    <Calendar className="w-3.5 h-3.5 mr-1" />
+                                    {formatDate(signup.createdAt.toString())}
+                                  </span>
+                                </div>
                               </div>
                             </div>
-                            <Badge variant="outline" className="text-cuci-primary border-cuci-primary">
-                              Awaiting Launch
+                            <Badge
+                              variant="outline"
+                              className="text-cuci-primary border-cuci-primary capitalize flex-shrink-0"
+                              data-testid={`badge-signup-plan-${signup.id}`}
+                            >
+                              {signup.plan
+                                ? PLAN_LABELS[signup.plan] ?? signup.plan
+                                : "Awaiting Launch"}
                             </Badge>
                           </div>
                         </CardContent>
@@ -1084,6 +1113,12 @@ interface OrdersReportResponse {
     kedaipos_pos_name: string | null;
   }>;
 }
+
+const PLAN_LABELS: Record<string, string> = {
+  unlimited: "Unlimited Xpress",
+  family: "Multi-Car Family",
+  corporate: "Corporate Fleet",
+};
 
 const paymentMethodLabels: Record<string, string> = {
   cash: "Cash",
