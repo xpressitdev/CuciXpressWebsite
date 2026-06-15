@@ -7708,18 +7708,19 @@ export async function registerRoutes(app: Express): Promise<Server> {
   });
 
   // ==========================================================================
-  // Loyalty — owner-only "verify physical receipt & add stamps" (digital-receipt
-  // migration backstop). The owner checks a customer's paper B$12 receipts and
-  // credits the matching number of stamps to a plate, tagged to a chosen branch.
+  // Loyalty — staff "verify physical receipt & add stamps" (digital-receipt
+  // migration backstop). Staff check a customer's paper B$12 receipts and
+  // credit the matching number of stamps to a plate, tagged to a branch.
   // Auto-count (real orders by plate) stays the baseline; manual stamps add on
-  // top. Owner-only because it's an audit-sensitive credit action.
+  // top. Open to owner/manager/cashier so cashiers can credit at the POS;
+  // every credit records the staff id and branch for the audit trail.
   // ==========================================================================
   const LOYALTY_PLATE_NORM = (s: string) => s.toUpperCase().replace(/\s+/g, "");
 
   // GET /api/pos/loyalty/lookup?plate=  → current stamp picture for a plate so
-  // the owner doesn't double-credit washes that already auto-counted.
-  // Owner-only: manual stamp credits are an audit-sensitive admin action.
-  app.get('/api/pos/loyalty/lookup', requireStaff, requireStaffRole('owner'), async (req, res) => {
+  // staff don't double-credit washes that already auto-counted.
+  // Staff (owner/manager/cashier): cashiers credit physical receipts at the POS.
+  app.get('/api/pos/loyalty/lookup', requireStaff, requireStaffRole('owner', 'manager', 'cashier'), async (req, res) => {
     const raw = String(req.query.plate ?? '').trim();
     if (!raw) return res.status(400).json({ error: 'plate_required' });
     const norm = LOYALTY_PLATE_NORM(raw);
@@ -7779,15 +7780,17 @@ export async function registerRoutes(app: Express): Promise<Server> {
   });
 
   // POST /api/pos/loyalty/stamp  Body: { plate, count, note?, receipt_no?, branch_id }
-  // Owner-only. Credits `count` manual stamps to a plate, tagged to a branch
-  // for audit (owners have no fixed branch, so they pass branch_id explicitly).
+  // Staff (owner/manager/cashier). Credits `count` manual stamps to a plate,
+  // tagged to a branch for audit. Owners/managers have no fixed branch so they
+  // pass branch_id explicitly; cashiers/lane are pinned to their own branch
+  // server-side and any body branch_id is ignored.
   const manualStampSchema = z.object({
     plate: z.string().trim().min(1).max(20),
     count: z.coerce.number().int().min(1).max(4),
     note: z.string().trim().max(160).optional().nullable(),
     receipt_no: z.string().trim().max(40).optional().nullable(),
   });
-  app.post('/api/pos/loyalty/stamp', requireStaff, requireStaffRole('owner'), async (req, res) => {
+  app.post('/api/pos/loyalty/stamp', requireStaff, requireStaffRole('owner', 'manager', 'cashier'), async (req, res) => {
     const parsed = manualStampSchema.safeParse(req.body);
     if (!parsed.success) return res.status(400).json({ error: 'invalid_request' });
     const staffUser = req.staff!.user as any;

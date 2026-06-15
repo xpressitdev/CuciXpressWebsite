@@ -15,17 +15,19 @@ import {
 } from "@/components/ui/select";
 import { apiRequest } from "@/lib/queryClient";
 import { useToast } from "@/hooks/use-toast";
+import { useStaffAuth } from "@/hooks/useStaffAuth";
 
 // ============================================================
-// LoyaltyStampTab — owner-only "verify physical receipt & add stamps".
+// LoyaltyStampTab — staff "verify physical receipt & add stamps".
 //
-// Digital-receipt migration backstop. The owner types a plate, taps
-// Check to see the plate's current stamp count (auto-counted system
-// orders + any manual credits), then credits the number of physical
+// Digital-receipt migration backstop. Staff (owner/manager/cashier) type a
+// plate, tap Check to see the plate's current stamp count (auto-counted
+// system orders + any manual credits), then credit the number of physical
 // B$12 receipts the customer is holding. Receipt number is optional, a
-// note is encouraged. The owner picks which branch the credit belongs
-// to (owners aren't pinned to a branch). The customer's loyalty card
-// picks up the stamps automatically by plate.
+// note is encouraged. Owners/managers pick which branch the credit belongs
+// to (they aren't pinned to a branch); cashiers are pinned server-side, so
+// the picker is hidden and the credit goes to their own branch. The
+// customer's loyalty card picks up the stamps automatically by plate.
 // ============================================================
 type LoyaltyLookup = {
   plate: string;
@@ -43,6 +45,11 @@ type BranchRow = { id: number; name: string; location: string };
 
 export default function LoyaltyStampTab() {
   const { toast } = useToast();
+  const { staff } = useStaffAuth();
+  // Owners/managers aren't pinned to a branch, so they pick which branch the
+  // credit belongs to. Cashiers (and lane) are pinned server-side, so they
+  // don't pick — and they can't read the owner/manager-only branches list.
+  const canPickBranch = staff?.role === "owner" || staff?.role === "manager";
   const [plate, setPlate] = useState("");
   const [info, setInfo] = useState<LoyaltyLookup | null>(null);
   const [count, setCount] = useState("1");
@@ -52,6 +59,7 @@ export default function LoyaltyStampTab() {
 
   const { data: branchData } = useQuery<{ rows: BranchRow[] }>({
     queryKey: ["/api/admin/branches"],
+    enabled: canPickBranch,
   });
   const branches = branchData?.rows ?? [];
 
@@ -79,7 +87,8 @@ export default function LoyaltyStampTab() {
         count: Number(count),
         note: note.trim() || null,
         receipt_no: receiptNo.trim() || null,
-        branch_id: Number(branchId),
+        // Cashiers are branch-pinned server-side; only owners/managers choose.
+        ...(canPickBranch ? { branch_id: Number(branchId) } : {}),
       });
       return (await r.json()) as LoyaltyLookup & { ok: boolean; added: number };
     },
@@ -114,7 +123,8 @@ export default function LoyaltyStampTab() {
   });
 
   const canCheck = plate.trim().length >= 1 && !lookup.isPending;
-  const canAdd = !!info && branchId !== "" && !add.isPending;
+  const canAdd =
+    !!info && (!canPickBranch || branchId !== "") && !add.isPending;
 
   return (
     <div className="max-w-xl">
@@ -185,21 +195,23 @@ export default function LoyaltyStampTab() {
 
           {info && (
             <>
-              <div>
-                <Label className="text-xs">Branch (credit belongs to)</Label>
-                <Select value={branchId} onValueChange={setBranchId}>
-                  <SelectTrigger data-testid="select-loyalty-branch">
-                    <SelectValue placeholder="Select branch" />
-                  </SelectTrigger>
-                  <SelectContent>
-                    {branches.map((b) => (
-                      <SelectItem key={b.id} value={String(b.id)}>
-                        {b.name}
-                      </SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
-              </div>
+              {canPickBranch && (
+                <div>
+                  <Label className="text-xs">Branch (credit belongs to)</Label>
+                  <Select value={branchId} onValueChange={setBranchId}>
+                    <SelectTrigger data-testid="select-loyalty-branch">
+                      <SelectValue placeholder="Select branch" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {branches.map((b) => (
+                        <SelectItem key={b.id} value={String(b.id)}>
+                          {b.name}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                </div>
+              )}
               <div className="grid grid-cols-2 gap-2">
                 <div>
                   <Label className="text-xs">Stamps to add</Label>

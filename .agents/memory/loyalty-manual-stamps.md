@@ -24,10 +24,13 @@ depending on where you look.
 oldest-first, all under `FOR UPDATE` (car row + orders + manual rows) so concurrent
 redeems for the same car serialize and can't over-consume.
 
-**Access: OWNER-ONLY.** Both /api/pos/loyalty/lookup and /stamp are
-`requireStaffRole('owner')`, and the UI lives in an owner-only admin tab
-(LoyaltyStampTab), NOT the cashier POS. (Owner explicitly pulled this off cashiers
-— it's an audit-sensitive credit action.)
+**Access: owner/manager/cashier.** Both /api/pos/loyalty/lookup and /stamp are
+`requireStaffRole('owner','manager','cashier')` (lane excluded). The shared
+LoyaltyStampTab is reused in both the admin Loyalty tab and a POS header dialog;
+it is cashier-aware via useStaffAuth (canPickBranch = owner|manager). Cashiers
+don't pick a branch — the picker and the owner/manager-only /api/admin/branches
+query are gated to canPickBranch, and the server pins the credit to the cashier's
+own staff.branchId (body branch_id ignored). The POS button is hidden from lane.
 
 **Branch-lock:** POST /api/pos/loyalty/stamp must resolve a non-null, existing
 branch before insert (400 `no_branch` / `invalid_branch`). Owners have

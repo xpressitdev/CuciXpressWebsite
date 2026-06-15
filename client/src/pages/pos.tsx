@@ -39,6 +39,7 @@ import {
   Undo2,
   RotateCcw,
   Pencil,
+  Stamp,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -57,6 +58,7 @@ import AdminLogin from "@/components/AdminLogin";
 import ShiftBar from "@/components/ShiftBar";
 import DailyReport from "@/components/DailyReport";
 import ScanInTab from "@/components/admin/ScanInTab";
+import LoyaltyStampTab from "@/components/admin/LoyaltyStampTab";
 import {
   Dialog,
   DialogContent,
@@ -311,6 +313,7 @@ function formatRelative(iso: string): string {
 
 export default function POS() {
   const { staff, isAuthenticated, isLoading: authLoading, login, logout } = useStaffAuth();
+  const [loyaltyOpen, setLoyaltyOpen] = useState(false);
   const queryClient = useQueryClient();
   const { toast } = useToast();
 
@@ -1311,6 +1314,31 @@ export default function POS() {
                   Daily report since it's set occasionally, not per sale. */}
               {branchId !== null && (
                 <BranchStatusControl branchId={branchId} />
+              )}
+              {/* Loyalty stamps — credit a customer's physical B$12 receipts.
+                  Open to owner/manager/cashier; hidden from lane staff since
+                  the backend route excludes them (they'd only hit a 403). */}
+              {staff && staff.role !== "lane" && (
+                <>
+                  <button
+                    onClick={() => setLoyaltyOpen(true)}
+                    className="cuci-cta bg-white text-gray-900 px-4 py-2 rounded-full inline-flex items-center gap-2 text-sm"
+                    data-testid="button-open-loyalty"
+                  >
+                    <Stamp className="w-4 h-4" />
+                    Loyalty stamps
+                  </button>
+                  <Dialog open={loyaltyOpen} onOpenChange={setLoyaltyOpen}>
+                    <DialogContent className="max-w-xl max-h-[90vh] overflow-y-auto">
+                      <DialogHeader>
+                        <DialogTitle className="flex items-center gap-2">
+                          <Stamp className="w-5 h-5" /> Loyalty stamps
+                        </DialogTitle>
+                      </DialogHeader>
+                      <LoyaltyStampTab />
+                    </DialogContent>
+                  </Dialog>
+                </>
               )}
               <button
                 onClick={logout}
