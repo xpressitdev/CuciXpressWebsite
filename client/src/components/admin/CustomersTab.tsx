@@ -22,6 +22,7 @@ import {
 } from "lucide-react";
 import { apiRequest } from "@/lib/queryClient";
 import { useToast } from "@/hooks/use-toast";
+import { SendReceiptButton } from "@/components/admin/SendReceiptButton";
 
 const formatBND = (cents: number) =>
   `B$${(cents / 100).toLocaleString("en-US", {
@@ -1407,6 +1408,11 @@ function CustomerDetail({ id, onDeleted }: { id: number; onDeleted?: () => void 
                       )}
                     </div>
                   </div>
+                  {!isPending && !isVoided && (
+                    <div className="mt-2 flex justify-end">
+                      <SendReceiptButton orderId={o.id} size="sm" variant="ghost" className="h-7 px-2 text-emerald-700" />
+                    </div>
+                  )}
                 </div>
               );
             })}

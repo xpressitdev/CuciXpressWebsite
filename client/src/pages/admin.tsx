@@ -73,6 +73,7 @@ import PaymentSetupTab from "@/components/admin/PaymentSetupTab";
 import StaffTab from "@/components/admin/StaffTab";
 import LoyaltyStampTab from "@/components/admin/LoyaltyStampTab";
 import CategoriesSection from "@/components/admin/CategoriesSection";
+import { SendReceiptButton } from "@/components/admin/SendReceiptButton";
 import {
   AreaChart,
   Area,
@@ -1545,6 +1546,7 @@ function OrdersReportTab() {
                     <TableHead>Staff</TableHead>
                     <TableHead className="text-right">Total</TableHead>
                     <TableHead>Status</TableHead>
+                    <TableHead className="text-right">Receipt</TableHead>
                   </TableRow>
                 </TableHeader>
                 <TableBody>
@@ -1574,6 +1576,11 @@ function OrdersReportTab() {
                             <Badge variant="destructive" className="text-xs">Refunded</Badge>
                           ) : (
                             <Badge variant="outline" className="text-xs capitalize">{r.status}</Badge>
+                          )}
+                        </TableCell>
+                        <TableCell className="text-right">
+                          {r.status !== "pending_payment" && (
+                            <SendReceiptButton orderId={r.id} size="sm" variant="ghost" className="h-7 px-2 text-emerald-700" />
                           )}
                         </TableCell>
                       </TableRow>

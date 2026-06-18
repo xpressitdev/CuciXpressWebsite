@@ -1036,6 +1036,73 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
+  // GET /api/admin/orders/:id/receipt — full digital-receipt payload for a
+  // single order so an admin can WhatsApp it to the customer. Returns the
+  // same rich shape the customer dashboard uses (package + add-on line items,
+  // subtotal/discount/paid/change, cashier, branch) plus the best-known
+  // customer phone so the share link can be addressed straight to them.
+  app.get('/api/admin/orders/:id/receipt', requireStaff, requireStaffRole('owner', 'manager'), async (req, res) => {
+    const id = String(req.params.id ?? '').trim();
+    if (!id) return res.status(400).json({ error: 'invalid_id' });
+    try {
+      const row = (await db.execute(sql`
+        SELECT
+          o.id, o.ticket_code, o.plate, o.created_at, o.status,
+          o.package_name, o.package_price_cents, o.addons,
+          o.subtotal_cents, o.discount_cents, o.promo_discount_cents,
+          o.total_cents, o.paid_amount_cents, o.change_cents,
+          o.item_notes, o.payment_method,
+          CASE WHEN o.payment_method = 'qr_code' THEN o.qr_provider ELSE NULL END AS qr_provider,
+          b.name AS branch_name,
+          s.name AS cashier_name,
+          COALESCE(ccar.name,  cusr.name)  AS customer_name,
+          COALESCE(ccar.phone, cusr.phone) AS customer_phone,
+          o.customer_name_walkin
+        FROM orders o
+        LEFT JOIN branches  b    ON b.id    = o.branch_id
+        LEFT JOIN staff     s    ON s.id    = o.staff_id
+        LEFT JOIN cars      cr   ON cr.id   = o.vehicle_id
+        LEFT JOIN customers ccar ON ccar.id = cr.customer_id
+        LEFT JOIN customers cusr ON cusr.user_id = o.customer_id
+        WHERE o.id = ${id}
+        LIMIT 1
+      `)).rows[0] as any;
+
+      if (!row) return res.status(404).json({ error: 'not_found' });
+
+      return res.json({
+        order: {
+          id: row.id,
+          ticket_code: row.ticket_code,
+          plate: row.plate,
+          created_at: row.created_at,
+          status: row.status,
+          branch_name: row.branch_name,
+          cashier_name: row.cashier_name,
+          package_name: row.package_name,
+          package_price_cents: row.package_price_cents,
+          addons: row.addons ?? [],
+          subtotal_cents: row.subtotal_cents,
+          discount_cents: row.discount_cents,
+          promo_discount_cents: row.promo_discount_cents,
+          total_cents: row.total_cents,
+          paid_amount_cents: row.paid_amount_cents,
+          change_cents: row.change_cents,
+          item_notes: row.item_notes,
+          payment_method: row.payment_method,
+          qr_provider: row.qr_provider,
+        },
+        customer: {
+          name: row.customer_name ?? row.customer_name_walkin ?? null,
+          phone: row.customer_phone ?? null,
+        },
+      });
+    } catch (err) {
+      console.error('[admin.orders.receipt] failed:', err);
+      return res.status(500).json({ error: 'receipt_failed' });
+    }
+  });
+
   // GET /api/admin/reports/orders/export
   // Same filters as /api/admin/reports/orders, no pagination. Streams an
   // .xlsx file with the 25-column "Master Sales Data" layout the owner
