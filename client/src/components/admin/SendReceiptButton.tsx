@@ -17,19 +17,17 @@ interface ReceiptResponse {
 
 // WhatsApp "send receipt to customer" button for the admin tabs.
 //
-// Sending an actual file (the PDF receipt) over WhatsApp is only possible
-// through the device's native share sheet — a wa.me link can ONLY carry text,
-// never an attachment. So:
-//   • On phones/tablets (and Macs) that support file sharing, we build the PDF
-//     and hand it to the OS share sheet, where the sender picks the customer's
-//     WhatsApp chat. This sends the real PDF.
-//   • On desktops that can't share files via the browser — and as a fallback
-//     when the share sheet errors — we download the PDF and open the customer's
-//     WhatsApp chat (pre-filled with the text receipt) so the sender can attach
-//     the just-downloaded PDF.
+// Sending the actual PDF over WhatsApp is only possible through the device's
+// native share sheet — a wa.me link can ONLY carry text, never an attachment.
 //
-// We reserve a popup tab synchronously from the click for that chat fallback,
-// because a window.open() issued AFTER the fetch/PDF awaits would be blocked.
+//   • On phones/tablets (and Macs) that support file sharing we go STRAIGHT to
+//     navigator.share with the PDF — exactly like the customer dashboard. We do
+//     NOT open any tab first: window.open() consumes the user-gesture that
+//     navigator.share needs, which would make the share fail and wrongly fall
+//     back to a download + wa.me tab.
+//   • On desktops that can't share files we reserve a tab synchronously from
+//     the click (popup-safe), download the PDF, and open the customer's wa.me
+//     chat pre-filled with the text receipt so the PDF can be attached manually.
 function downloadBlob(blob: Blob, filename: string) {
   const url = URL.createObjectURL(blob);
   const a = document.createElement("a");
@@ -72,11 +70,10 @@ export function SendReceiptButton({
       canShareFiles = false;
     }
 
-    // Reserve a popup from the click gesture for the chat fallback. If the
-    // native share path succeeds we close this spare tab; otherwise we point
-    // it at the WhatsApp chat. Opening it now (not after the awaits) keeps it
-    // clear of the popup blocker.
-    const win = window.open("about:blank", "_blank");
+    // Only reserve a popup for the desktop text-fallback. Crucially we do NOT
+    // open a tab on the native-share path (it would consume the user gesture
+    // and break navigator.share).
+    const win = canShareFiles ? null : window.open("about:blank", "_blank");
 
     setLoading(true);
     try {
@@ -90,41 +87,35 @@ export function SendReceiptButton({
       const caption = receiptCaption(order);
       const intl = normalizeWaPhone(data.customer?.phone);
       const filename = `CuciXpress-${shortReceiptId(order.id)}.pdf`;
+      const chatUrl = intl
+        ? `https://wa.me/${intl}?text=${encodeURIComponent(caption)}`
+        : `https://wa.me/?text=${encodeURIComponent(caption)}`;
       const blob = await buildReceiptPdfBlob(order);
 
-      const openChat = () => {
-        const url = intl
-          ? `https://wa.me/${intl}?text=${encodeURIComponent(caption)}`
-          : `https://wa.me/?text=${encodeURIComponent(caption)}`;
-        if (win && !win.closed) win.location.href = url;
-        else window.open(url, "_blank", "noopener,noreferrer");
-      };
-
       if (canShareFiles) {
-        const file = new File([blob], filename, { type: "application/pdf" });
+        // Mirror the customer dashboard exactly: attach the real PDF via the
+        // native share sheet, where the sender picks the customer's chat.
         try {
+          const file = new File([blob], filename, { type: "application/pdf" });
           await nav.share({
             files: [file],
             title: "CuciXpress receipt",
             text: caption,
           });
-          // Real PDF was shared — the spare tab isn't needed.
-          win?.close();
-          return;
         } catch (err: any) {
-          // Sender dismissed the share sheet — respect that, do nothing.
-          if (err?.name === "AbortError") {
-            win?.close();
-            return;
-          }
-          // Any other error (incl. lost user activation / unsupported) falls
-          // through to the guaranteed download + chat fallback below.
+          // Sender dismissed the share sheet — respect that.
+          if (err?.name === "AbortError") return;
+          // Genuine share failure — best-effort: save the PDF and open a chat.
+          downloadBlob(blob, filename);
+          window.open(chatUrl, "_blank", "noopener,noreferrer");
         }
+        return;
       }
 
-      // Fallback: download the PDF and open the chat for manual attachment.
+      // Desktop: download the PDF and open the chat for manual attachment.
       downloadBlob(blob, filename);
-      openChat();
+      if (win && !win.closed) win.location.href = chatUrl;
+      else window.open(chatUrl, "_blank", "noopener,noreferrer");
       toast({
         title: "Receipt PDF downloaded",
         description: intl
