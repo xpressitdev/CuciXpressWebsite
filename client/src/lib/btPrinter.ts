@@ -72,7 +72,7 @@ export function isBluetoothPrintingSupported(): boolean {
 
 const ESC = 0x1b;
 const GS = 0x1d;
-const LINE_WIDTH = 32; // 58mm printers print 32 characters per line.
+const LINE_WIDTH = 48; // 80mm printers print 48 characters per line.
 
 class EscPos {
   private chunks: number[] = [];
