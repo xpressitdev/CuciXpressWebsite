@@ -160,6 +160,14 @@ interface TodayOrder {
   // Phase 4 — populated when status='refunded'.
   refunded_at?: string | null;
   refund_reason?: string | null;
+  // Receipt re-print: full line-item + payment detail so a cashier can
+  // print a paper copy of a past order on customer request.
+  branch_id: number;
+  package_price_cents: number;
+  addons: Array<{ id?: string; name: string; price_cents: number; quantity?: number }>;
+  subtotal_cents: number;
+  paid_amount_cents: number | null;
+  change_cents: number | null;
 }
 
 interface VehicleSuggestion {
@@ -366,6 +374,8 @@ export default function POS() {
 
   // Confirmation state
   const [lastOrder, setLastOrder] = useState<CreatedOrder | null>(null);
+  // Which Today's-orders row is currently re-printing (per-row spinner).
+  const [reprintId, setReprintId] = useState<string | null>(null);
   const [printing, setPrinting] = useState<boolean>(false);
 
   // Branch resolution.
@@ -991,8 +1001,9 @@ export default function POS() {
 
   // On-demand Bluetooth thermal-printer receipt. Digital receipts remain the
   // default; this only fires when a cashier taps "Print receipt".
-  const handlePrintReceipt = async () => {
-    if (!lastOrder) return;
+  // Shared "is Bluetooth available?" guard + toast. Returns false (and warns)
+  // when Web Bluetooth isn't usable here (e.g. iPhone/iPad, insecure context).
+  const ensurePrinter = (): boolean => {
     if (!isBluetoothPrintingSupported()) {
       toast({
         variant: "destructive",
@@ -1000,48 +1011,84 @@ export default function POS() {
         description:
           "Use Chrome or Edge on an Android tablet, phone, or computer over a secure connection. It isn't supported on iPhone/iPad.",
       });
-      return;
+      return false;
     }
+    return true;
+  };
+
+  // Build the ESC/POS receipt from any order shape and send it to the BLE
+  // printer. Shared by the post-checkout confirmation screen and the per-order
+  // "Print" buttons in Today's orders (re-print on customer request).
+  const sendReceiptToPrinter = async (o: {
+    ticket_code: string;
+    plate: string;
+    branch_id: number;
+    package_name: string;
+    package_price_cents: number;
+    addons: Array<{ name: string; price_cents: number; quantity?: number }>;
+    subtotal_cents: number;
+    total_cents: number;
+    paid_amount_cents: number | null;
+    change_cents: number | null;
+    payment_method: PaymentMethod;
+    qr_provider: string | null;
+    when: Date;
+  }) => {
+    const items = [
+      { name: o.package_name, price: formatBND(o.package_price_cents) },
+      ...o.addons.map((a) => {
+        const q = a.quantity ?? 1;
+        return {
+          name: q > 1 ? `+ ${a.name} × ${q}` : `+ ${a.name}`,
+          price: formatBND(a.price_cents * q),
+        };
+      }),
+    ];
+    await printReceipt({
+      branchName: BRANCH_NAME_BY_ID[o.branch_id] ?? "Cuci Xpress",
+      ticketCode: o.ticket_code,
+      plate: o.plate,
+      dateTime: o.when.toLocaleString("en-GB", {
+        day: "2-digit",
+        month: "2-digit",
+        year: "numeric",
+        hour: "2-digit",
+        minute: "2-digit",
+        timeZone: "Asia/Brunei",
+      }),
+      items,
+      subtotal: formatBND(o.subtotal_cents),
+      total: formatBND(o.total_cents),
+      paymentLabel: paymentDisplayLabel(o.payment_method, o.qr_provider),
+      paidAmount:
+        o.paid_amount_cents != null ? formatBND(o.paid_amount_cents) : undefined,
+      change:
+        o.paid_amount_cents != null
+          ? formatBND(o.change_cents ?? 0)
+          : undefined,
+      cashierName: staff?.name ?? undefined,
+    });
+  };
+
+  const handlePrintReceipt = async () => {
+    if (!lastOrder) return;
+    if (!ensurePrinter()) return;
     setPrinting(true);
     try {
-      const items = [
-        {
-          name: lastOrder.package_name,
-          price: formatBND(lastOrder.package_price_cents),
-        },
-        ...lastOrder.addons.map((a) => {
-          const q = a.quantity ?? 1;
-          return {
-            name: q > 1 ? `+ ${a.name} × ${q}` : `+ ${a.name}`,
-            price: formatBND(a.price_cents * q),
-          };
-        }),
-      ];
-      await printReceipt({
-        branchName: BRANCH_NAME_BY_ID[lastOrder.branch_id] ?? "Cuci Xpress",
-        ticketCode: lastOrder.ticket_code,
+      await sendReceiptToPrinter({
+        ticket_code: lastOrder.ticket_code,
         plate: lastOrder.plate,
-        dateTime: new Date().toLocaleString("en-GB", {
-          day: "2-digit",
-          month: "2-digit",
-          year: "numeric",
-          hour: "2-digit",
-          minute: "2-digit",
-          timeZone: "Asia/Brunei",
-        }),
-        items,
-        subtotal: formatBND(lastOrder.subtotal_cents),
-        total: formatBND(lastOrder.total_cents),
-        paymentLabel: paymentDisplayLabel(lastOrder.payment_method, lastOrder.qr_provider),
-        paidAmount:
-          lastOrder.paid_amount_cents != null
-            ? formatBND(lastOrder.paid_amount_cents)
-            : undefined,
-        change:
-          lastOrder.paid_amount_cents != null
-            ? formatBND(lastOrder.change_cents ?? 0)
-            : undefined,
-        cashierName: staff?.name ?? undefined,
+        branch_id: lastOrder.branch_id,
+        package_name: lastOrder.package_name,
+        package_price_cents: lastOrder.package_price_cents,
+        addons: lastOrder.addons,
+        subtotal_cents: lastOrder.subtotal_cents,
+        total_cents: lastOrder.total_cents,
+        paid_amount_cents: lastOrder.paid_amount_cents,
+        change_cents: lastOrder.change_cents,
+        payment_method: lastOrder.payment_method,
+        qr_provider: lastOrder.qr_provider,
+        when: new Date(),
       });
       toast({ title: "Receipt sent to printer" });
     } catch (e) {
@@ -1057,6 +1104,44 @@ export default function POS() {
       });
     } finally {
       setPrinting(false);
+    }
+  };
+
+  // Re-print a paper receipt for an existing order (customer asked for one).
+  // Uses the order's original date/time so the slip matches the original sale.
+  const handleReprint = async (o: TodayOrder) => {
+    if (!ensurePrinter()) return;
+    setReprintId(o.id);
+    try {
+      await sendReceiptToPrinter({
+        ticket_code: o.ticket_code,
+        plate: o.plate,
+        branch_id: o.branch_id,
+        package_name: o.package_name,
+        package_price_cents: o.package_price_cents,
+        addons: o.addons ?? [],
+        subtotal_cents: o.subtotal_cents,
+        total_cents: o.total_cents,
+        paid_amount_cents: o.paid_amount_cents,
+        change_cents: o.change_cents,
+        payment_method: o.payment_method,
+        qr_provider: o.qr_provider ?? null,
+        when: new Date(o.created_at),
+      });
+      toast({ title: "Receipt sent to printer" });
+    } catch (e) {
+      const err = e as BluetoothPrintError;
+      if (err?.code === "cancelled") {
+        setReprintId(null);
+        return;
+      }
+      toast({
+        variant: "destructive",
+        title: "Couldn't print",
+        description: err?.message ?? "Please try again.",
+      });
+    } finally {
+      setReprintId(null);
     }
   };
 
@@ -2407,27 +2492,41 @@ export default function POS() {
                                 {isRefunded ? "−" : ""}
                                 {formatBND(o.total_cents)}
                               </span>
-                              {isRefunded ? (
-                                <Badge
-                                  variant="destructive"
-                                  className="text-xs"
-                                  data-testid={`badge-refunded-${o.id}`}
-                                >
-                                  Refunded
-                                </Badge>
-                              ) : (
+                              <div className="flex items-center gap-1">
                                 <Button
                                   type="button"
                                   variant="ghost"
                                   size="sm"
-                                  className="h-6 px-2 text-xs text-red-600 hover:text-red-700 hover:bg-red-50"
-                                  disabled={refundOrder.isPending}
-                                  onClick={() => promptRefund(o)}
-                                  data-testid={`button-refund-${o.id}`}
+                                  className="h-6 px-2 text-xs text-gray-600 hover:text-cuci-primary hover:bg-gray-100"
+                                  disabled={reprintId === o.id}
+                                  onClick={() => handleReprint(o)}
+                                  data-testid={`button-print-${o.id}`}
                                 >
-                                  Refund
+                                  <Printer className="w-3 h-3 mr-1" />
+                                  {reprintId === o.id ? "Printing…" : "Print"}
                                 </Button>
-                              )}
+                                {isRefunded ? (
+                                  <Badge
+                                    variant="destructive"
+                                    className="text-xs"
+                                    data-testid={`badge-refunded-${o.id}`}
+                                  >
+                                    Refunded
+                                  </Badge>
+                                ) : (
+                                  <Button
+                                    type="button"
+                                    variant="ghost"
+                                    size="sm"
+                                    className="h-6 px-2 text-xs text-red-600 hover:text-red-700 hover:bg-red-50"
+                                    disabled={refundOrder.isPending}
+                                    onClick={() => promptRefund(o)}
+                                    data-testid={`button-refund-${o.id}`}
+                                  >
+                                    Refund
+                                  </Button>
+                                )}
+                              </div>
                             </div>
                           </div>
                         );

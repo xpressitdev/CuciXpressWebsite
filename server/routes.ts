@@ -7966,6 +7966,8 @@ export async function registerRoutes(app: Express): Promise<Server> {
     try {
       const rows = (await db.execute(sql`
         SELECT id, ticket_code, plate, package_name,
+               package_price_cents, addons, subtotal_cents,
+               paid_amount_cents, change_cents, branch_id,
                total_cents, payment_method, qr_provider, status, created_at,
                refunded_at, refund_reason, queue_position
           FROM orders
