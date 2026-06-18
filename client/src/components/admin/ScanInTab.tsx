@@ -50,6 +50,7 @@ const formatBND = (cents: number) =>
 export default function ScanInTab({
   branchId,
   branchName,
+  onScanned,
 }: {
   // The active POS branch. When supplied, free-wash vouchers get
   // rerouted server-side to *this* branch on first scan. Omit on
@@ -57,6 +58,10 @@ export default function ScanInTab({
   // the server then falls back to the voucher's original branch.
   branchId?: number | null;
   branchName?: string | null;
+  // Called after a successful scan-in. The POS uses it to close the
+  // scan dialog and refresh the lane/queue. Omitted on the standalone
+  // admin scan-in page, where the result card stays open for review.
+  onScanned?: () => void;
 } = {}) {
   const { toast } = useToast();
   const scannerRef = useRef<any>(null);
@@ -119,6 +124,10 @@ export default function ScanInTab({
           title: body.newly_allocated ? "Ticket allocated" : "Already in queue",
           description: `${body.order?.ticket_code ?? ""} · ${body.order?.plate ?? ""}`,
         });
+        // Let the POS close the scan dialog and refresh the lane/queue.
+        // When no handler is supplied (admin scan-in page) the result
+        // card stays open so staff can review and "Scan another".
+        onScanned?.();
       } else {
         setResult({
           ok: false,

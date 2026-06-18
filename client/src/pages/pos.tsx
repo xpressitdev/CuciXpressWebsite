@@ -2557,6 +2557,18 @@ export default function POS() {
           <ScanInTab
             branchId={branchId}
             branchName={branchId !== null ? BRANCH_NAME_BY_ID[branchId] ?? null : null}
+            onScanned={() => {
+              // Close the camera dialog and refresh both the cashier's
+              // lane/queue (today's orders) and the public queue widget
+              // so the just-scanned car shows up right away.
+              setScanOpen(false);
+              queryClient.invalidateQueries({
+                queryKey: ["/api/pos/orders/today", branchId],
+              });
+              queryClient.invalidateQueries({
+                queryKey: ["/api/queue/snapshot"],
+              });
+            }}
           />
         </DialogContent>
       </Dialog>
