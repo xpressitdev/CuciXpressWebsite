@@ -12,3 +12,9 @@ id = "XyuV6gEH4NU_pX7uciGa7"
 uri = "file://Cuci_Xpress_POS_Cashier_Guide.md"
 type = "text"
 title = "Cuci Xpress — Cashier Guide (POS System)"
+
+[[outputs]]
+id = "gMuDMIEFxUUbGkKJY8vj4"
+uri = "file://exports/legacy_accounts_never_otp.csv"
+type = "table"
+title = "Legacy accounts with wash history, never logged in via OTP (279)"
