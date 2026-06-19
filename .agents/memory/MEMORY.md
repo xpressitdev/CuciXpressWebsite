@@ -17,6 +17,7 @@
 - [Add-on line quantity & category](addon-line-quantity.md) — bulk selling is per-add-on qty in the order addons jsonb (fallback ?? 1), not on orders; packages stay single-wash; orders.quantity column left in DB but unused.
 - [DB migration workflow](db-migration-workflow.md) — db:push/drizzle-kit are BLOCKED; change schema via raw idempotent SQL in migrations/manual applied to BOTH $DATABASE_URL and $STAGING_DATABASE_URL.
 - [POS first-timer car capture](pos-firsttimer-car-capture.md) — new plate at POS requires brand/model (not customer name/phone); claim-on-login keeps them via COALESCE, never overwrite.
+- [Customer add-vehicle must claim](customer-add-vehicle-claim.md) — POST /api/customer/cars must CLAIM an existing unclaimed (both-NULL) plate row, not INSERT, or it 500s on cars_plate_normalized_unique.
 - [Loyalty collection cutover](loyalty-collection-cutover.md) — "reset everyone's stamps, start today" = a date-cutoff constant on the 4 AUTO-count readers, NOT data deletion; manual stamps stay un-filtered.
 - [Dev server has no watch](dev-server-no-watch.md) — `server/**` edits don't hot-reload (tsx, no watch); restart the workflow before curl-testing backend changes. Client edits do reload.
 - [Plate regex escaping](plate-regex-escaping.md) — in drizzle `sql` templates, plate-normalize `\s` cooks to `s` (strips letters); use `\\s+` to match cars_plate_normalized_unique or POS upserts 500.

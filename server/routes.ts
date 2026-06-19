@@ -6407,14 +6407,14 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
     const userId = Number(req.lucia!.user!.id);
     const plate = parsed.data.license_plate.toUpperCase().replace(/\s+/g, ' ').trim();
+    // Plate-normalisation: case + whitespace insensitive so "BC 8" and
+    // "bc8" collide. Used to detect both self-duplicates and cross-user
+    // claims (and to resolve any residual unique-constraint race in catch).
+    const plateNorm = plate.toUpperCase().replace(/\s+/g, '');
     try {
       const cust = (await db.execute(sql`
         SELECT id FROM customers WHERE user_id = ${userId} LIMIT 1
       `)).rows[0] as { id: number } | undefined;
-      // Plate-normalisation: case + whitespace insensitive so "BC 8" and
-      // "bc8" collide. Used to detect both self-duplicates and cross-user
-      // claims.
-      const plateNorm = plate.toUpperCase().replace(/\s+/g, '');
       const dupe = (await db.execute(sql`
         SELECT id FROM cars
         WHERE UPPER(REGEXP_REPLACE(license_plate, '\\s+', '', 'g')) = ${plateNorm}
@@ -6435,6 +6435,31 @@ export async function registerRoutes(app: Express): Promise<Server> {
       if (claimed) {
         return res.status(409).json({ ok: false, reason: 'plate_claimed', plate });
       }
+
+      // An unclaimed car for this plate may already exist — typically created
+      // at the POS as a walk-in (user_id + customer_id both NULL). Because of
+      // the cars_plate_normalized_unique constraint, inserting a second row for
+      // the same plate would fail. So instead we CLAIM that existing car in a
+      // single atomic UPDATE (the WHERE re-checks "still unclaimed" so two
+      // concurrent claims can't both win): attach it to this customer and fill
+      // in the details they entered, keeping any existing value left blank.
+      const claimedCar = (await db.execute(sql`
+        UPDATE cars SET
+          user_id       = ${userId},
+          customer_id   = ${cust?.id ?? null},
+          license_plate = ${plate},
+          brand     = COALESCE(${parsed.data.brand ?? null}, brand),
+          model     = COALESCE(${parsed.data.model ?? null}, model),
+          color     = COALESCE(${parsed.data.color ?? null}, color),
+          photo_url = COALESCE(${parsed.data.photo_url ?? null}, photo_url)
+        WHERE UPPER(REGEXP_REPLACE(license_plate, '\\s+', '', 'g')) = ${plateNorm}
+          AND user_id IS NULL AND customer_id IS NULL
+        RETURNING id, license_plate, brand, model, color, photo_url, last_seen_at
+      `)).rows[0];
+      if (claimedCar) {
+        return res.json({ ok: true, car: claimedCar });
+      }
+
       const inserted = (await db.execute(sql`
         INSERT INTO cars (user_id, customer_id, license_plate, brand, model, color, photo_url)
         VALUES (${userId}, ${cust?.id ?? null}, ${plate},
@@ -6444,6 +6469,29 @@ export async function registerRoutes(app: Express): Promise<Server> {
       `)).rows[0];
       res.json({ ok: true, car: inserted });
     } catch (err) {
+      // A residual unique-constraint hit (23505 on cars_plate_normalized_unique)
+      // means another request claimed/created this plate in the tiny window
+      // between our checks and our write. Resolve it deterministically into a
+      // 409 instead of a confusing 500: ours -> duplicate_plate, theirs ->
+      // plate_claimed.
+      const code = (err as any)?.cause?.code ?? (err as any)?.code;
+      if (code === '23505') {
+        try {
+          const mine = (await db.execute(sql`
+            SELECT id FROM cars
+            WHERE UPPER(REGEXP_REPLACE(license_plate, '\\s+', '', 'g')) = ${plateNorm}
+              AND user_id = ${userId}
+            LIMIT 1
+          `)).rows[0];
+          return res.status(409).json(
+            mine
+              ? { ok: false, reason: 'duplicate_plate' }
+              : { ok: false, reason: 'plate_claimed', plate },
+          );
+        } catch {
+          /* fall through to generic 500 below */
+        }
+      }
       console.error('[customer/cars POST] failed', err);
       res.status(500).json({ ok: false, reason: 'server_error' });
     }
