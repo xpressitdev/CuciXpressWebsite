@@ -1,0 +1,110 @@
+Unified Checkout (Main Integration Method)
+
+ 
+
+CyberSource Unified Checkout is a hosted payment solution designed to simplify online payment integration and improve the checkout experience for customers.
+
+ 
+
+It is a JavaScript-based payment widget that you embed on your e-commerce site. It handles sensitive payment data securely and integrates multiple payment methods in one interface. This means merchants don’t need to manage PCI compliance for card data directly because CyberSource captures and processes it on their behalf.
+
+ 
+
+Key Features
+
+Seamless Integration: Works with existing e-commerce platforms using Cybersource’s REST API and JavaScript SDK.
+Multiple Payment Methods: Supports manual card entry, Click to Pay, and digital wallets like Apple Pay and Google Pay.
+Customizable Checkout Flow: Merchants can configure the look and feel of the payment widget.
+Enhanced Security: Uses JSON Web Tokens (JWT) and secure keys for transaction authentication.
+Responsive Design: Optimized for both desktop and mobile devices.
+ 
+
+How It Works
+
+Server-Side Setup: Your server sends a request to CyberSource for a capture context, which returns a signed JWT containing merchant-specific parameters.
+Client-Side Setup: Use the JWT to invoke the Unified Checkout JavaScript library on your site.
+Payment Processing: The widget securely collects payment details and calls Cybersource APIs to authorize and process the transaction.
+Optional Features: Webhook notifications and Payment Details API for retrieving billing/shipping info.
+ 
+
+Benefits
+
+Simplified Integration: Reduces development complexity.
+Improved Conversion Rates: Faster, user-friendly checkout.
+Reduced Cart Abandonment: Supports popular payment methods.
+Compliance: Meets PCI and industry security standards.
+ 
+
+Guides and helpful information
+
+Unified Checkout Guide:
+
+https://developer.cybersource.com/content/dam/docs/cybs/en-us/unified-checkout/developer/all/rest/unified-checkout.pdf
+
+ 
+
+You can explore the Unified Checkout experience using the demo site below:
+
+https://vasdemos.visa.com/unifiedCheckout
+
+ 
+
+For sample payloads, refer to this section of the guide:
+
+https://developer.cybersource.com/docs/cybs/en-us/unified-checkout/developer/all/rest/unified-checkout/uc-getting-started-ss-setup.html
+
+ 
+
+Testing Requirements
+
+Ensure you've tested using both Challenged and Non-Challenge Flow in your testing phase:
+
+3DS Success Test Cards (Step‑Up / Challenge Flow):
+https://developer.cybersource.com/docs/cybs/en-us/payer-authentication/developer/all/so/payer-auth/pa-testing-intro/pa-testing-3ds-2x-intro/pa-testing-3ds-2x-success-stepup-auth-cruise-hybri.html
+
+ 
+
+Non‑Challenge / Standard Test Cards:
+https://developer.cybersource.com/docs/cybs/en-us/payments/developer/softwareexpress/so/payments/payments-intro/payments-testing-services/payments-testing-cards.html
+
+ 
+
+Plug-ins (alternative integration method using plugin via ecommerce platforms)
+
+ 
+
+Developed and supported by their respective developers, not by Visa CyberSource. Therefore, our ability to provide troubleshooting or support is limited. However, if the plug-in is listed under the developer section on
+
+(Technology partners | Cybersource Developer Center), Visa Cybersource offers better support coverage, and we can assist further in those cases.
+
+ 
+
+We do not maintain a catalog of plug-ins outside those listed on the Cybersource Developer Center. Nonetheless, we will do our best within our capacity to help where possible.
+
+ 
+
+Examples of plug-ins listed under Technology partners | Cybersource Developer Center include:
+
+OpenCart 
+Shopify 
+SalesForce 
+SAP 
+WooCommerce
+ 
+
+Viewing Transactions (via CyberSource)
+
+To view transactions in Cybersource, log in to the Cybersource portal using the credentials provided and navigate to the
+
+Transaction Management or Transaction page.
+
+ 
+
+Viewing Transactions (via API)
+ 
+
+If you prefer to monitor transactions from your own platform or monitoring tools, you can integrate using the CyberSource APIs.
+
+ 
+
+Refer to the Developer Guide: https://developer.cybersource.com/docs/cybs/en-us/txn-search/developer/all/rest/txn-search/txn-search-intro.html
