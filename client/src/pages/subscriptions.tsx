@@ -323,7 +323,7 @@ export default function Subscriptions() {
                 One flat monthly fee. Drive into any branch, any time. Rain re-wash on us — designed for Brunei's everyday drivers, families and fleets.
               </p>
               <p className="text-sm text-gray-500">
-                Pay-as-you-go average is <span className="font-bold">BND 15</span> per wash. Most members break even after 4 visits.
+                Pay-as-you-go average is <span className="font-bold">BND 12</span> per wash. Most members break even after 4 visits.
               </p>
             </motion.div>
           </div>
@@ -480,7 +480,6 @@ export default function Subscriptions() {
                       >
                         ★ Most picked
                       </div>
-
                       {/* Inner gradient card — clips the shimmer/gloss/twinkles. */}
                       <div
                         className="relative overflow-hidden flex flex-col h-full"
@@ -748,7 +747,6 @@ export default function Subscriptions() {
           <Footer />
         </>
       )}
-
       {/* --- Subscribe / Contact dialog --- */}
       <Dialog open={openPlan !== null} onOpenChange={(o) => !o && closeDialog()}>
         <DialogContent className="sm:max-w-md" data-testid="dialog-subscribe">
@@ -771,7 +769,7 @@ export default function Subscriptions() {
 
           {launched && openPlan && !openPlan.custom && !signedInCustomer ? (
             /* Launched paid plan but the visitor isn't signed in as a customer. */
-            <div className="space-y-4">
+            (<div className="space-y-4">
               <div className="rounded-lg bg-gray-50 border border-gray-200 px-4 py-3 text-sm text-gray-600">
                 Please sign in to your Cuci Xpress account to subscribe. Your plan
                 and billing are tied to your account so you can manage them anytime.
@@ -793,7 +791,7 @@ export default function Subscriptions() {
                   </Button>
                 </Link>
               </DialogFooter>
-            </div>
+            </div>)
           ) : (
           <form onSubmit={handleSubmit} className="space-y-4">
             <div className="space-y-1.5">
