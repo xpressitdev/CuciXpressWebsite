@@ -230,7 +230,6 @@ export async function processPocketPayPayment(paymentData: PaymentRequest): Prom
       order_id: orderId,
       order_ref: createResult.order_ref,
       payment_url: createResult.payment_url,
-      success_indicator: createResult.success_indicator,
       qr: createResult.qr ? 'QR code generated' : 'No QR code',
       transaction_id: transactionId
     });
@@ -257,76 +256,58 @@ export async function processPocketPayPayment(paymentData: PaymentRequest): Prom
   }
 }
 
-// Handle payment callback from Pocket Pay
-export function handlePaymentCallback(callbackData: any): any {
+// Normalised view of a Pocket Pay callback.
+export interface NormalizedPaymentCallback {
+  success: boolean;
+  order_id: string | null;
+  success_indicator: string | null;
+  message: string;
+}
+
+// Parse + normalise a Pocket Pay payment callback.
+//
+// Pocket Pay's REAL callback body looks like:
+//   { OrderId: '68', Message: 'Successful Payment', successIndicator: '<token>' }
+// There is NO `hash` field — authenticity is proved by `successIndicator`, the
+// per-order token Pocket Pay handed us at create time. This function only
+// normalises the shape; the CALLER must authenticate the callback by matching
+// `success_indicator` against the value it stored for this order, and then apply
+// the state transition. (The previous version checked an MD5 hash that Pocket
+// Pay never sends, so every callback failed and no payment ever finalized.)
+export function handlePaymentCallback(callbackData: any): NormalizedPaymentCallback {
   try {
     console.log('Payment callback received:', callbackData);
 
-    // Verify callback authenticity (implement hash verification here)
-    const expectedHash = generateCallbackHash(callbackData);
-    
-    if (callbackData.hash !== expectedHash) {
-      console.warn('Invalid callback hash detected');
-      return {
-        success: false,
-        message: 'Invalid callback authentication'
-      };
-    }
+    const orderId =
+      callbackData?.OrderId ??
+      callbackData?.order_id ??
+      callbackData?.orderId ??
+      null;
 
-    // Process callback based on status
-    if (callbackData.status === 'success' || callbackData.status === 'completed') {
-      console.log('Payment completed successfully:', callbackData);
-      
-      // Here you can update your database, send confirmation emails, etc.
-      
-      return {
-        success: true,
-        status: 'completed',
-        transaction_id: callbackData.transaction_id,
-        order_id: callbackData.order_id,
-        message: 'Payment completed successfully'
-      };
-    } else if (callbackData.status === 'failed' || callbackData.status === 'cancelled') {
-      console.log('Payment failed or cancelled:', callbackData);
-      
-      return {
-        success: false,
-        status: callbackData.status,
-        transaction_id: callbackData.transaction_id,
-        order_id: callbackData.order_id,
-        message: `Payment ${callbackData.status}`
-      };
-    } else {
-      console.log('Payment status unknown:', callbackData);
-      
-      return {
-        success: false,
-        status: 'unknown',
-        message: 'Unknown payment status'
-      };
-    }
-    
+    const successIndicator =
+      callbackData?.successIndicator ??
+      callbackData?.success_indicator ??
+      null;
+
+    const message: string = String(
+      callbackData?.Message ?? callbackData?.message ?? callbackData?.status ?? '',
+    );
+    // Exact-match the known-good Pocket Pay success signals. Substring matching
+    // would wrongly treat 'Unsuccessful Payment' as a success.
+    const m = message.trim().toLowerCase();
+    const success =
+      m === 'successful payment' || m === 'success' || m === 'completed' || m === 'paid';
+
+    return {
+      success,
+      order_id: orderId != null ? String(orderId) : null,
+      success_indicator: successIndicator != null ? String(successIndicator) : null,
+      message: message || 'unknown',
+    };
   } catch (error) {
     console.error('Payment callback processing error:', error);
-    
-    return {
-      success: false,
-      message: 'Callback processing failed'
-    };
+    return { success: false, order_id: null, success_indicator: null, message: 'parse_error' };
   }
-}
-
-// Generate callback hash for verification
-function generateCallbackHash(callbackData: any): string {
-  // Implement hash generation for callback verification
-  // This should match the format expected by Pocket Pay
-  const hashString = `${callbackData.api_key}|${callbackData.order_id}|${callbackData.status}|${callbackData.amount}|${POCKET_PAY_CONFIG.SALT}`;
-  
-  return crypto
-    .createHash('md5')
-    .update(hashString)
-    .digest('hex')
-    .toUpperCase();
 }
 
 // Query transaction status

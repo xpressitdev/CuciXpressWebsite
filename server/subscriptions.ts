@@ -731,19 +731,25 @@ export function registerSubscriptionRoutes(app: Express) {
           .json({ error: "payment_error", message: pay?.message });
       }
 
-      // Store the Pocket Pay order_id so the callback can finalize this sub.
+      // Store the Pocket Pay order_id + success_indicator so the callback can
+      // both find this sub (by ref) and authenticate itself (by indicator).
       await db.execute(sql`
         UPDATE subscriptions
-           SET pocket_pay_ref = ${String(pay.order_id)}, updated_at = now()
+           SET pocket_pay_ref = ${String(pay.order_id)},
+               pocket_pay_success_indicator = ${pay.success_indicator ?? null},
+               updated_at = now()
          WHERE id = ${subId}
       `);
 
+      // NOTE: success_indicator is deliberately NOT returned to the client. It
+      // is the per-order token Pocket Pay echoes in the callback, and we match
+      // it server-side to authenticate the callback. Exposing it pre-payment
+      // would let a caller forge a "paid" callback without paying.
       res.json({
         ok: true,
         redirect_url: pay.payment_url,
         qr_code: pay.qr_code ?? null,
         order_id: pay.order_id,
-        success_indicator: pay.success_indicator ?? null,
       });
     },
   );

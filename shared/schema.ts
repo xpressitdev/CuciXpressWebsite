@@ -594,6 +594,7 @@ export const orders = pgTable("orders", {
   total_cents: integer("total_cents").notNull(),
   payment_method: text("payment_method").notNull(),
   payment_ref: text("payment_ref"),
+  pocket_pay_success_indicator: text("pocket_pay_success_indicator"), // Pocket Pay per-order token echoed in the callback; matched to authenticate it
   // Phase 12a (2026-05-04_10): nullable so web-checkout rows that
   // start as `status='pending_payment'` can exist without a lane
   // ticket. Staff allocates T-NNN at scan-in time. The unique
@@ -739,6 +740,7 @@ export const subscriptions = pgTable("subscriptions", {
   initial_transaction_id: text("initial_transaction_id"),
   payment_provider: text("payment_provider"), // NULL = CyberSource (auto-renew) | 'pocket_pay' = one-time
   pocket_pay_ref: text("pocket_pay_ref"), // Pocket Pay order_id, used by the payment callback to finalize
+  pocket_pay_success_indicator: text("pocket_pay_success_indicator"), // Pocket Pay per-order token echoed in the callback; matched to authenticate it
   car_plate: text("car_plate"), // plate(s) the membership is for (comma-joined, normalised UPPERCASE); finalizer binds each to a car + membership
   card_brand: text("card_brand"),
   card_last4: text("card_last4"),

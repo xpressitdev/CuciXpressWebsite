@@ -4228,13 +4228,13 @@ export async function registerRoutes(app: Express): Promise<Server> {
                 id, branch_id, plate, vehicle_id, customer_id,
                 package_id, package_name, package_price_cents,
                 addons, subtotal_cents, total_cents,
-                payment_method, payment_ref, qr_provider,
+                payment_method, payment_ref, pocket_pay_success_indicator, qr_provider,
                 status, customer_name_walkin
               ) VALUES (
                 ${orderId}, ${branchId}, ${plateUpper}, ${vehicleId}, ${customerId},
                 ${packageId}, ${packageName}, ${priceCents},
                 '[]'::jsonb, ${priceCents}, ${priceCents},
-                'qr_code', ${result.order_id}, 'pocket_pay',
+                'qr_code', ${result.order_id}, ${result.success_indicator ?? null}, 'pocket_pay',
                 'pending_payment', ${fallbackName}
               )
             `);
@@ -4275,8 +4275,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
             amount: paymentData.amount,
             branch: null,
             car_plate: paymentData.carPlate,
-            phone: paymentData.phone,
-            success_indicator: result.success_indicator
+            phone: paymentData.phone
           },
           qr_code: result.qr_code
         });
@@ -4650,55 +4649,87 @@ export async function registerRoutes(app: Express): Promise<Server> {
   // Payment callback endpoint for Pocket Pay
   app.post("/api/payment-callback", async (req, res) => {
     try {
-      const callbackData = req.body;
-      
-      console.log('Payment callback received:', callbackData);
-      
-      const result = handlePaymentCallback(callbackData);
+      // handlePaymentCallback() normalises Pocket Pay's real callback shape
+      // ({ OrderId, Message, successIndicator }) and logs it.
+      const result = handlePaymentCallback(req.body);
+
+      const ppOrderId = result.order_id;
+      if (!ppOrderId) {
+        console.warn('payment-callback: missing OrderId in callback');
+        return res.status(400).json({ status: 'ERROR', message: 'Missing order id' });
+      }
+
+      // ── Authenticate the callback. Pocket Pay does NOT sign the callback with
+      // a hash; instead it echoes the per-order `successIndicator` it gave us at
+      // create time. We look up the value we stored for THIS order id and require
+      // the callback to match it. An attacker can't forge a callback without
+      // knowing this per-order secret. We check both the subscription flow
+      // (pocket_pay_ref) and the single-wash order flow (payment_ref).
+      const subRow = (await db.execute(sql`
+        SELECT pocket_pay_success_indicator AS ind
+          FROM subscriptions
+         WHERE pocket_pay_ref = ${ppOrderId} AND payment_provider = 'pocket_pay'
+         LIMIT 1
+      `)).rows[0] as { ind: string | null } | undefined;
+      const ordRow = (await db.execute(sql`
+        SELECT pocket_pay_success_indicator AS ind
+          FROM orders
+         WHERE payment_ref = ${ppOrderId} AND qr_provider = 'pocket_pay'
+         LIMIT 1
+      `)).rows[0] as { ind: string | null } | undefined;
+
+      if (!subRow && !ordRow) {
+        console.warn('payment-callback: no subscription/order found for OrderId', ppOrderId);
+        return res.status(404).json({ status: 'ERROR', message: 'Unknown order' });
+      }
+
+      const expectedIndicator = subRow?.ind ?? ordRow?.ind ?? null;
+      const provided = result.success_indicator;
+      const authentic = !!expectedIndicator && !!provided && expectedIndicator === provided;
+      if (!authentic) {
+        console.warn('payment-callback: success_indicator mismatch for OrderId', ppOrderId);
+        return res.status(400).json({ status: 'ERROR', message: 'Invalid callback authentication' });
+      }
 
       // ── Phase 12a: flip the pending_payment order to 'paid' (callback
-      // success) or 'voided' (failure/cancellation) by looking up the
-      // Pocket Pay order_id. The partial unique index on payment_ref
-      // (WHERE qr_provider='pocket_pay') makes this idempotent — Pocket
-      // Pay can re-deliver the callback safely. We only flip rows still
-      // in 'pending_payment' so a manual override (refund, void) sticks.
-      const ppOrderId = callbackData?.order_id ?? result?.order_id ?? null;
-      if (ppOrderId) {
-        const newStatus = result.success ? 'paid' : 'voided';
-        try {
-          await db.execute(sql`
-            UPDATE orders
-               SET status       = ${newStatus},
-                   completed_at = CASE WHEN ${newStatus} = 'paid' THEN now() ELSE completed_at END
-             WHERE qr_provider = 'pocket_pay'
-               AND payment_ref = ${String(ppOrderId)}
-               AND status      = 'pending_payment'
-          `);
-        } catch (dbErr) {
-          // Non-blocking: callback ack still goes back to Pocket Pay.
-          // Pending row stays visible in the CRM as 'pending_payment'
-          // and can be reconciled by hand or by a future status-poll cron.
-          console.error('Phase 12a: failed to flip order status from callback (non-blocking):', dbErr);
-        }
+      // success) or 'voided' (failure/cancellation). The partial unique index
+      // on payment_ref (WHERE qr_provider='pocket_pay') + the status guard make
+      // this idempotent — Pocket Pay can safely re-deliver the callback, and a
+      // manual override (refund, void) sticks.
+      const newStatus = result.success ? 'paid' : 'voided';
+      try {
+        await db.execute(sql`
+          UPDATE orders
+             SET status       = ${newStatus},
+                 completed_at = CASE WHEN ${newStatus} = 'paid' THEN now() ELSE completed_at END
+           WHERE qr_provider = 'pocket_pay'
+             AND payment_ref = ${ppOrderId}
+             AND status      = 'pending_payment'
+        `);
+      } catch (dbErr) {
+        // Non-blocking: callback ack still goes back to Pocket Pay. The pending
+        // row stays visible in the CRM as 'pending_payment' and can be
+        // reconciled by hand or by a future status-poll cron.
+        console.error('Phase 12a: failed to flip order status from callback (non-blocking):', dbErr);
+      }
 
-        // If this Pocket Pay order funded a ONE-TIME subscription purchase,
-        // finalize it now (activate the 1-month unlimited membership). This is
-        // idempotent and a no-op for ordinary single-wash order callbacks.
-        if (result.success) {
-          try {
-            await activatePocketPaySubscription(String(ppOrderId));
-          } catch (subErr) {
-            console.error('payment-callback: subscription activation failed (non-blocking):', subErr);
-          }
+      // If this Pocket Pay order funded a ONE-TIME subscription purchase,
+      // finalize it now (activate the 1-month unlimited membership per car).
+      // Idempotent and a no-op for ordinary single-wash order callbacks.
+      if (result.success) {
+        try {
+          await activatePocketPaySubscription(ppOrderId);
+        } catch (subErr) {
+          console.error('payment-callback: subscription activation failed (non-blocking):', subErr);
         }
       }
 
       if (result.success) {
-        res.json({ status: 'OK', message: 'Callback processed' });
-      } else {
-        res.status(400).json({ status: 'ERROR', message: result.message || 'Callback processing failed' });
+        return res.json({ status: 'OK', message: 'Callback processed' });
       }
-      
+      // Authentic but a non-success status (failed/cancelled): ack so Pocket Pay
+      // stops retrying — we've already voided the pending order above.
+      return res.json({ status: 'OK', message: `Callback processed (${result.message})` });
     } catch (error) {
       console.error('Payment callback error:', error);
       res.status(500).json({ status: 'ERROR', message: 'Internal server error' });
