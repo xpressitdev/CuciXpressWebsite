@@ -264,6 +264,14 @@ export default function Subscriptions() {
     // Launched paid plan + signed-in customer: kick off the one-time Pocket Pay
     // checkout (redirects to the payment page) instead of the launch
     // lead-capture.
+    // Family plans cover 2-3 cars: cars 1 & 2 are required, car 3 is optional.
+    // All plates go into a single comma-joined string. The per-car unlimited
+    // membership is bound to each plate.
+    const extraPlates =
+      openPlan.id === "family"
+        ? [carPlate2, carPlate3].map((p) => p.trim()).filter(Boolean)
+        : [];
+    const allPlates = [carPlate.trim(), ...extraPlates].filter(Boolean).join(", ");
     if (paidFlow) {
       if (!phone.trim()) {
         toast({
@@ -276,17 +284,10 @@ export default function Subscriptions() {
       pocketPayMutation.mutate({
         plan_id: openPlan.id,
         phone: phone.trim(),
-        car_plate: carPlate.trim(),
+        car_plate: allPlates,
       });
       return;
     }
-    // Family plans cover 2-3 cars: cars 1 & 2 are required, car 3 is optional.
-    // All plates go into the single carPlate field, comma-joined.
-    const extraPlates =
-      openPlan.id === "family"
-        ? [carPlate2, carPlate3].map((p) => p.trim()).filter(Boolean)
-        : [];
-    const allPlates = [carPlate.trim(), ...extraPlates].filter(Boolean).join(", ");
     subscribeMutation.mutate({
       email: email.trim(),
       phone: phone.trim(),

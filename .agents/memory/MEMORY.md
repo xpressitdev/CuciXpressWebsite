@@ -26,5 +26,6 @@
 - [Main db transactions](db-transactions.md) — main `db` is neon-serverless Pool/WebSocket, so `db.transaction()` is real BEGIN/COMMIT; the "Neon HTTP autocommits" note is a different driver.
 - [MDR fee rates](mdr-fee-rates.md) — fee table keyed by method|qr_provider (missing=0bps); MUST use COALESCE NULL-safe unique index or dup (card,NULL) rows break the rate map. Fee on GROSS; net-after-fees is headline.
 - [Admin DashboardTab role gating](admin-dashboard-role-gating.md) — DashboardTab is shown to ALL staff incl cashiers; owner/manager-only widgets there must be UI-gated or they 401-error.
+- [Subscription car binding](subscription-car-binding.md) — unlimited memberships MUST set vehicle_id (redemption rejects null); Family = 1 membership/car but full price on primary only, B$0 on extras.
 - [Subscription launch gate](subscription-launch-gate.md) — Subscribe→lead-capture (not payment) is the LAUNCH_TS countdown working as designed; prod cutover = move LAUNCH_TS + CyberSource prod keys/env + republish.
 - [Subscription billing idempotency](subscription-billing-idempotency.md) — two partial unique indexes (one-live-per-user + invoice per period) are the ONLY double-charge guard; never drop them, keep periods row-derived.
