@@ -25,6 +25,7 @@ import {
   chargeStoredInstrument,
 } from "./cybersource";
 import { getSubscriptionPlan } from "@shared/subscriptionPlans";
+import { processPocketPayPayment } from "./payment";
 
 // Renewal worker tuning.
 const POLL_INTERVAL_MS = 15 * 60_000; // every 15 minutes
@@ -62,6 +63,131 @@ function requestOrigin(req: any): string {
     req.protocol ||
     "https";
   return `${proto}://${host}`;
+}
+
+/**
+ * Ensure a customers row exists for this Lucia user and return its id.
+ * Claim-on-login pattern: adopt an unclaimed row with the same phone rather
+ * than colliding with the unique phone constraint. Throws
+ * "phone_belongs_to_other_customer" if the phone is already tied to a
+ * different account.
+ */
+async function resolveCustomerId(userId: number, phone: string): Promise<number> {
+  const byUser = (await db.execute(sql`
+    SELECT id FROM customers WHERE user_id = ${userId} LIMIT 1
+  `)).rows[0] as any;
+  if (byUser) return Number(byUser.id);
+
+  const byPhone = (await db.execute(sql`
+    SELECT id, user_id FROM customers WHERE phone = ${phone} LIMIT 1
+  `)).rows[0] as any;
+  if (byPhone && byPhone.user_id == null) {
+    await db.execute(sql`
+      UPDATE customers SET user_id = ${userId}, updated_at = now() WHERE id = ${byPhone.id}
+    `);
+    return Number(byPhone.id);
+  }
+  if (byPhone && Number(byPhone.user_id) === userId) return Number(byPhone.id);
+  if (byPhone) throw new Error("phone_belongs_to_other_customer");
+
+  const uname = (await db.execute(sql`
+    SELECT COALESCE(NULLIF(TRIM(CONCAT_WS(' ', first_name, last_name)), ''), 'Member') AS name
+      FROM users WHERE id = ${userId} LIMIT 1
+  `)).rows[0] as any;
+  const inserted = (await db.execute(sql`
+    INSERT INTO customers (phone, name, user_id)
+    VALUES (${phone}, ${uname?.name ?? "Member"}, ${userId})
+    RETURNING id
+  `)).rows[0] as any;
+  return Number(inserted.id);
+}
+
+/**
+ * Finalize a ONE-TIME Pocket Pay subscription purchase. Called by the Pocket
+ * Pay payment callback with the gateway order_id. Looks up the pending
+ * ('incomplete') subscription created at checkout-start, promotes it to
+ * 'active', and creates the 1-month unlimited membership + a paid invoice.
+ *
+ * No auto-renew: the row keeps cancel_at_period_end = true (set at start), so
+ * the existing renewal worker retires it at period end.
+ *
+ * Idempotent + concurrency-safe: the row is claimed with an atomic
+ * UPDATE ... WHERE status = 'incomplete'. A re-delivered callback finds 0 rows
+ * and rolls back, so no second membership/invoice is ever created. Returns
+ * false when there is no matching pending subscription (e.g. a single-wash
+ * order callback, or an already-finalized subscription).
+ */
+export async function activatePocketPaySubscription(
+  pocketPayOrderId: string,
+): Promise<boolean> {
+  const row = (await db.execute(sql`
+    SELECT id, customer_id, price_cents, currency
+      FROM subscriptions
+     WHERE pocket_pay_ref = ${pocketPayOrderId}
+       AND payment_provider = 'pocket_pay'
+       AND status = 'incomplete'
+     LIMIT 1
+  `)).rows[0] as any;
+  if (!row) return false;
+
+  const subId = String(row.id);
+  const now = new Date();
+  const periodEnd = addOneMonth(now);
+  const membershipId = genId("mem");
+
+  try {
+    await db.transaction(async (tx) => {
+      // Atomically claim the row: only the first finalization flips it out of
+      // 'incomplete'. A re-delivered callback gets 0 rows and rolls back.
+      const claimed = (await tx.execute(sql`
+        UPDATE subscriptions
+           SET status = 'active',
+               current_period_start = ${now.toISOString()},
+               current_period_end = ${periodEnd.toISOString()},
+               next_billing_at = ${periodEnd.toISOString()},
+               cancel_at_period_end = true,
+               failed_attempts = 0,
+               updated_at = now()
+         WHERE id = ${subId} AND status = 'incomplete'
+        RETURNING id
+      `)).rows;
+      if (claimed.length === 0) throw new Error("ALREADY_FINALIZED");
+
+      // Insert the maintaining unlimited membership FIRST (the FK
+      // subscriptions.membership_id -> memberships.id is checked immediately),
+      // then point the subscription at it.
+      await tx.execute(sql`
+        INSERT INTO memberships (
+          id, customer_id, vehicle_id, kind, total_washes, remaining_washes,
+          price_cents, status, source, expires_at, sold_by_staff_id, sold_at_branch_id
+        ) VALUES (
+          ${membershipId}, ${row.customer_id}, NULL, 'unlimited', 0, 0,
+          ${row.price_cents}, 'active', 'subscription', ${periodEnd.toISOString()}, NULL, NULL
+        )
+      `);
+      await tx.execute(sql`
+        UPDATE subscriptions SET membership_id = ${membershipId}, updated_at = now()
+         WHERE id = ${subId}
+      `);
+      await tx.execute(sql`
+        INSERT INTO subscription_invoices (
+          id, subscription_id, amount_cents, currency, status,
+          period_start, period_end
+        ) VALUES (
+          ${genId("inv")}, ${subId}, ${row.price_cents}, ${row.currency}, 'paid',
+          ${now.toISOString()}, ${periodEnd.toISOString()}
+        )
+      `);
+    });
+    console.log(
+      `[subscriptions.pocketpay] activated ${subId} from order ${pocketPayOrderId}`,
+    );
+    return true;
+  } catch (err: any) {
+    if (String(err?.message) === "ALREADY_FINALIZED") return false;
+    console.error("[subscriptions.pocketpay] finalize failed:", err?.message ?? err);
+    throw err;
+  }
 }
 
 // ---------------------------------------------------------------------------
@@ -333,6 +459,150 @@ export function registerSubscriptionRoutes(app: Express) {
       },
     });
   });
+
+  // ---- POST /api/subscriptions/pocketpay/start --------------------------
+  // ONE-TIME Pocket Pay subscription purchase (no auto-renew). Creates a
+  // pending ('incomplete') subscription, then a Pocket Pay payment link.
+  // The payment callback finalizes it via activatePocketPaySubscription().
+  const ppStartSchema = z.object({
+    plan_id: z.string(),
+    phone: z.string().trim().min(3).max(40),
+    car_plate: z.string().trim().max(40).optional(),
+  });
+
+  app.post(
+    "/api/subscriptions/pocketpay/start",
+    requireLuciaUser,
+    async (req, res) => {
+      const parsed = ppStartSchema.safeParse(req.body);
+      if (!parsed.success) {
+        return res.status(400).json({
+          error: "invalid_request",
+          details: parsed.error.flatten().fieldErrors,
+        });
+      }
+      const plan = getSubscriptionPlan(parsed.data.plan_id);
+      if (!plan) return res.status(400).json({ error: "unknown_plan" });
+
+      const userId = Number(req.lucia!.user!.id);
+      const phone = parsed.data.phone.replace(/\s+/g, "");
+      const carPlate = parsed.data.car_plate?.trim().toUpperCase() || "";
+
+      // Already have a live subscription? Don't let them pay twice.
+      const existing = (await db.execute(sql`
+        SELECT id FROM subscriptions
+         WHERE user_id = ${userId} AND status IN ('active','past_due')
+         LIMIT 1
+      `)).rows[0];
+      if (existing) return res.status(409).json({ error: "already_subscribed" });
+
+      // Resolve/create the customers row UP FRONT so the callback can finalize
+      // without needing the phone again.
+      let customerId: number;
+      try {
+        customerId = await resolveCustomerId(userId, phone);
+      } catch (err: any) {
+        if (String(err?.message) === "phone_belongs_to_other_customer") {
+          return res.status(409).json({ error: "phone_in_use" });
+        }
+        console.error(
+          "[subscriptions.pocketpay.start] customer resolve failed:",
+          err?.message ?? err,
+        );
+        return res.status(500).json({ error: "customer_resolve_failed" });
+      }
+
+      const now = new Date();
+      const subId = genId("sub");
+
+      // Claim a slot BEFORE creating the payment. The partial unique index
+      // `subscriptions_one_live_per_user` (covers 'incomplete') makes a
+      // duplicate/concurrent start fail without creating a second payment.
+      // Clear abandoned (>15m) incompletes first so a stale attempt doesn't
+      // permanently lock the user out.
+      try {
+        await db.execute(sql`
+          DELETE FROM subscriptions
+           WHERE user_id = ${userId} AND status = 'incomplete'
+             AND created_at < now() - interval '15 minutes'
+        `);
+        await db.execute(sql`
+          INSERT INTO subscriptions (
+            id, user_id, customer_id, plan_id, status, price_cents, currency,
+            payment_provider, cancel_at_period_end,
+            current_period_start, current_period_end, next_billing_at
+          ) VALUES (
+            ${subId}, ${userId}, ${customerId}, ${plan.id}, 'incomplete',
+            ${plan.priceCents}, ${plan.currency}, 'pocket_pay', true,
+            ${now.toISOString()}, ${now.toISOString()}, ${now.toISOString()}
+          )
+        `);
+      } catch (err: any) {
+        if (isUniqueViolation(err)) {
+          return res.status(409).json({ error: "already_subscribed" });
+        }
+        console.error(
+          "[subscriptions.pocketpay.start] claim error:",
+          err?.message ?? err,
+        );
+        return res.status(500).json({ error: "claim_failed" });
+      }
+
+      const releaseClaim = async () => {
+        try {
+          await db.execute(sql`
+            DELETE FROM subscriptions WHERE id = ${subId} AND status = 'incomplete'
+          `);
+        } catch (e: any) {
+          console.error(
+            "[subscriptions.pocketpay.start] failed to release claim",
+            e?.message ?? e,
+          );
+        }
+      };
+
+      // Create the Pocket Pay payment link.
+      let pay: any;
+      try {
+        pay = await processPocketPayPayment({
+          serviceName: `${plan.name} — 1 month`,
+          amount: plan.priceCents / 100,
+          carPlate: carPlate || "SUBSCRIPTION",
+          phone,
+          selectedBranch: "Online",
+          returnPath: "/subscription-success",
+        });
+      } catch (err: any) {
+        console.error(
+          "[subscriptions.pocketpay.start] payment error:",
+          err?.message ?? err,
+        );
+        await releaseClaim();
+        return res.status(502).json({ error: "payment_error" });
+      }
+      if (!pay?.success || !pay.payment_url || !pay.order_id) {
+        await releaseClaim();
+        return res
+          .status(502)
+          .json({ error: "payment_error", message: pay?.message });
+      }
+
+      // Store the Pocket Pay order_id so the callback can finalize this sub.
+      await db.execute(sql`
+        UPDATE subscriptions
+           SET pocket_pay_ref = ${String(pay.order_id)}, updated_at = now()
+         WHERE id = ${subId}
+      `);
+
+      res.json({
+        ok: true,
+        redirect_url: pay.payment_url,
+        qr_code: pay.qr_code ?? null,
+        order_id: pay.order_id,
+        success_indicator: pay.success_indicator ?? null,
+      });
+    },
+  );
 
   // ---- GET /api/subscriptions/me ----------------------------------------
   app.get("/api/subscriptions/me", requireLuciaUser, async (req, res) => {

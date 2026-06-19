@@ -29,6 +29,10 @@ interface PaymentRequest {
   carPlate: string;
   phone: string;
   selectedBranch: string;
+  // Where Pocket Pay sends the browser back after payment. Defaults to the
+  // single-wash success page; the subscription flow overrides it so paying
+  // members land on /subscription-success instead.
+  returnPath?: string;
 }
 
 interface PocketPayOrderRequest {
@@ -132,6 +136,7 @@ export async function processPocketPayPayment(paymentData: PaymentRequest): Prom
     const productionDomain = process.env.PRODUCTION_URL || 'https://cucixpress.com';
     const currentDomain = process.env.NODE_ENV === 'development' ? 'http://localhost:5000' : productionDomain;
     const liveDomain = currentDomain; // Use current domain for redirects
+    const returnUrl = `${liveDomain}${paymentData.returnPath ?? '/payment-success'}`;
     
     // Convert BND to cents for production API (multiply by 100)
     const amountInCents = Math.round(paymentData.amount * 100);
@@ -152,7 +157,7 @@ export async function processPocketPayPayment(paymentData: PaymentRequest): Prom
       order_id: orderId,
       order_info: `This is the order info ${orderId}.`,
       order_desc: `${paymentData.serviceName} - ${paymentData.selectedBranch} branch`,
-      return_url: `${liveDomain}/payment-success`,
+      return_url: returnUrl,
       callback_url: `${liveDomain}/api/payment-callback`,
       discount: 0
     };
@@ -196,7 +201,7 @@ export async function processPocketPayPayment(paymentData: PaymentRequest): Prom
       order_id: orderId,
       order_info: `This is the order info ${orderId}.`,
       order_desc: `${paymentData.serviceName} - ${paymentData.selectedBranch} branch`,
-      return_url: `${liveDomain}/payment-success`,
+      return_url: returnUrl,
       callback_url: `${liveDomain}/api/payment-callback`,
       discount: 0
     };

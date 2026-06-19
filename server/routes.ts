@@ -21,7 +21,7 @@ import { unifiedAuth } from "./unified-auth";
 import { lucia } from "./auth/lucia";
 import { staffLucia } from "./auth/staffLucia";
 import { requireLuciaUser, requireStaff, requireStaffRole, requireStaffOrPlateOwner } from "./auth/middleware";
-import { registerSubscriptionRoutes } from "./subscriptions";
+import { registerSubscriptionRoutes, activatePocketPaySubscription } from "./subscriptions";
 import { sendOtp, verifyOtp, OTP_CONSTANTS } from "./auth/otp";
 import { loginStaff, createStaff, hashStaffPassword, STAFF_ROLES, MIN_PASSWORD_LENGTH } from "./auth/staff";
 import {
@@ -4679,6 +4679,17 @@ export async function registerRoutes(app: Express): Promise<Server> {
           // Pending row stays visible in the CRM as 'pending_payment'
           // and can be reconciled by hand or by a future status-poll cron.
           console.error('Phase 12a: failed to flip order status from callback (non-blocking):', dbErr);
+        }
+
+        // If this Pocket Pay order funded a ONE-TIME subscription purchase,
+        // finalize it now (activate the 1-month unlimited membership). This is
+        // idempotent and a no-op for ordinary single-wash order callbacks.
+        if (result.success) {
+          try {
+            await activatePocketPaySubscription(String(ppOrderId));
+          } catch (subErr) {
+            console.error('payment-callback: subscription activation failed (non-blocking):', subErr);
+          }
         }
       }
 

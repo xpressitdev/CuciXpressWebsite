@@ -20,7 +20,6 @@ import {
 } from "@/components/ui/dialog";
 import { apiRequest, queryClient } from "@/lib/queryClient";
 import { useToast } from "@/hooks/use-toast";
-import { SubscriptionCheckout } from "@/components/SubscriptionCheckout";
 
 // --- Plan catalog (mirrors the handoff /tmp/handoff/.../landing.jsx tease) ---
 type Plan = {
@@ -115,9 +114,6 @@ export default function Subscriptions() {
   const [carPlate, setCarPlate] = useState("");
   const [carPlate2, setCarPlate2] = useState("");
   const [carPlate3, setCarPlate3] = useState("");
-  // Once the user passes the details step on a launched paid plan, we swap the
-  // form out for the live CyberSource Unified Checkout widget.
-  const [payStep, setPayStep] = useState(false);
 
   // Live countdown to the subscription launch (ticks every second).
   const [now, setNow] = useState(() => Date.now());
@@ -194,8 +190,48 @@ export default function Subscriptions() {
 
   const closeDialog = () => {
     setOpenPlan(null);
-    setPayStep(false);
   };
+
+  // One-time Pocket Pay subscription purchase. Creates the pending
+  // subscription server-side, then sends the customer to the Pocket Pay
+  // payment page. On success they return to /subscription-success, where the
+  // membership is activated by the payment callback.
+  const pocketPayMutation = useMutation({
+    mutationFn: (payload: {
+      plan_id: string;
+      phone: string;
+      car_plate: string;
+    }) => apiRequest("POST", "/api/subscriptions/pocketpay/start", payload),
+    onSuccess: async (res: any) => {
+      const data = await res.json().catch(() => ({}));
+      if (data?.redirect_url) {
+        window.location.href = data.redirect_url;
+        return;
+      }
+      toast({
+        title: "Couldn't start payment",
+        description: "Please try again in a moment.",
+        variant: "destructive",
+      });
+    },
+    onError: async (error: any) => {
+      let msg = "Please try again in a moment.";
+      if (error?.message) msg = error.message;
+      try {
+        const body = await error?.response?.json?.();
+        if (body?.error === "already_subscribed") {
+          msg = "You already have an active subscription.";
+        } else if (body?.error === "phone_in_use") {
+          msg = "That phone number is linked to another account.";
+        }
+      } catch {}
+      toast({
+        title: "Couldn't start payment",
+        description: msg,
+        variant: "destructive",
+      });
+    },
+  });
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
@@ -225,8 +261,9 @@ export default function Subscriptions() {
       });
       return;
     }
-    // Launched paid plan + signed-in customer: move to the secure card step
-    // instead of the launch lead-capture.
+    // Launched paid plan + signed-in customer: kick off the one-time Pocket Pay
+    // checkout (redirects to the payment page) instead of the launch
+    // lead-capture.
     if (paidFlow) {
       if (!phone.trim()) {
         toast({
@@ -236,7 +273,11 @@ export default function Subscriptions() {
         });
         return;
       }
-      setPayStep(true);
+      pocketPayMutation.mutate({
+        plan_id: openPlan.id,
+        phone: phone.trim(),
+        car_plate: carPlate.trim(),
+      });
       return;
     }
     // Family plans cover 2-3 cars: cars 1 & 2 are required, car 3 is optional.
@@ -252,22 +293,6 @@ export default function Subscriptions() {
       plan: openPlan.id,
       carPlate: allPlates,
     });
-  };
-
-  const handleCheckoutSuccess = () => {
-    queryClient.invalidateQueries({ queryKey: ["/api/subscriptions/me"] });
-    queryClient.invalidateQueries({ queryKey: ["/api/customer/me"] });
-    toast({
-      title: "You're subscribed! 🎉",
-      description:
-        "Your plan is active and your first month is paid. Drive into any branch any time.",
-    });
-    closeDialog();
-    setEmail("");
-    setPhone("");
-    setCarPlate("");
-    setCarPlate2("");
-    setCarPlate3("");
   };
 
   // Signed-in users see the same sidebar shell as /dashboard so they don't
@@ -730,41 +755,20 @@ export default function Subscriptions() {
             <DialogTitle>
               {openPlan?.custom
                 ? "Tell us about your fleet"
-                : payStep
-                ? `Pay for ${openPlan?.name}`
                 : `Subscribe to ${openPlan?.name}`}
             </DialogTitle>
             <DialogDescription>
               {openPlan?.custom
                 ? "Drop your details and our team will reach out within one business day."
-                : payStep
-                ? `You'll be charged ${openPlan?.price} now, then automatically each month. Cancel anytime from your dashboard.`
+                : paidFlow
+                ? `You'll pay ${openPlan?.price} once for one month of unlimited washes. No auto-renew — your plan simply ends after a month unless you subscribe again.`
                 : launched
                 ? "Enter your details and pay securely to activate your plan today."
                 : "Reserve your founding spot now and lock in this price for life. We launch 19 June — we'll text you at launch to activate your plan and book your first wash."}
             </DialogDescription>
           </DialogHeader>
 
-          {/* Step 2 (paid): live CyberSource Unified Checkout card form. */}
-          {payStep && openPlan && !openPlan.custom ? (
-            <div className="space-y-4">
-              <SubscriptionCheckout
-                planId={openPlan.id}
-                phone={phone.trim()}
-                onSuccess={handleCheckoutSuccess}
-              />
-              <DialogFooter>
-                <Button
-                  type="button"
-                  variant="outline"
-                  onClick={() => setPayStep(false)}
-                  data-testid="button-checkout-back"
-                >
-                  Back
-                </Button>
-              </DialogFooter>
-            </div>
-          ) : launched && openPlan && !openPlan.custom && !signedInCustomer ? (
+          {launched && openPlan && !openPlan.custom && !signedInCustomer ? (
             /* Launched paid plan but the visitor isn't signed in as a customer. */
             <div className="space-y-4">
               <div className="rounded-lg bg-gray-50 border border-gray-200 px-4 py-3 text-sm text-gray-600">
@@ -904,22 +908,24 @@ export default function Subscriptions() {
                 type="button"
                 variant="outline"
                 onClick={closeDialog}
-                disabled={subscribeMutation.isPending}
+                disabled={subscribeMutation.isPending || pocketPayMutation.isPending}
               >
                 Cancel
               </Button>
               <Button
                 type="submit"
-                disabled={subscribeMutation.isPending}
+                disabled={subscribeMutation.isPending || pocketPayMutation.isPending}
                 className="bg-cuci-primary text-white"
                 data-testid="button-subscribe-submit"
               >
-                {subscribeMutation.isPending
+                {pocketPayMutation.isPending
+                  ? "Starting payment…"
+                  : subscribeMutation.isPending
                   ? "Sending…"
                   : openPlan?.custom
                   ? "Send enquiry"
                   : paidFlow
-                  ? "Continue to payment"
+                  ? `Pay ${openPlan?.price} — 1 month`
                   : "Reserve my spot"}
               </Button>
             </DialogFooter>

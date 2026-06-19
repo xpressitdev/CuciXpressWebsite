@@ -12,6 +12,8 @@ import LoginPage from "@/pages/login";
 import DashboardPage from "@/pages/dashboard";
 import Pricing from "@/pages/pricing";
 import Subscriptions from "@/pages/subscriptions";
+import SubscriptionSuccess from "@/pages/subscription-success";
+import AdminSubscriptionTest from "@/pages/admin-subscription-test";
 import Checkout from "@/pages/checkout";
 import PrivacyPolicy from "@/pages/privacy-policy";
 import TermsOfService from "@/pages/terms-of-service";
@@ -40,6 +42,8 @@ function Router() {
       <Route path="/dashboard" component={DashboardPage} />
       <Route path="/pricing" component={Pricing} />
       <Route path="/subscriptions" component={Subscriptions} />
+      <Route path="/subscription-success" component={SubscriptionSuccess} />
+      <Route path="/admin/subscription-test" component={AdminSubscriptionTest} />
       <Route path="/checkout" component={Checkout} />
       <Route path="/privacy-policy" component={PrivacyPolicy} />
       <Route path="/terms-of-service" component={TermsOfService} />

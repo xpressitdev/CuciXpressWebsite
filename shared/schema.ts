@@ -737,6 +737,8 @@ export const subscriptions = pgTable("subscriptions", {
   cybersource_customer_id: text("cybersource_customer_id"),
   cybersource_instrument_id: text("cybersource_instrument_id"),
   initial_transaction_id: text("initial_transaction_id"),
+  payment_provider: text("payment_provider"), // NULL = CyberSource (auto-renew) | 'pocket_pay' = one-time
+  pocket_pay_ref: text("pocket_pay_ref"), // Pocket Pay order_id, used by the payment callback to finalize
   card_brand: text("card_brand"),
   card_last4: text("card_last4"),
   current_period_start: timestamp("current_period_start", { withTimezone: true }).defaultNow().notNull(),
