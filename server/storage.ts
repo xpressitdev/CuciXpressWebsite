@@ -7,7 +7,7 @@ export interface IStorage {
   getUserByEmail(email: string): Promise<User | undefined>;
   createUser(user: InsertUser): Promise<User>;
   updateUser(id: number, updates: Partial<InsertUser>): Promise<User | null>;
-  updateCustomerName(userId: number, firstName: string, lastName: string): Promise<User | null>;
+  updateCustomerProfile(userId: number, profile: { firstName: string; lastName: string; email: string; phoneNumber: string | null }): Promise<User | null>;
   
   // Service History
   createServiceHistory(entry: InsertServiceHistory): Promise<ServiceHistory>;
@@ -56,21 +56,54 @@ export class DatabaseStorage implements IStorage {
     }
   }
 
-  async updateCustomerName(userId: number, firstName: string, lastName: string): Promise<User | null> {
+  async updateCustomerProfile(
+    userId: number,
+    profile: { firstName: string; lastName: string; email: string; phoneNumber: string | null },
+  ): Promise<User | null> {
     // Note: errors are intentionally NOT caught here so the route layer can
-    // distinguish a true "user not found" (returns null) from an internal
-    // failure (throws → route maps to 500).
+    // distinguish a true "user not found" (returns null), a unique-constraint
+    // clash (23505 → route maps to 409) and an internal failure (→ 500).
+    const { firstName, lastName, email, phoneNumber } = profile;
     return await db.transaction(async (tx) => {
+      // Guard phone identity: users.phone_number has no DB unique constraint
+      // and phone is a login identifier, so a phone already attached to a
+      // DIFFERENT account must be rejected (the route maps this to 409).
+      if (phoneNumber) {
+        const clash = await tx.execute(sql`
+          SELECT 1
+            FROM users
+           WHERE phone_number = ${phoneNumber} AND id <> ${userId}
+          UNION ALL
+          SELECT 1
+            FROM customers
+           WHERE phone = ${phoneNumber} AND user_id IS DISTINCT FROM ${userId}
+          LIMIT 1
+        `);
+        if (clash.rows.length > 0) {
+          throw Object.assign(new Error('phone_in_use'), { phoneConflict: true });
+        }
+      }
       const [user] = await tx
         .update(users)
-        .set({ first_name: firstName, last_name: lastName })
+        .set({
+          first_name: firstName,
+          last_name: lastName,
+          email,
+          phone_number: phoneNumber,
+        })
         .where(eq(users.id, userId))
         .returning();
       if (!user) return null;
       const fullName = `${firstName} ${lastName}`.trim();
+      // Keep the linked customer record in sync. customers.phone is NOT NULL
+      // and unique, so only overwrite it when a non-empty phone was provided.
       await tx
         .update(customers)
-        .set({ name: fullName, updated_at: sql`now()` })
+        .set({
+          name: fullName,
+          ...(phoneNumber ? { phone: phoneNumber } : {}),
+          updated_at: sql`now()`,
+        })
         .where(eq(customers.user_id, userId));
       return user;
     });

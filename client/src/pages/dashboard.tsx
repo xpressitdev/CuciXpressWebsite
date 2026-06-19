@@ -154,7 +154,9 @@ export default function DashboardPage() {
         profile={{
           first_name: me.profile.first_name ?? "",
           last_name: me.profile.last_name ?? "",
-        }}
+          email: me.profile.email ?? "",
+          phone_number: me.profile.phone_number,
+          }}
       />
       <div className="flex-1 min-w-0">
         <DashMobileHeader
@@ -164,7 +166,9 @@ export default function DashboardPage() {
           profile={{
             first_name: me.profile.first_name ?? "",
             last_name: me.profile.last_name ?? "",
-          }}
+            email: me.profile.email ?? "",
+            phone_number: me.profile.phone_number,
+            }}
         />
         <main className="px-4 sm:px-6 lg:px-10 py-6 lg:py-10 pb-24 md:pb-10 max-w-7xl">
           {tab === "overview" && (

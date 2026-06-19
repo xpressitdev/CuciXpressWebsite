@@ -25,6 +25,14 @@ Legacy customers (imported from the live-queue app) already have accounts but ke
 
 **How to apply:** staff-side edit lives on `PATCH /api/admin/customers/:id` (gated `requireStaffRole('owner','manager')`), surfaced in the admin Customers tab edit form. It validates new email is free (case-insensitive vs other `users`), rejects customers with no `user_id` (`no_account`), and runs name/notes + email update in one `db.transaction` so it's all-or-nothing. Fits the business: customers are physically present, staff verify identity in person.
 
+## Self-service profile edit (name/email/phone) must guard identity
+
+**Rule:** when a customer edits their own email/phone (dashboard "Edit Profile" → `PATCH /api/customer/me`), reject any value already attached to a DIFFERENT account, and normalise phone with the SAME `normalisePhone` the sign-in flow uses before storing.
+
+**Why:** `users.email` is DB-unique (23505 → 409), but `users.phone_number` is NOT, and phone is a login identifier (`findCustomerByIdentifier` prefers `users.phone_number ... LIMIT 1`). Letting a customer set their phone to someone else's makes phone sign-in ambiguous / enables account confusion. Storing an un-normalised phone breaks login lookup equivalence (`+673 1234567` vs `1234567`).
+
+**How to apply:** the cross-account phone check (users.phone_number id<>self UNION customers.phone user_id IS DISTINCT FROM self) runs inside the update transaction in `storage.updateCustomerProfile`, throwing a typed conflict the route maps to 409 `field:'phone'`. Optional future hardening: a DB unique constraint on `users.phone_number` (needs dedup/backfill first).
+
 ## Onboarding a NEW customer ≠ renaming an existing account
 
 **Rule:** to get a brand-new person logged in, **CREATE a new `users` row** for them; never repurpose an existing legacy account by overwriting its email. An existing legacy account (real email + phone + created date + 161-char legacy password) belongs to its *original* owner even if they've never logged in via OTP.

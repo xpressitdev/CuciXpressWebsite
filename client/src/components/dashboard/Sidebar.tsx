@@ -49,13 +49,13 @@ interface Props {
   membershipLabel: string;
   onLogout: () => void;
   loggingOut: boolean;
-  /** Pre-fill values for the "Edit name" dialog. When omitted, the dialog
+  /** Pre-fill values for the "Edit Profile" dialog. When omitted, the dialog
    *  is hidden — pages without a `me` profile loaded shouldn't try to
-   *  expose name editing. */
-  profile?: { first_name: string; last_name: string };
+   *  expose profile editing. */
+  profile?: EditableProfile;
 }
 
-const editNameSchema = z.object({
+const editProfileSchema = z.object({
   first_name: z
     .string()
     .trim()
@@ -66,8 +66,26 @@ const editNameSchema = z.object({
     .trim()
     .min(1, "Last name is required")
     .max(80, "Keep it under 80 characters"),
+  email: z
+    .string()
+    .trim()
+    .min(1, "Email is required")
+    .email("Enter a valid email")
+    .max(160, "Keep it under 160 characters"),
+  phone_number: z
+    .string()
+    .trim()
+    .max(40, "Keep it under 40 characters")
+    .optional(),
 });
-type EditNameValues = z.infer<typeof editNameSchema>;
+type EditProfileValues = z.infer<typeof editProfileSchema>;
+
+type EditableProfile = {
+  first_name: string;
+  last_name: string;
+  email: string;
+  phone_number: string | null;
+};
 
 const items: { id: DashTab; label: string; short: string; icon: any }[] = [
   { id: "overview", label: "Overview", short: "Home", icon: Home },
@@ -102,7 +120,7 @@ function AccountMenu({
   fullName: string;
   onLogout: () => void;
   loggingOut: boolean;
-  profile?: { first_name: string; last_name: string };
+  profile?: EditableProfile;
   trigger: React.ReactNode;
   side?: "top" | "bottom";
   align?: "start" | "center" | "end";
@@ -121,7 +139,7 @@ function AccountMenu({
               data-testid="button-dash-edit-name"
             >
               <Pencil className="w-3.5 h-3.5 mr-2" />
-              Edit name
+              Edit Profile
             </DropdownMenuItem>
           )}
           <DropdownMenuItem
@@ -137,11 +155,10 @@ function AccountMenu({
       </DropdownMenu>
 
       {profile && (
-        <EditNameDialog
+        <EditProfileDialog
           open={editOpen}
           onOpenChange={setEditOpen}
-          firstName={profile.first_name}
-          lastName={profile.last_name}
+          profile={profile}
         />
       )}
     </>
@@ -229,34 +246,43 @@ export function DashSidebar({
   );
 }
 
-function EditNameDialog({
+function EditProfileDialog({
   open,
   onOpenChange,
-  firstName,
-  lastName,
+  profile,
 }: {
   open: boolean;
   onOpenChange: (next: boolean) => void;
-  firstName: string;
-  lastName: string;
+  profile: EditableProfile;
 }) {
   const qc = useQueryClient();
   const { toast } = useToast();
-  const form = useForm<EditNameValues>({
-    resolver: zodResolver(editNameSchema),
-    defaultValues: { first_name: firstName, last_name: lastName },
+  const defaults: EditProfileValues = {
+    first_name: profile.first_name,
+    last_name: profile.last_name,
+    email: profile.email,
+    phone_number: profile.phone_number ?? "",
+  };
+  const form = useForm<EditProfileValues>({
+    resolver: zodResolver(editProfileSchema),
+    defaultValues: defaults,
   });
 
   // Sync the form whenever the dialog re-opens or the upstream profile
   // changes (e.g. after a successful save the cached `me` updates).
   useEffect(() => {
     if (open) {
-      form.reset({ first_name: firstName, last_name: lastName });
+      form.reset({
+        first_name: profile.first_name,
+        last_name: profile.last_name,
+        email: profile.email,
+        phone_number: profile.phone_number ?? "",
+      });
     }
-  }, [open, firstName, lastName, form]);
+  }, [open, profile.first_name, profile.last_name, profile.email, profile.phone_number, form]);
 
   const mutation = useMutation({
-    mutationFn: async (values: EditNameValues) => {
+    mutationFn: async (values: EditProfileValues) => {
       const r = await apiRequest("PATCH", "/api/customer/me", values);
       return r.json() as Promise<{ profile: MeResp["profile"] }>;
     },
@@ -265,13 +291,30 @@ function EditNameDialog({
         prev ? { ...prev, profile: { ...prev.profile, ...data.profile } } : prev,
       );
       qc.invalidateQueries({ queryKey: ["/api/customer/me"] });
-      toast({ title: "Name updated" });
+      toast({ title: "Profile updated" });
       onOpenChange(false);
     },
-    onError: () => {
+    onError: (err: any) => {
+      // apiRequest throws Error("<status>: <body text>"); pull the conflict
+      // field out of the JSON body when present.
+      let field: string | undefined;
+      const msg = String(err?.message ?? "");
+      if (msg.startsWith("409")) {
+        try {
+          field = JSON.parse(msg.slice(msg.indexOf("{")))?.field;
+        } catch {
+          field = undefined;
+        }
+      }
+      const description =
+        field === "email"
+          ? "That email is already in use by another account."
+          : field === "phone"
+            ? "That phone number is already in use by another account."
+            : "Please try again.";
       toast({
-        title: "Could not update name",
-        description: "Please try again.",
+        title: "Could not update profile",
+        description,
         variant: "destructive",
       });
     },
@@ -281,9 +324,10 @@ function EditNameDialog({
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent className="sm:max-w-[420px]" data-testid="dialog-edit-name">
         <DialogHeader>
-          <DialogTitle>Edit your name</DialogTitle>
+          <DialogTitle>Edit Profile</DialogTitle>
           <DialogDescription>
-            This is how you'll appear on receipts and in your dashboard.
+            Update your name, email and phone number. These details appear on
+            your receipts and in your dashboard.
           </DialogDescription>
         </DialogHeader>
         <Form {...form}>
@@ -319,6 +363,45 @@ function EditNameDialog({
                     <Input
                       maxLength={80}
                       data-testid="input-last-name"
+                      {...field}
+                    />
+                  </FormControl>
+                  <FormMessage />
+                </FormItem>
+              )}
+            />
+            <FormField
+              control={form.control}
+              name="email"
+              render={({ field }) => (
+                <FormItem>
+                  <FormLabel>Email address</FormLabel>
+                  <FormControl>
+                    <Input
+                      type="email"
+                      inputMode="email"
+                      maxLength={160}
+                      data-testid="input-email"
+                      {...field}
+                    />
+                  </FormControl>
+                  <FormMessage />
+                </FormItem>
+              )}
+            />
+            <FormField
+              control={form.control}
+              name="phone_number"
+              render={({ field }) => (
+                <FormItem>
+                  <FormLabel>Phone number</FormLabel>
+                  <FormControl>
+                    <Input
+                      type="tel"
+                      inputMode="tel"
+                      maxLength={40}
+                      placeholder="e.g. +673 1234567"
+                      data-testid="input-phone"
                       {...field}
                     />
                   </FormControl>
@@ -366,7 +449,7 @@ export function DashMobileHeader({
   fullName: string;
   onLogout: () => void;
   loggingOut: boolean;
-  profile?: { first_name: string; last_name: string };
+  profile?: EditableProfile;
 }) {
   const initials = initialsOf(fullName);
   return (

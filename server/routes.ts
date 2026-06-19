@@ -5648,16 +5648,23 @@ export async function registerRoutes(app: Express): Promise<Server> {
     });
   });
 
-  // PATCH /api/customer/me — update the signed-in customer's first/last name.
-  // Mirrors the response shape of GET /api/customer/me so the cache update
-  // on the client just slots in.
-  const updateCustomerNameSchema = z.object({
+  // PATCH /api/customer/me — update the signed-in customer's profile
+  // (name, email, phone). Mirrors the response shape of GET /api/customer/me
+  // so the cache update on the client just slots in.
+  const updateCustomerProfileSchema = z.object({
     first_name: z.string().trim().min(1, 'First name is required').max(80),
     last_name: z.string().trim().min(1, 'Last name is required').max(80),
+    email: z.string().trim().toLowerCase().email('Enter a valid email').max(160),
+    phone_number: z
+      .string()
+      .trim()
+      .max(40, 'Phone number is too long')
+      .optional()
+      .transform((v) => (v && v.length > 0 ? v : null)),
   });
 
   app.patch('/api/customer/me', requireLuciaUser, async (req, res) => {
-    const parsed = updateCustomerNameSchema.safeParse(req.body);
+    const parsed = updateCustomerProfileSchema.safeParse(req.body);
     if (!parsed.success) {
       return res.status(400).json({
         error: 'invalid_request',
@@ -5665,14 +5672,38 @@ export async function registerRoutes(app: Express): Promise<Server> {
       });
     }
     const userId = Number(req.lucia!.user!.id);
+    // Normalise the phone the same way the sign-in flow does so phone-based
+    // login resolution stays deterministic (digits only, 7-digit local →
+    // +673). Junk that normalises to empty is stored as NULL.
+    const rawPhone = parsed.data.phone_number ?? null;
+    const normPhone = rawPhone ? normalisePhone(rawPhone) : '';
+    const phoneNumber = normPhone.length > 0 ? normPhone : null;
     let updated;
     try {
-      updated = await storage.updateCustomerName(
-        userId,
-        parsed.data.first_name,
-        parsed.data.last_name,
-      );
-    } catch (err) {
+      updated = await storage.updateCustomerProfile(userId, {
+        firstName: parsed.data.first_name,
+        lastName: parsed.data.last_name,
+        email: parsed.data.email,
+        phoneNumber,
+      });
+    } catch (err: any) {
+      // A phone already attached to a DIFFERENT account: users.phone_number is
+      // not DB-unique and phone is a login identifier, so a collision would
+      // make phone sign-in ambiguous / enable account confusion. Reject it.
+      if (err?.phoneConflict) {
+        return res.status(409).json({ error: 'conflict', field: 'phone' });
+      }
+      // 23505 = unique_violation. The login email and the customer phone are
+      // both unique; surface a friendly per-field conflict instead of a 500.
+      if (err?.code === '23505') {
+        const constraint = String(err?.constraint ?? '').toLowerCase();
+        const field = constraint.includes('email')
+          ? 'email'
+          : constraint.includes('phone')
+            ? 'phone'
+            : 'value';
+        return res.status(409).json({ error: 'conflict', field });
+      }
       console.error('[customer/me PATCH] failed', err);
       return res.status(500).json({ error: 'server_error' });
     }
