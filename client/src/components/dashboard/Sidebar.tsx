@@ -281,8 +281,49 @@ function EditProfileDialog({
     }
   }, [open, profile.first_name, profile.last_name, profile.email, profile.phone_number, form]);
 
-  const mutation = useMutation({
-    mutationFn: async (values: EditProfileValues) => {
+  // Two-step flow: edit the fields, then confirm with a one-time code sent to
+  // the customer's CURRENT email. `step` toggles which view is shown.
+  const [step, setStep] = useState<"form" | "code">("form");
+  const [emailHint, setEmailHint] = useState("");
+  const [code, setCode] = useState("");
+  const [codeError, setCodeError] = useState<string | null>(null);
+
+  // Reset to the editing step whenever the dialog (re)opens.
+  useEffect(() => {
+    if (open) {
+      setStep("form");
+      setCode("");
+      setCodeError(null);
+    }
+  }, [open]);
+
+  // Step 1: send the code to the on-record email, then advance to step 2.
+  const startMutation = useMutation({
+    mutationFn: async () => {
+      const r = await apiRequest("POST", "/api/customer/me/change/start");
+      return r.json() as Promise<{ ok: boolean; email_hint: string }>;
+    },
+    onSuccess: (data) => {
+      setEmailHint(data.email_hint ?? "");
+      setCode("");
+      setCodeError(null);
+      setStep("code");
+    },
+    onError: (err: any) => {
+      const msg = String(err?.message ?? "");
+      toast({
+        title: "Could not send code",
+        description: msg.startsWith("429")
+          ? "Too many attempts. Please wait a few minutes and try again."
+          : "Please try again in a moment.",
+        variant: "destructive",
+      });
+    },
+  });
+
+  // Step 2: submit the edited values together with the code.
+  const saveMutation = useMutation({
+    mutationFn: async (values: EditProfileValues & { code: string }) => {
       const r = await apiRequest("PATCH", "/api/customer/me", values);
       return r.json() as Promise<{ profile: MeResp["profile"] }>;
     },
@@ -295,30 +336,43 @@ function EditProfileDialog({
       onOpenChange(false);
     },
     onError: (err: any) => {
-      // apiRequest throws Error("<status>: <body text>"); pull the conflict
-      // field out of the JSON body when present.
-      let field: string | undefined;
+      // apiRequest throws Error("<status>: <body text>"). A 400 here means the
+      // code was wrong/expired (stay on the code step so they can retry); a 409
+      // is a field conflict (send them back to fix it, with a fresh code).
       const msg = String(err?.message ?? "");
-      if (msg.startsWith("409")) {
+      let field: string | undefined;
+      if (msg.includes("{")) {
         try {
           field = JSON.parse(msg.slice(msg.indexOf("{")))?.field;
         } catch {
           field = undefined;
         }
       }
-      const description =
-        field === "email"
-          ? "That email is already in use by another account."
-          : field === "phone"
-            ? "That phone number is already in use by another account."
-            : "Please try again.";
-      toast({
-        title: "Could not update profile",
-        description,
-        variant: "destructive",
-      });
+      if (msg.startsWith("409")) {
+        setStep("form");
+        setCode("");
+        toast({
+          title: "Could not update profile",
+          description:
+            field === "email"
+              ? "That email is already in use by another account."
+              : field === "phone"
+                ? "That phone number is already in use by another account."
+                : "Please try again.",
+          variant: "destructive",
+        });
+        return;
+      }
+      // Otherwise treat as a bad/expired code.
+      setCodeError(
+        msg.startsWith("429")
+          ? "Too many incorrect attempts. Request a new code."
+          : "That code is incorrect or has expired.",
+      );
     },
   });
+
+  const busy = startMutation.isPending || saveMutation.isPending;
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
@@ -326,13 +380,82 @@ function EditProfileDialog({
         <DialogHeader>
           <DialogTitle>Edit Profile</DialogTitle>
           <DialogDescription>
-            Update your name, email and phone number. These details appear on
-            your receipts and in your dashboard.
+            {step === "form"
+              ? "Update your name, email and phone number. These details appear on your receipts and in your dashboard."
+              : "For your security, enter the 6-digit code we just emailed you to confirm these changes."}
           </DialogDescription>
         </DialogHeader>
+        {step === "code" ? (
+          <div className="space-y-4">
+            <p className="text-sm text-muted-foreground">
+              We sent a code to{" "}
+              <span className="font-medium text-foreground">{emailHint}</span>.
+              Enter it below to save your changes.
+            </p>
+            <div className="space-y-1.5">
+              <FormLabel htmlFor="profile-otp-code">Verification code</FormLabel>
+              <Input
+                id="profile-otp-code"
+                autoFocus
+                inputMode="numeric"
+                autoComplete="one-time-code"
+                maxLength={6}
+                placeholder="123456"
+                value={code}
+                onChange={(e) => {
+                  setCode(e.target.value.replace(/\D/g, "").slice(0, 6));
+                  setCodeError(null);
+                }}
+                data-testid="input-otp-code"
+              />
+              {codeError && (
+                <p className="text-sm font-medium text-destructive">
+                  {codeError}
+                </p>
+              )}
+            </div>
+            <button
+              type="button"
+              className="text-sm text-cuci-primary underline-offset-2 hover:underline disabled:opacity-50"
+              onClick={() => startMutation.mutate()}
+              disabled={busy}
+              data-testid="button-otp-resend"
+            >
+              Resend code
+            </button>
+            <DialogFooter className="gap-2">
+              <Button
+                type="button"
+                variant="outline"
+                onClick={() => {
+                  setStep("form");
+                  setCode("");
+                  setCodeError(null);
+                }}
+                disabled={busy}
+                data-testid="button-otp-back"
+              >
+                Back
+              </Button>
+              <Button
+                type="button"
+                disabled={busy || code.length !== 6}
+                onClick={() =>
+                  saveMutation.mutate({ ...form.getValues(), code })
+                }
+                data-testid="button-otp-confirm"
+              >
+                {saveMutation.isPending && (
+                  <Loader2 className="w-3.5 h-3.5 mr-2 animate-spin" />
+                )}
+                Confirm changes
+              </Button>
+            </DialogFooter>
+          </div>
+        ) : (
         <Form {...form}>
           <form
-            onSubmit={form.handleSubmit((values) => mutation.mutate(values))}
+            onSubmit={form.handleSubmit(() => startMutation.mutate())}
             className="space-y-4"
           >
             <FormField
@@ -414,24 +537,25 @@ function EditProfileDialog({
                 type="button"
                 variant="outline"
                 onClick={() => onOpenChange(false)}
-                disabled={mutation.isPending}
+                disabled={busy}
                 data-testid="button-edit-name-cancel"
               >
                 Cancel
               </Button>
               <Button
                 type="submit"
-                disabled={mutation.isPending}
+                disabled={busy || !form.formState.isDirty}
                 data-testid="button-edit-name-save"
               >
-                {mutation.isPending && (
+                {startMutation.isPending && (
                   <Loader2 className="w-3.5 h-3.5 mr-2 animate-spin" />
                 )}
-                Save changes
+                Continue
               </Button>
             </DialogFooter>
           </form>
         </Form>
+        )}
       </DialogContent>
     </Dialog>
   );

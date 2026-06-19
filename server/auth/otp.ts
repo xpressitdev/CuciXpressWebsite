@@ -38,7 +38,7 @@ const CODE_LENGTH = 6;
 const TTL_SECONDS = 5 * 60;
 const MAX_ATTEMPTS = 5;
 
-const ALLOWED_PURPOSES = ["login", "verify_phone", "verify_email"] as const;
+const ALLOWED_PURPOSES = ["login", "verify_phone", "verify_email", "profile_update"] as const;
 export type OtpPurpose = (typeof ALLOWED_PURPOSES)[number];
 
 const scrypt = new Scrypt();
@@ -190,7 +190,12 @@ async function deliverOtp(args: {
         to: args.identifier,
         code: args.code,
         ttlMinutes: Math.round(TTL_SECONDS / 60),
-        purpose: args.purpose === "verify_email" ? "register" : "signin",
+        purpose:
+          args.purpose === "verify_email"
+            ? "register"
+            : args.purpose === "profile_update"
+              ? "profile"
+              : "signin",
       });
       if (sent) {
         // Real send succeeded — no need to fall through to dev mock.

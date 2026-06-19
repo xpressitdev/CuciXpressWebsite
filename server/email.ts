@@ -281,18 +281,25 @@ export async function sendOtpEmail(args: {
   to: string;
   code: string;
   ttlMinutes: number;
-  purpose: 'register' | 'signin';
+  purpose: 'register' | 'signin' | 'profile';
 }): Promise<boolean> {
   if (!GMAIL_APP_PASSWORD && !SENDGRID_API_KEY) {
     console.log(`[email] no email provider configured — would have sent OTP to ${args.to}`);
     return false;
   }
 
-  const heading = args.purpose === 'register' ? 'Confirm your email' : 'Your sign-in code';
+  const heading =
+    args.purpose === 'register'
+      ? 'Confirm your email'
+      : args.purpose === 'profile'
+        ? 'Confirm your profile changes'
+        : 'Your sign-in code';
   const blurb =
     args.purpose === 'register'
       ? 'Use the code below to finish creating your Cuci Xpress account.'
-      : 'Use the code below to sign in to your Cuci Xpress account.';
+      : args.purpose === 'profile'
+        ? 'Use the code below to confirm the changes to your Cuci Xpress profile. If you didn\'t make this change, ignore this email and your details stay the same.'
+        : 'Use the code below to sign in to your Cuci Xpress account.';
 
   const html = `
   <!DOCTYPE html>

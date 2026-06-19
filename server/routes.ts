@@ -5648,9 +5648,41 @@ export async function registerRoutes(app: Express): Promise<Server> {
     });
   });
 
+  // POST /api/customer/me/change/start — send a one-time code to the
+  // customer's CURRENT (on-record) email to authorise a profile change.
+  // Every profile edit (name, email, or phone) must be confirmed with this
+  // code, proving the account owner — not a hijacked session — made it.
+  // The code always goes to the existing email, even when the email itself
+  // is the field being changed.
+  app.post('/api/customer/me/change/start', requireLuciaUser, async (req, res) => {
+    const userId = Number(req.lucia!.user!.id);
+    const ip = req.ip ?? 'unknown';
+    // Per-user: max 3 sends / 15 min. Per-IP: max 10 sends / 10 min.
+    if (!checkRateLimit(`profile_change_user:${userId}`, 3, 15 * 60 * 1000)) {
+      return res.status(429).json({ ok: false, reason: 'too_many_requests' });
+    }
+    if (!checkRateLimit(`profile_change_ip:${ip}`, 10, 10 * 60 * 1000)) {
+      return res.status(429).json({ ok: false, reason: 'too_many_requests' });
+    }
+    const row = (await db.execute(sql`
+      SELECT email FROM users WHERE id = ${userId} LIMIT 1
+    `)).rows[0] as { email: string } | undefined;
+    if (!row?.email) return res.status(404).json({ ok: false, reason: 'not_found' });
+    const email = normaliseEmail(row.email);
+    const result = await sendOtp({ identifier: email, purpose: 'profile_update', ip });
+    if (!result.ok) return res.status(400).json(result);
+    res.json({
+      ok: true,
+      expiresAt: result.expiresAt,
+      ttlSeconds: OTP_CONSTANTS.TTL_SECONDS,
+      email_hint: maskEmail(email),
+    });
+  });
+
   // PATCH /api/customer/me — update the signed-in customer's profile
-  // (name, email, phone). Mirrors the response shape of GET /api/customer/me
-  // so the cache update on the client just slots in.
+  // (name, email, phone). Requires a valid `code` from /change/start, which
+  // is verified against the customer's CURRENT email. Mirrors the response
+  // shape of GET /api/customer/me so the cache update on the client slots in.
   const updateCustomerProfileSchema = z.object({
     first_name: z.string().trim().min(1, 'First name is required').max(80),
     last_name: z.string().trim().min(1, 'Last name is required').max(80),
@@ -5661,6 +5693,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
       .max(40, 'Phone number is too long')
       .optional()
       .transform((v) => (v && v.length > 0 ? v : null)),
+    code: z.string().regex(/^\d{6}$/, 'Enter the 6-digit code'),
   });
 
   app.patch('/api/customer/me', requireLuciaUser, async (req, res) => {
@@ -5672,6 +5705,23 @@ export async function registerRoutes(app: Express): Promise<Server> {
       });
     }
     const userId = Number(req.lucia!.user!.id);
+
+    // Verify the one-time code against the customer's CURRENT email before
+    // applying any change. This is the authorisation gate for the edit.
+    const currentRow = (await db.execute(sql`
+      SELECT email FROM users WHERE id = ${userId} LIMIT 1
+    `)).rows[0] as { email: string } | undefined;
+    if (!currentRow?.email) return res.status(404).json({ error: 'not_found' });
+    const verify = await verifyOtp({
+      identifier: normaliseEmail(currentRow.email),
+      purpose: 'profile_update',
+      code: parsed.data.code,
+      ip: req.ip ?? null,
+    });
+    if (!verify.ok) {
+      const status = verify.reason === 'too_many_attempts' ? 429 : 400;
+      return res.status(status).json({ error: 'otp_failed', ...verify });
+    }
     // Normalise the phone the same way the sign-in flow does so phone-based
     // login resolution stays deterministic (digits only, 7-digit local →
     // +673). Junk that normalises to empty is stored as NULL.
