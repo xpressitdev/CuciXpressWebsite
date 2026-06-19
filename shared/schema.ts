@@ -687,9 +687,12 @@ export const memberships = pgTable("memberships", {
   remaining_washes: integer("remaining_washes").notNull(),
   price_cents: integer("price_cents").notNull(),
   status: text("status").default("active").notNull(), // 'active' | 'exhausted' | 'expired' | 'cancelled'
+  // 'pos' (sold by a cashier) | 'subscription' (created/maintained by an
+  // auto-renewing web subscription). Web rows leave staff/branch null.
+  source: text("source").default("pos").notNull(),
   expires_at: timestamp("expires_at", { withTimezone: true }),
-  sold_by_staff_id: text("sold_by_staff_id").references(() => staff.id).notNull(),
-  sold_at_branch_id: integer("sold_at_branch_id").references(() => branches.id).notNull(),
+  sold_by_staff_id: text("sold_by_staff_id").references(() => staff.id),
+  sold_at_branch_id: integer("sold_at_branch_id").references(() => branches.id),
   cancelled_at: timestamp("cancelled_at", { withTimezone: true }),
   created_at: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
 });
@@ -718,6 +721,49 @@ export const insertMembershipRedemptionSchema = createInsertSchema(membershipRed
 });
 export type MembershipRedemption = typeof membershipRedemptions.$inferSelect;
 export type InsertMembershipRedemption = z.infer<typeof insertMembershipRedemptionSchema>;
+
+// --- Subscriptions (auto-renewing, card-on-file) ------------
+// A paid subscription maintains an `unlimited` membership (membership_id)
+// so the lane-scan/QR redemption flow is unchanged. Billed monthly via
+// CyberSource using the stored TMS instrument (cybersource_instrument_id).
+export const subscriptions = pgTable("subscriptions", {
+  id: text("id").primaryKey(),
+  user_id: integer("user_id").references(() => users.id),
+  customer_id: integer("customer_id").references(() => customers.id),
+  plan_id: text("plan_id").notNull(), // 'unlimited' | 'family'
+  status: text("status").default("active").notNull(), // active | past_due | cancelled | incomplete
+  price_cents: integer("price_cents").notNull(),
+  currency: text("currency").default("BND").notNull(),
+  cybersource_customer_id: text("cybersource_customer_id"),
+  cybersource_instrument_id: text("cybersource_instrument_id"),
+  initial_transaction_id: text("initial_transaction_id"),
+  card_brand: text("card_brand"),
+  card_last4: text("card_last4"),
+  current_period_start: timestamp("current_period_start", { withTimezone: true }).defaultNow().notNull(),
+  current_period_end: timestamp("current_period_end", { withTimezone: true }).notNull(),
+  next_billing_at: timestamp("next_billing_at", { withTimezone: true }).notNull(),
+  cancel_at_period_end: boolean("cancel_at_period_end").default(false).notNull(),
+  failed_attempts: integer("failed_attempts").default(0).notNull(),
+  membership_id: text("membership_id").references(() => memberships.id),
+  created_at: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
+  updated_at: timestamp("updated_at", { withTimezone: true }).defaultNow().notNull(),
+});
+export type Subscription = typeof subscriptions.$inferSelect;
+
+// One row per billing attempt (audit + idempotency).
+export const subscriptionInvoices = pgTable("subscription_invoices", {
+  id: text("id").primaryKey(),
+  subscription_id: text("subscription_id").references(() => subscriptions.id).notNull(),
+  amount_cents: integer("amount_cents").notNull(),
+  currency: text("currency").default("BND").notNull(),
+  status: text("status").notNull(), // paid | failed
+  cybersource_payment_id: text("cybersource_payment_id"),
+  period_start: timestamp("period_start", { withTimezone: true }),
+  period_end: timestamp("period_end", { withTimezone: true }),
+  error_message: text("error_message"),
+  created_at: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
+});
+export type SubscriptionInvoice = typeof subscriptionInvoices.$inferSelect;
 
 // --- Loyalty redemptions (Phase 12f) ------------------------
 // One row per "collect 4 × B$12 receipts → free B$12 wash"

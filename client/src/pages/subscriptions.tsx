@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react";
 import { useMutation, useQuery } from "@tanstack/react-query";
+import { Link } from "wouter";
 import { motion } from "framer-motion";
 import { Check, Crown, Users, Building2, ShieldCheck, ArrowRight, Sparkles } from "lucide-react";
 import Navigation from "@/components/Navigation";
@@ -17,8 +18,9 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog";
-import { apiRequest } from "@/lib/queryClient";
+import { apiRequest, queryClient } from "@/lib/queryClient";
 import { useToast } from "@/hooks/use-toast";
+import { SubscriptionCheckout } from "@/components/SubscriptionCheckout";
 
 // --- Plan catalog (mirrors the handoff /tmp/handoff/.../landing.jsx tease) ---
 type Plan = {
@@ -113,6 +115,9 @@ export default function Subscriptions() {
   const [carPlate, setCarPlate] = useState("");
   const [carPlate2, setCarPlate2] = useState("");
   const [carPlate3, setCarPlate3] = useState("");
+  // Once the user passes the details step on a launched paid plan, we swap the
+  // form out for the live CyberSource Unified Checkout widget.
+  const [payStep, setPayStep] = useState(false);
 
   // Live countdown to the subscription launch (ticks every second).
   const [now, setNow] = useState(() => Date.now());
@@ -179,6 +184,19 @@ export default function Subscriptions() {
     },
   });
 
+  // A logged-in customer (customer Lucia session) is required to pay, because
+  // the maintaining membership ties to a customers row via users.id.
+  const signedInCustomer = !!me?.profile;
+  // Paid self-serve checkout only once subscriptions are live, for the
+  // self-serve (non-corporate) plans, and only for signed-in customers.
+  const paidFlow =
+    launched && !!openPlan && !openPlan.custom && signedInCustomer;
+
+  const closeDialog = () => {
+    setOpenPlan(null);
+    setPayStep(false);
+  };
+
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
     if (!openPlan) return;
@@ -207,6 +225,20 @@ export default function Subscriptions() {
       });
       return;
     }
+    // Launched paid plan + signed-in customer: move to the secure card step
+    // instead of the launch lead-capture.
+    if (paidFlow) {
+      if (!phone.trim()) {
+        toast({
+          title: "Phone required",
+          description: "We use your phone number to send subscription updates.",
+          variant: "destructive",
+        });
+        return;
+      }
+      setPayStep(true);
+      return;
+    }
     // Family plans cover 2-3 cars: cars 1 & 2 are required, car 3 is optional.
     // All plates go into the single carPlate field, comma-joined.
     const extraPlates =
@@ -220,6 +252,22 @@ export default function Subscriptions() {
       plan: openPlan.id,
       carPlate: allPlates,
     });
+  };
+
+  const handleCheckoutSuccess = () => {
+    queryClient.invalidateQueries({ queryKey: ["/api/subscriptions/me"] });
+    queryClient.invalidateQueries({ queryKey: ["/api/customer/me"] });
+    toast({
+      title: "You're subscribed! 🎉",
+      description:
+        "Your plan is active and your first month is paid. Drive into any branch any time.",
+    });
+    closeDialog();
+    setEmail("");
+    setPhone("");
+    setCarPlate("");
+    setCarPlate2("");
+    setCarPlate3("");
   };
 
   // Signed-in users see the same sidebar shell as /dashboard so they don't
@@ -676,18 +724,72 @@ export default function Subscriptions() {
       )}
 
       {/* --- Subscribe / Contact dialog --- */}
-      <Dialog open={openPlan !== null} onOpenChange={(o) => !o && setOpenPlan(null)}>
+      <Dialog open={openPlan !== null} onOpenChange={(o) => !o && closeDialog()}>
         <DialogContent className="sm:max-w-md" data-testid="dialog-subscribe">
           <DialogHeader>
             <DialogTitle>
-              {openPlan?.custom ? "Tell us about your fleet" : `Subscribe to ${openPlan?.name}`}
+              {openPlan?.custom
+                ? "Tell us about your fleet"
+                : payStep
+                ? `Pay for ${openPlan?.name}`
+                : `Subscribe to ${openPlan?.name}`}
             </DialogTitle>
             <DialogDescription>
               {openPlan?.custom
                 ? "Drop your details and our team will reach out within one business day."
+                : payStep
+                ? `You'll be charged ${openPlan?.price} now, then automatically each month. Cancel anytime from your dashboard.`
+                : launched
+                ? "Enter your details and pay securely to activate your plan today."
                 : "Reserve your founding spot now and lock in this price for life. We launch 19 June — we'll text you at launch to activate your plan and book your first wash."}
             </DialogDescription>
           </DialogHeader>
+
+          {/* Step 2 (paid): live CyberSource Unified Checkout card form. */}
+          {payStep && openPlan && !openPlan.custom ? (
+            <div className="space-y-4">
+              <SubscriptionCheckout
+                planId={openPlan.id}
+                phone={phone.trim()}
+                onSuccess={handleCheckoutSuccess}
+              />
+              <DialogFooter>
+                <Button
+                  type="button"
+                  variant="outline"
+                  onClick={() => setPayStep(false)}
+                  data-testid="button-checkout-back"
+                >
+                  Back
+                </Button>
+              </DialogFooter>
+            </div>
+          ) : launched && openPlan && !openPlan.custom && !signedInCustomer ? (
+            /* Launched paid plan but the visitor isn't signed in as a customer. */
+            <div className="space-y-4">
+              <div className="rounded-lg bg-gray-50 border border-gray-200 px-4 py-3 text-sm text-gray-600">
+                Please sign in to your Cuci Xpress account to subscribe. Your plan
+                and billing are tied to your account so you can manage them anytime.
+              </div>
+              <DialogFooter className="gap-2 sm:gap-0">
+                <Button
+                  type="button"
+                  variant="outline"
+                  onClick={closeDialog}
+                >
+                  Cancel
+                </Button>
+                <Link href="/login">
+                  <Button
+                    className="bg-cuci-primary text-white w-full"
+                    data-testid="button-subscribe-signin"
+                  >
+                    Sign in to subscribe
+                  </Button>
+                </Link>
+              </DialogFooter>
+            </div>
+          ) : (
           <form onSubmit={handleSubmit} className="space-y-4">
             <div className="space-y-1.5">
               <Label htmlFor="sub-email">Email</Label>
@@ -801,7 +903,7 @@ export default function Subscriptions() {
               <Button
                 type="button"
                 variant="outline"
-                onClick={() => setOpenPlan(null)}
+                onClick={closeDialog}
                 disabled={subscribeMutation.isPending}
               >
                 Cancel
@@ -816,10 +918,13 @@ export default function Subscriptions() {
                   ? "Sending…"
                   : openPlan?.custom
                   ? "Send enquiry"
+                  : paidFlow
+                  ? "Continue to payment"
                   : "Reserve my spot"}
               </Button>
             </DialogFooter>
           </form>
+          )}
         </DialogContent>
       </Dialog>
     </div>

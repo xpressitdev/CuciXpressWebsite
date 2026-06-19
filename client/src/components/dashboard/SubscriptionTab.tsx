@@ -1,10 +1,19 @@
 import { Crown, Lock, ArrowRight } from "lucide-react";
 import { Link } from "wouter";
-import { MembershipRow, CarRow, formatBND, formatBNDFull } from "./types";
+import {
+  MembershipRow,
+  CarRow,
+  SubscriptionRow,
+  formatBND,
+  formatBNDFull,
+} from "./types";
 
 interface Props {
   memberships: MembershipRow[];
   cars: CarRow[];
+  subscription?: SubscriptionRow | null;
+  onCancel?: (id: string) => void;
+  cancelling?: boolean;
   washesThisMonth: number;
   washesLastMonth: number;
   savedThisCycleCents: number;
@@ -13,6 +22,9 @@ interface Props {
 export function SubscriptionTab({
   memberships,
   cars,
+  subscription = null,
+  onCancel,
+  cancelling = false,
   washesThisMonth,
   washesLastMonth,
   savedThisCycleCents,
@@ -38,6 +50,9 @@ export function SubscriptionTab({
         {active ? (
           <ActiveCard
             membership={active}
+            subscription={subscription}
+            onCancel={onCancel}
+            cancelling={cancelling}
             washesThisMonth={washesThisMonth}
             avgPerWeek={avgPerWeek}
             savingsCents={savedThisCycleCents}
@@ -106,22 +121,34 @@ const CARD_BASE: React.CSSProperties = {
 // ----------------------------------------------------------------------
 function ActiveCard({
   membership,
+  subscription,
+  onCancel,
+  cancelling,
   washesThisMonth,
   avgPerWeek,
   savingsCents,
 }: {
   membership: MembershipRow;
+  subscription?: SubscriptionRow | null;
+  onCancel?: (id: string) => void;
+  cancelling?: boolean;
   washesThisMonth: number;
   avgPerWeek: string;
   savingsCents: number;
 }) {
-  const renewLabel = membership.expires_at
-    ? new Date(membership.expires_at).toLocaleDateString("en-GB", {
+  // Prefer the subscription's billing period for the renewal date; fall back
+  // to the membership expiry when there's no auto-renewing subscription.
+  const renewSource =
+    subscription?.current_period_end ?? membership.expires_at;
+  const renewLabel = renewSource
+    ? new Date(renewSource).toLocaleDateString("en-GB", {
         day: "numeric",
         month: "short",
         year: "numeric",
       })
     : "Ongoing";
+  const willCancel = !!subscription?.cancel_at_period_end;
+  const canCancel = !!subscription && !willCancel && !!onCancel;
 
   const isUnlimited = membership.kind === "unlimited";
   const planName = isUnlimited ? "Unlimited Xpress" : "Wash Pack";
@@ -195,8 +222,18 @@ function ActiveCard({
           {planName}
         </h2>
         <p className="text-sm mt-1" style={{ color: "rgba(255,255,255,0.85)" }}>
-          {formatBNDFull(membership.price_cents)}/mo · Renews {renewLabel}
+          {formatBNDFull(subscription?.price_cents ?? membership.price_cents)}/mo ·{" "}
+          {willCancel ? `Ends ${renewLabel}` : `Renews ${renewLabel}`}
         </p>
+        {willCancel && (
+          <p
+            className="text-xs mt-1 font-semibold"
+            style={{ color: "#FFE89E" }}
+            data-testid="text-cancel-scheduled"
+          >
+            Auto-renew is off — you keep access until {renewLabel}.
+          </p>
+        )}
 
         <div
           className="my-5"
@@ -219,29 +256,42 @@ function ActiveCard({
           />
         </div>
 
+        {subscription?.card_last4 && (
+          <p
+            className="text-xs mt-4"
+            style={{ color: "rgba(255,255,255,0.7)" }}
+            data-testid="text-card-on-file"
+          >
+            Auto-renews on {subscription.card_brand ?? "card"} ····{" "}
+            {subscription.card_last4}
+          </p>
+        )}
+
         <div className="flex gap-2 mt-auto pt-6">
-          <button
-            className="px-4 py-2.5 rounded-lg text-sm font-bold"
-            style={{
-              background: "rgba(0,0,0,0.55)",
-              color: "#fff",
-              border: "1px solid rgba(255,255,255,0.25)",
-            }}
-            data-testid="button-manage-payment"
-          >
-            Manage payment
-          </button>
-          <button
-            className="px-4 py-2.5 rounded-lg text-sm font-bold"
-            style={{
-              background: "rgba(255,255,255,0.15)",
-              color: "#fff",
-              border: "1px solid rgba(255,255,255,0.4)",
-            }}
-            data-testid="button-cancel-plan"
-          >
-            Cancel plan
-          </button>
+          {canCancel && (
+            <button
+              onClick={() => {
+                if (
+                  subscription &&
+                  window.confirm(
+                    "Turn off auto-renew? You'll keep access until the end of your current billing period.",
+                  )
+                ) {
+                  onCancel!(subscription.id);
+                }
+              }}
+              disabled={cancelling}
+              className="px-4 py-2.5 rounded-lg text-sm font-bold disabled:opacity-60"
+              style={{
+                background: "rgba(255,255,255,0.15)",
+                color: "#fff",
+                border: "1px solid rgba(255,255,255,0.4)",
+              }}
+              data-testid="button-cancel-plan"
+            >
+              {cancelling ? "Cancelling…" : "Cancel plan"}
+            </button>
+          )}
         </div>
       </div>
     </article>

@@ -21,6 +21,7 @@ import { unifiedAuth } from "./unified-auth";
 import { lucia } from "./auth/lucia";
 import { staffLucia } from "./auth/staffLucia";
 import { requireLuciaUser, requireStaff, requireStaffRole, requireStaffOrPlateOwner } from "./auth/middleware";
+import { registerSubscriptionRoutes } from "./subscriptions";
 import { sendOtp, verifyOtp, OTP_CONSTANTS } from "./auth/otp";
 import { loginStaff, createStaff, hashStaffPassword, STAFF_ROLES, MIN_PASSWORD_LENGTH } from "./auth/staff";
 import {
@@ -9365,6 +9366,8 @@ export async function registerRoutes(app: Express): Promise<Server> {
       res.status(500).json({ error: 'Failed to update service history' });
     }
   });
+
+  registerSubscriptionRoutes(app);
 
   const httpServer = createServer(app);
   return httpServer;

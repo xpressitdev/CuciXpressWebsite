@@ -16,6 +16,7 @@ import {
   OrderRow,
   MembershipRow,
   CarRow,
+  SubscriptionRow,
 } from "@/components/dashboard/types";
 
 export default function DashboardPage() {
@@ -74,6 +75,28 @@ export default function DashboardPage() {
   const { data: carsData } = useQuery<{ cars: CarRow[] }>({
     queryKey: ["/api/customer/cars"],
     enabled: !!who?.authenticated,
+  });
+  const { data: subData } = useQuery<{ subscription: SubscriptionRow | null }>({
+    queryKey: ["/api/subscriptions/me"],
+    enabled: !!who?.authenticated,
+  });
+
+  const cancelSub = useMutation({
+    mutationFn: async (id: string) => {
+      const r = await apiRequest("POST", `/api/subscriptions/${id}/cancel`, {});
+      return r.json();
+    },
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ["/api/subscriptions/me"] });
+      toast({
+        title: "Auto-renew turned off",
+        description:
+          "Your plan stays active until the end of the current billing period.",
+      });
+    },
+    onError: () => {
+      toast({ title: "Could not cancel", variant: "destructive" });
+    },
   });
 
   const logout = useMutation({
@@ -160,6 +183,9 @@ export default function DashboardPage() {
             <SubscriptionTab
               memberships={memberships}
               cars={cars}
+              subscription={subData?.subscription ?? null}
+              onCancel={(id) => cancelSub.mutate(id)}
+              cancelling={cancelSub.isPending}
               washesThisMonth={me.stats.washes_this_month}
               washesLastMonth={me.stats.washes_last_month}
               savedThisCycleCents={me.stats.saved_this_cycle_cents}

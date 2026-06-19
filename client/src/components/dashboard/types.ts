@@ -70,6 +70,20 @@ export interface MembershipRow {
   vehicle_plate: string | null;
 }
 
+export interface SubscriptionRow {
+  id: string;
+  plan_id: string;
+  status: string;
+  price_cents: number;
+  currency: string;
+  card_brand: string | null;
+  card_last4: string | null;
+  current_period_end: string | null;
+  next_billing_at: string | null;
+  cancel_at_period_end: boolean;
+  created_at: string;
+}
+
 export interface CarRow {
   id: number;
   license_plate: string;
