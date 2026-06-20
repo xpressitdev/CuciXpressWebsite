@@ -24,6 +24,18 @@ Test subscriptions are written with `is_test=true`, `membership_id=NULL`,
 on `user_id` (status in active/past_due/incomplete). Postgres treats NULLs as distinct, so
 the owner can create many test subs without colliding.
 
+## CyberSource Unified Checkout must render INLINE, never in a modal
+`unifiedPayments.show({ containers: { paymentSelection, paymentScreen } })` breaks
+inside a Radix `Dialog`: the dialog's CSS `transform` (centering/animation) corrupts
+the SDK's container measurement, so it either errors with "The supplied container
+parameter is invalid when sidebar is selected" or renders an empty/stuck widget.
+**Why:** CyberSource measures the container's bounding box to pick embedded vs sidebar
+mode and to position its iframe; a transformed ancestor gives wrong geometry.
+**How to apply:** render the checkout inline in a normal-flow card (the working
+reference `admin-subscription-test.tsx` uses `max-w-lg` ~512px and embedded mode with
+BOTH containers). Do NOT put it in a Dialog/Popover/anything with a transform. Width
+threshold is NOT the issue — 512px inline works fine.
+
 ## Hard test-gateway guard
 `isCyberSourceTestMode()` (server/cybersource.ts) is true only when HOST is
 apitest.cybersource.com. All sandbox routes return 409 `not_in_test_mode` unless true —

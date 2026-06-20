@@ -13,13 +13,6 @@ import {
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import {
-  Dialog,
-  DialogContent,
-  DialogDescription,
-  DialogHeader,
-  DialogTitle,
-} from "@/components/ui/dialog";
-import {
   Select,
   SelectContent,
   SelectItem,
@@ -176,15 +169,14 @@ function TestCheckout({
         const unifiedPayments = await accept.unifiedPayments();
         setStatus("ready");
 
-        // Unified Checkout renders in "sidebar" mode inside this dialog (the
-        // container is narrower than the embedded-mode threshold). In sidebar
-        // mode ONLY the paymentSelection container may be supplied — passing a
-        // paymentScreen container throws "container parameter is invalid when
-        // sidebar is selected". The payment form opens in CyberSource's own
-        // slide-in panel.
+        // Embedded mode (both containers). The widget is rendered inline in a
+        // full-width card — NOT a modal — so the container is wide enough for
+        // embedded mode and isn't inside a CSS-transformed dialog (which breaks
+        // CyberSource's iframe positioning).
         const transientToken: string = await unifiedPayments.show({
           containers: {
             paymentSelection: "#uc-test-payment-selection",
+            paymentScreen: "#uc-test-payment-screen",
           },
         });
 
@@ -223,7 +215,10 @@ function TestCheckout({
           <span>{message}</span>
         </div>
       ) : (
-        <div id="uc-test-payment-selection" />
+        <>
+          <div id="uc-test-payment-selection" />
+          <div id="uc-test-payment-screen" />
+        </>
       )}
 
       {status === "processing" && (
@@ -475,43 +470,60 @@ export default function SubscriptionTestTab() {
         </CardContent>
       </Card>
 
-      <Dialog open={dialogOpen} onOpenChange={setDialogOpen}>
-        <DialogContent className="sm:max-w-md">
-          <DialogHeader>
-            <DialogTitle>New test subscription</DialogTitle>
-            <DialogDescription>
-              Charges the first month on the CyberSource test gateway and stores
-              the card for auto-renew. No real money moves.
-            </DialogDescription>
-          </DialogHeader>
-
-          <div className="space-y-4">
-            <div>
-              <label className="text-sm font-medium text-gray-700 mb-1.5 block">
-                Plan
-              </label>
-              <Select value={planId} onValueChange={setPlanId}>
-                <SelectTrigger data-testid="select-test-plan">
-                  <SelectValue />
-                </SelectTrigger>
-                <SelectContent>
-                  {PLAN_OPTIONS.map((p) => (
-                    <SelectItem key={p.id} value={p.id}>
-                      {p.label}
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
+      {/* Inline (NOT modal) checkout panel. CyberSource Unified Checkout's
+          iframe breaks inside a CSS-transformed Radix dialog and the narrow
+          dialog forces sidebar mode; rendering inline in a full-width card
+          keeps it in embedded mode and renders reliably. */}
+      {dialogOpen && (
+        <Card data-testid="new-test-subscription-panel">
+          <CardHeader>
+            <div className="flex items-start justify-between gap-3">
+              <div>
+                <CardTitle className="text-base">New test subscription</CardTitle>
+                <p className="text-sm text-gray-600 mt-1">
+                  Charges the first month on the CyberSource test gateway and
+                  stores the card for auto-renew. No real money moves.
+                </p>
+              </div>
+              <Button
+                variant="ghost"
+                size="sm"
+                onClick={() => setDialogOpen(false)}
+                data-testid="button-cancel-test-subscription"
+              >
+                Cancel
+              </Button>
             </div>
+          </CardHeader>
+          <CardContent>
+            <div className="space-y-4 max-w-xl">
+              <div>
+                <label className="text-sm font-medium text-gray-700 mb-1.5 block">
+                  Plan
+                </label>
+                <Select value={planId} onValueChange={setPlanId}>
+                  <SelectTrigger data-testid="select-test-plan">
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {PLAN_OPTIONS.map((p) => (
+                      <SelectItem key={p.id} value={p.id}>
+                        {p.label}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
 
-            <TestCheckout
-              key={`${planId}-${checkoutKey}`}
-              planId={planId}
-              onSuccess={onCheckoutSuccess}
-            />
-          </div>
-        </DialogContent>
-      </Dialog>
+              <TestCheckout
+                key={`${planId}-${checkoutKey}`}
+                planId={planId}
+                onSuccess={onCheckoutSuccess}
+              />
+            </div>
+          </CardContent>
+        </Card>
+      )}
     </div>
   );
 }
