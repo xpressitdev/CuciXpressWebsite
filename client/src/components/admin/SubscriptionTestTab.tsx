@@ -474,7 +474,7 @@ export default function SubscriptionTestTab() {
       </Card>
 
       <Dialog open={dialogOpen} onOpenChange={setDialogOpen}>
-        <DialogContent className="sm:max-w-md">
+        <DialogContent className="sm:max-w-3xl">
           <DialogHeader>
             <DialogTitle>New test subscription</DialogTitle>
             <DialogDescription>
