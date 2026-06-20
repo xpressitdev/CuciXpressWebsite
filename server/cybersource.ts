@@ -36,6 +36,16 @@ export function isCyberSourceConfigured(): boolean {
   return Boolean(MERCHANT_ID && KEY_ID && SHARED_SECRET);
 }
 
+/**
+ * True when CyberSource is pointed at the TEST gateway (apitest.cybersource.com).
+ * The owner-only subscription sandbox MUST refuse to run unless this is true, so
+ * flipping CYBERSOURCE_ENV to production can never let the test routes charge a
+ * real card.
+ */
+export function isCyberSourceTestMode(): boolean {
+  return HOST === "apitest.cybersource.com";
+}
+
 function assertConfigured() {
   if (!isCyberSourceConfigured()) {
     throw new Error(

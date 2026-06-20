@@ -30,3 +30,4 @@
 - [Pocket Pay callback authenticity](pocket-pay-callback-auth.md) — callback has no hash; auth by matching stored per-order successIndicator. NEVER return it to the client or paid callbacks can be forged.
 - [Subscription launch gate](subscription-launch-gate.md) — Subscribe→lead-capture (not payment) is the LAUNCH_TS countdown working as designed; prod cutover = move LAUNCH_TS + CyberSource prod keys/env + republish.
 - [Subscription billing idempotency](subscription-billing-idempotency.md) — two partial unique indexes (one-live-per-user + invoice per period) are the ONLY double-charge guard; never drop them, keep periods row-derived.
+- [Subscription test sandbox](subscription-test-sandbox.md) — owner-only CyberSource test subs stay invisible via membership_id/user_id/customer_id NULL; gate sandbox routes on isCyberSourceTestMode().

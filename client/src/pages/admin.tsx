@@ -59,6 +59,7 @@ import {
   Wallet,
   Stamp,
   Car,
+  FlaskConical,
 } from "lucide-react";
 import { Link } from "wouter";
 import { motion } from "framer-motion";
@@ -72,6 +73,7 @@ import PromoCodesTab from "@/components/admin/PromoCodesTab";
 import PaymentSetupTab from "@/components/admin/PaymentSetupTab";
 import StaffTab from "@/components/admin/StaffTab";
 import LoyaltyStampTab from "@/components/admin/LoyaltyStampTab";
+import SubscriptionTestTab from "@/components/admin/SubscriptionTestTab";
 import CategoriesSection from "@/components/admin/CategoriesSection";
 import { SendReceiptButton } from "@/components/admin/SendReceiptButton";
 import {
@@ -386,6 +388,12 @@ export default function Admin() {
                   Loyalty
                 </TabsTrigger>
               )}
+              {isOwner && (
+                <TabsTrigger value="subscription-test" className="flex items-center gap-2" data-testid="tab-subscription-test">
+                  <FlaskConical className="w-4 h-4" />
+                  Subscription Test
+                </TabsTrigger>
+              )}
               {isManagerOrOwner && (
                 <TabsTrigger value="shifts" className="flex items-center gap-2" data-testid="tab-shifts">
                   <Clock className="w-4 h-4" />
@@ -478,6 +486,12 @@ export default function Admin() {
             {isOwner && (
               <TabsContent value="loyalty" className="mt-6">
                 <LoyaltyStampTab />
+              </TabsContent>
+            )}
+
+            {isOwner && (
+              <TabsContent value="subscription-test" className="mt-6">
+                <SubscriptionTestTab />
               </TabsContent>
             )}
 

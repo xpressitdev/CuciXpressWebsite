@@ -750,6 +750,12 @@ export const subscriptions = pgTable("subscriptions", {
   cancel_at_period_end: boolean("cancel_at_period_end").default(false).notNull(),
   failed_attempts: integer("failed_attempts").default(0).notNull(),
   membership_id: text("membership_id").references(() => memberships.id),
+  // Owner-only CyberSource sandbox subscription (created from the admin
+  // "Subscription Test" tab). is_test rows carry NULL user/customer and no
+  // maintaining membership, so they stay out of customer-facing endpoints and
+  // the membership-based revenue report while the renewal worker still
+  // auto-renews them against the TEST gateway.
+  is_test: boolean("is_test").default(false).notNull(),
   created_at: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
   updated_at: timestamp("updated_at", { withTimezone: true }).defaultNow().notNull(),
 });

@@ -17,9 +17,10 @@ import type { Express } from "express";
 import { sql } from "drizzle-orm";
 import { z } from "zod";
 import { db } from "./db";
-import { requireLuciaUser } from "./auth/middleware";
+import { requireLuciaUser, requireStaff, requireStaffRole } from "./auth/middleware";
 import {
   isCyberSourceConfigured,
+  isCyberSourceTestMode,
   generateCaptureContext,
   createPaymentWithTransientToken,
   chargeStoredInstrument,
@@ -789,6 +790,267 @@ export function registerSubscriptionRoutes(app: Express) {
     `);
     res.json({ ok: true, cancel_at_period_end: true });
   });
+
+  // =========================================================================
+  // OWNER-ONLY CYBERSOURCE SANDBOX (admin "Subscription Test" tab)
+  //
+  // Lets the owner walk the full CyberSource recurring flow end-to-end against
+  // the TEST gateway (capture context -> first charge -> stored card token ->
+  // merchant-initiated auto-renewals) WITHOUT touching live data. Test
+  // subscriptions carry user_id/customer_id = NULL and create NO maintaining
+  // membership (membership_id stays NULL), so they never surface in
+  // `/api/subscriptions/me`, the membership-based revenue report, POS, or
+  // loyalty. The renewal worker still processes them (test gateway = no real
+  // money), which is exactly what we want to exercise. Marked is_test = true.
+  // =========================================================================
+
+  // ---- POST /api/admin/subscription-test/capture-context ----------------
+  app.post(
+    "/api/admin/subscription-test/capture-context",
+    requireStaff,
+    requireStaffRole("owner"),
+    async (req, res) => {
+      if (!isCyberSourceConfigured()) {
+        return res.status(503).json({ error: "payments_unavailable" });
+      }
+      // Hard safety: the sandbox must NEVER run against the production gateway,
+      // even if CYBERSOURCE_ENV is later flipped to prod.
+      if (!isCyberSourceTestMode()) {
+        return res.status(409).json({ error: "not_in_test_mode" });
+      }
+      const parsed = captureSchema.safeParse(req.body);
+      if (!parsed.success) return res.status(400).json({ error: "invalid_request" });
+      const plan = getSubscriptionPlan(parsed.data.plan_id);
+      if (!plan) return res.status(400).json({ error: "unknown_plan" });
+      try {
+        const captureContext = await generateCaptureContext({
+          amountCents: plan.priceCents,
+          currency: plan.currency,
+          targetOrigin: requestOrigin(req),
+        });
+        res.json({
+          captureContext,
+          plan: {
+            id: plan.id,
+            name: plan.name,
+            priceCents: plan.priceCents,
+            currency: plan.currency,
+          },
+        });
+      } catch (err: any) {
+        console.error(
+          "[subscriptions.test.capture-context] failed:",
+          err?.message ?? err,
+        );
+        res.status(502).json({ error: "capture_context_failed" });
+      }
+    },
+  );
+
+  // ---- POST /api/admin/subscription-test/confirm ------------------------
+  // Charges the first month against the TEST gateway, stores the card token,
+  // and persists a standalone is_test subscription (NO membership).
+  const testConfirmSchema = z.object({
+    plan_id: z.string(),
+    transientToken: z.string().min(10),
+  });
+
+  app.post(
+    "/api/admin/subscription-test/confirm",
+    requireStaff,
+    requireStaffRole("owner"),
+    async (req, res) => {
+      if (!isCyberSourceConfigured()) {
+        return res.status(503).json({ error: "payments_unavailable" });
+      }
+      if (!isCyberSourceTestMode()) {
+        return res.status(409).json({ error: "not_in_test_mode" });
+      }
+      const parsed = testConfirmSchema.safeParse(req.body);
+      if (!parsed.success) {
+        return res.status(400).json({
+          error: "invalid_request",
+          details: parsed.error.flatten().fieldErrors,
+        });
+      }
+      const plan = getSubscriptionPlan(parsed.data.plan_id);
+      if (!plan) return res.status(400).json({ error: "unknown_plan" });
+
+      const now = new Date();
+      const periodEnd = addOneMonth(now);
+      const subId = genId("subtest");
+
+      // Charge the first month + create the stored card token (external call).
+      let pay;
+      try {
+        pay = await createPaymentWithTransientToken({
+          transientTokenJwt: parsed.data.transientToken,
+          amountCents: plan.priceCents,
+          currency: plan.currency,
+          referenceCode: subId,
+        });
+      } catch (err: any) {
+        console.error(
+          "[subscriptions.test.confirm] charge error:",
+          err?.message ?? err,
+        );
+        return res.status(502).json({ error: "payment_error" });
+      }
+      if (!pay.ok) {
+        return res
+          .status(402)
+          .json({ error: "payment_declined", status: pay.status });
+      }
+      if (!pay.instrumentId) {
+        // Auto-renew needs a stored token; without one there's nothing to test.
+        console.error(
+          "[subscriptions.test.confirm] charged but no stored instrument returned",
+          { subId, paymentId: pay.id },
+        );
+        return res
+          .status(502)
+          .json({ error: "card_not_storable", paymentId: pay.id });
+      }
+
+      try {
+        await db.transaction(async (tx) => {
+          await tx.execute(sql`
+            INSERT INTO subscriptions (
+              id, user_id, customer_id, plan_id, status, price_cents, currency,
+              cybersource_customer_id, cybersource_instrument_id,
+              initial_transaction_id, card_brand, card_last4,
+              current_period_start, current_period_end, next_billing_at,
+              membership_id, is_test
+            ) VALUES (
+              ${subId}, NULL, NULL, ${plan.id}, 'active',
+              ${plan.priceCents}, ${plan.currency},
+              ${pay.customerId ?? null}, ${pay.instrumentId ?? null},
+              ${pay.id ?? null}, ${pay.cardBrand ?? null}, ${pay.cardLast4 ?? null},
+              ${now.toISOString()}, ${periodEnd.toISOString()}, ${periodEnd.toISOString()},
+              NULL, true
+            )
+          `);
+          await tx.execute(sql`
+            INSERT INTO subscription_invoices (
+              id, subscription_id, amount_cents, currency, status,
+              cybersource_payment_id, period_start, period_end
+            ) VALUES (
+              ${genId("inv")}, ${subId}, ${plan.priceCents}, ${plan.currency}, 'paid',
+              ${pay.id ?? null}, ${now.toISOString()}, ${periodEnd.toISOString()}
+            )
+          `);
+        });
+      } catch (err: any) {
+        console.error(
+          "[subscriptions.test.confirm] PERSIST FAILED after successful charge",
+          { paymentId: pay.id, err: err?.message ?? err },
+        );
+        return res.status(500).json({ error: "persist_failed", paymentId: pay.id });
+      }
+
+      res.status(201).json({
+        ok: true,
+        subscription: {
+          id: subId,
+          plan_id: plan.id,
+          status: "active",
+          current_period_end: periodEnd.toISOString(),
+          card_brand: pay.cardBrand,
+          card_last4: pay.cardLast4,
+        },
+      });
+    },
+  );
+
+  // ---- GET /api/admin/subscription-test/list ----------------------------
+  // All test subscriptions newest-first, each with its invoices.
+  app.get(
+    "/api/admin/subscription-test/list",
+    requireStaff,
+    requireStaffRole("owner"),
+    async (_req, res) => {
+      const subs = (await db.execute(sql`
+        SELECT id, plan_id, status, price_cents, currency, card_brand, card_last4,
+               current_period_start, current_period_end, next_billing_at,
+               cancel_at_period_end, failed_attempts, created_at
+          FROM subscriptions
+         WHERE is_test = true
+         ORDER BY created_at DESC
+      `)).rows as any[];
+
+      const invoices = subs.length
+        ? ((await db.execute(sql`
+            SELECT id, subscription_id, amount_cents, currency, status,
+                   cybersource_payment_id, period_start, period_end,
+                   error_message, created_at
+              FROM subscription_invoices
+             WHERE subscription_id IN (${sql.join(
+               subs.map((s) => sql`${s.id}`),
+               sql`, `,
+             )})
+             ORDER BY created_at DESC
+          `)).rows as any[])
+        : [];
+
+      const byId = new Map<string, any[]>();
+      for (const inv of invoices) {
+        const list = byId.get(inv.subscription_id) ?? [];
+        list.push(inv);
+        byId.set(inv.subscription_id, list);
+      }
+      res.json({
+        subscriptions: subs.map((s) => ({ ...s, invoices: byId.get(s.id) ?? [] })),
+      });
+    },
+  );
+
+  // ---- POST /api/admin/subscription-test/:id/charge-now -----------------
+  // Force the NEXT renewal charge immediately so auto-renew can be verified
+  // without waiting for the worker's poll / the month boundary.
+  app.post(
+    "/api/admin/subscription-test/:id/charge-now",
+    requireStaff,
+    requireStaffRole("owner"),
+    async (req, res) => {
+      if (!isCyberSourceConfigured()) {
+        return res.status(503).json({ error: "payments_unavailable" });
+      }
+      if (!isCyberSourceTestMode()) {
+        return res.status(409).json({ error: "not_in_test_mode" });
+      }
+      const id = String(req.params.id);
+      const result = await chargeTestRenewalNow(id);
+      if (!result.ok) {
+        const code = result.error === "not_found" ? 404 : 409;
+        return res.status(code).json({ error: result.error });
+      }
+      res.json(result);
+    },
+  );
+
+  // ---- DELETE /api/admin/subscription-test/:id --------------------------
+  // Tear down a test subscription and its invoices (is_test rows only).
+  app.delete(
+    "/api/admin/subscription-test/:id",
+    requireStaff,
+    requireStaffRole("owner"),
+    async (req, res) => {
+      const id = String(req.params.id);
+      const found = (await db.execute(sql`
+        SELECT id FROM subscriptions WHERE id = ${id} AND is_test = true LIMIT 1
+      `)).rows[0];
+      if (!found) return res.status(404).json({ error: "not_found" });
+      await db.transaction(async (tx) => {
+        await tx.execute(sql`
+          DELETE FROM subscription_invoices WHERE subscription_id = ${id}
+        `);
+        await tx.execute(sql`
+          DELETE FROM subscriptions WHERE id = ${id} AND is_test = true
+        `);
+      });
+      res.json({ ok: true });
+    },
+  );
 }
 
 // ---------------------------------------------------------------------------
@@ -971,6 +1233,113 @@ export async function renewDueOnce(): Promise<{ charged: number; failed: number 
   }
 
   return { charged, failed };
+}
+
+/**
+ * Force the NEXT renewal charge for a single TEST subscription immediately,
+ * mirroring renewDueOnce()'s per-period idempotency anchor but scoped to one
+ * is_test row. Used by the owner sandbox "charge now" button so auto-renew can
+ * be verified without waiting for the worker poll or the month boundary.
+ */
+export async function chargeTestRenewalNow(
+  subId: string,
+): Promise<
+  | { ok: true; status: string; paymentId: string | null; period_end: string }
+  | { ok: false; error: string }
+> {
+  const s = (await db.execute(sql`
+    SELECT id, plan_id, price_cents, currency, cybersource_instrument_id,
+           initial_transaction_id, current_period_end, cancel_at_period_end,
+           failed_attempts, status
+      FROM subscriptions
+     WHERE id = ${subId} AND is_test = true
+       AND status IN ('active','past_due')
+     LIMIT 1
+  `)).rows[0] as any;
+  if (!s) return { ok: false, error: "not_found" };
+  if (!s.cybersource_instrument_id) {
+    return { ok: false, error: "no_stored_card" };
+  }
+
+  const periodStart = new Date(s.current_period_end);
+  const periodEnd = addOneMonth(periodStart);
+
+  // Idempotency anchor: claim this period with a 'pending' invoice BEFORE
+  // charging. A duplicate request for the same period hits the partial unique
+  // index and is rejected rather than double-charging.
+  const invId = genId("inv");
+  try {
+    await db.execute(sql`
+      INSERT INTO subscription_invoices (
+        id, subscription_id, amount_cents, currency, status,
+        period_start, period_end
+      ) VALUES (
+        ${invId}, ${s.id}, ${s.price_cents}, ${s.currency}, 'pending',
+        ${periodStart.toISOString()}, ${periodEnd.toISOString()}
+      )
+    `);
+  } catch (err: any) {
+    if (isUniqueViolation(err)) {
+      return { ok: false, error: "period_already_charged" };
+    }
+    throw err;
+  }
+
+  const result = await chargeStoredInstrument({
+    instrumentId: s.cybersource_instrument_id,
+    amountCents: Number(s.price_cents),
+    currency: s.currency,
+    referenceCode: invId,
+    previousTransactionId: s.initial_transaction_id,
+  });
+
+  if (result.ok) {
+    await db.transaction(async (tx) => {
+      await tx.execute(sql`
+        UPDATE subscription_invoices
+           SET status = 'paid', cybersource_payment_id = ${result.id ?? null}
+         WHERE id = ${invId}
+      `);
+      await tx.execute(sql`
+        UPDATE subscriptions
+           SET status = 'active',
+               current_period_start = ${periodStart.toISOString()},
+               current_period_end = ${periodEnd.toISOString()},
+               next_billing_at = ${periodEnd.toISOString()},
+               failed_attempts = 0,
+               updated_at = now()
+         WHERE id = ${s.id}
+      `);
+    });
+    return {
+      ok: true,
+      status: "paid",
+      paymentId: result.id ?? null,
+      period_end: periodEnd.toISOString(),
+    };
+  }
+
+  // Definitive decline: flip the anchor to 'failed' (frees the period for a
+  // retry) and back off, mirroring the worker.
+  const attempts = Number(s.failed_attempts) + 1;
+  const giveUp = attempts >= MAX_FAILED_ATTEMPTS;
+  await db.transaction(async (tx) => {
+    await tx.execute(sql`
+      UPDATE subscription_invoices
+         SET status = 'failed',
+             error_message = ${(result.errorText ?? result.status ?? "declined").slice(0, 400)}
+       WHERE id = ${invId}
+    `);
+    await tx.execute(sql`
+      UPDATE subscriptions
+         SET status = ${giveUp ? "cancelled" : "past_due"},
+             failed_attempts = ${attempts},
+             next_billing_at = now() + (${RETRY_BACKOFF_SECONDS}::int * interval '1 second'),
+             updated_at = now()
+       WHERE id = ${s.id}
+    `);
+  });
+  return { ok: false, error: result.status ? `declined_${result.status}` : "declined" };
 }
 
 async function tick() {
