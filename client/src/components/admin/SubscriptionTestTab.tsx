@@ -176,10 +176,15 @@ function TestCheckout({
         const unifiedPayments = await accept.unifiedPayments();
         setStatus("ready");
 
+        // Unified Checkout renders in "sidebar" mode inside this dialog (the
+        // container is narrower than the embedded-mode threshold). In sidebar
+        // mode ONLY the paymentSelection container may be supplied — passing a
+        // paymentScreen container throws "container parameter is invalid when
+        // sidebar is selected". The payment form opens in CyberSource's own
+        // slide-in panel.
         const transientToken: string = await unifiedPayments.show({
           containers: {
             paymentSelection: "#uc-test-payment-selection",
-            paymentScreen: "#uc-test-payment-screen",
           },
         });
 
@@ -218,10 +223,7 @@ function TestCheckout({
           <span>{message}</span>
         </div>
       ) : (
-        <>
-          <div id="uc-test-payment-selection" />
-          <div id="uc-test-payment-screen" />
-        </>
+        <div id="uc-test-payment-selection" />
       )}
 
       {status === "processing" && (
@@ -474,7 +476,7 @@ export default function SubscriptionTestTab() {
       </Card>
 
       <Dialog open={dialogOpen} onOpenChange={setDialogOpen}>
-        <DialogContent className="sm:max-w-3xl">
+        <DialogContent className="sm:max-w-md">
           <DialogHeader>
             <DialogTitle>New test subscription</DialogTitle>
             <DialogDescription>
