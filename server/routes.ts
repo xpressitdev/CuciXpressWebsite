@@ -3845,7 +3845,8 @@ export async function registerRoutes(app: Express): Promise<Server> {
         const branchQueries: { [key: string]: string } = {
           "salar-branch": "Cuci Xpress Salar Link Brunei",
           "bengkurong-branch": "Cuci Xpress Bengkurong Link Brunei", 
-          "tutong-branch": "Cuci Xpress Tutong Link Brunei"
+          "tutong-branch": "Cuci Xpress Tutong Link Brunei",
+          "lambak-branch": "Cuci Xpress Lambak Brunei"
         };
         
         const searchQuery = branchQueries[placeId];
@@ -4019,7 +4020,8 @@ export async function registerRoutes(app: Express): Promise<Server> {
         { name: "Tungku Link", placeId: defaultPlaceId },
         { name: "Salar", placeId: "salar-branch" },
         { name: "Bengkurong", placeId: "bengkurong-branch" },
-        { name: "Tutong", placeId: "tutong-branch" }
+        { name: "Tutong", placeId: "tutong-branch" },
+        { name: "Lambak", placeId: "lambak-branch" }
       ];
 
       let totalRating = 0;
@@ -4035,7 +4037,8 @@ export async function registerRoutes(app: Express): Promise<Server> {
             const branchQueries: { [key: string]: string } = {
               "salar-branch": "Cuci Xpress Salar Link Brunei",
               "bengkurong-branch": "Cuci Xpress Bengkurong Link Brunei", 
-              "tutong-branch": "Cuci Xpress Tutong Link Brunei"
+              "tutong-branch": "Cuci Xpress Tutong Link Brunei",
+              "lambak-branch": "Cuci Xpress Lambak Brunei"
             };
             
             const searchQuery = branchQueries[branch.placeId];
