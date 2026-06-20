@@ -496,8 +496,13 @@ export default function SubscriptionTestTab() {
             </div>
           </CardHeader>
           <CardContent>
-            <div className="space-y-4 max-w-xl">
-              <div>
+            {/* The checkout container must stay >= ~696px wide so CyberSource
+                Unified Checkout renders in EMBEDDED mode (where both containers
+                are valid). Below that it switches to sidebar mode and rejects
+                the paymentScreen container. So the plan select is constrained
+                but the checkout itself spans the full (wide) panel width. */}
+            <div className="space-y-4">
+              <div className="max-w-sm">
                 <label className="text-sm font-medium text-gray-700 mb-1.5 block">
                   Plan
                 </label>
@@ -515,11 +520,13 @@ export default function SubscriptionTestTab() {
                 </Select>
               </div>
 
-              <TestCheckout
-                key={`${planId}-${checkoutKey}`}
-                planId={planId}
-                onSuccess={onCheckoutSuccess}
-              />
+              <div className="min-w-[700px] max-w-3xl">
+                <TestCheckout
+                  key={`${planId}-${checkoutKey}`}
+                  planId={planId}
+                  onSuccess={onCheckoutSuccess}
+                />
+              </div>
             </div>
           </CardContent>
         </Card>
