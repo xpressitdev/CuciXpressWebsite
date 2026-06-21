@@ -54,6 +54,10 @@ export interface OrderRow {
   item_notes?: string | null;
   ticket_code?: string | null;
   cashier_name?: string | null;
+  // Pocket Pay order reference — only present (and non-null) for web-paid
+  // walk-in washes (qr_provider === 'pocket_pay'). It is the order_id that
+  // the in-dashboard wash QR encodes for the POS scanner.
+  payment_ref?: string | null;
 }
 
 export interface MembershipRow {

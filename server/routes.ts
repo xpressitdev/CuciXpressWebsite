@@ -5827,6 +5827,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
              o.promo_discount_cents, o.total_cents, o.paid_amount_cents,
              o.change_cents, o.item_notes, o.ticket_code, o.payment_method,
              CASE WHEN o.payment_method = 'qr_code' THEN o.qr_provider ELSE NULL END AS qr_provider,
+             CASE WHEN o.qr_provider = 'pocket_pay' THEN o.payment_ref ELSE NULL END AS payment_ref,
              s.name AS cashier_name,
              o.status, o.created_at, o.completed_at
       FROM orders o

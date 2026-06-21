@@ -1,5 +1,6 @@
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { motion } from "framer-motion";
+import QRCodeLib from "qrcode";
 import {
   Download,
   Filter as FilterIcon,
@@ -72,6 +73,162 @@ function packageGradient(name: string) {
   if (lower.includes("premium")) return "from-amber-400 to-orange-500";
   if (lower.includes("basic")) return "from-slate-400 to-slate-600";
   return "from-violet-500 to-purple-600";
+}
+
+// A web-paid walk-in wash (paid online via Pocket Pay) carries a QR the
+// customer shows at the lane. Its lifecycle drives what we surface in the
+// Activity tab:
+//   pending_payment → payment still confirming, no QR yet
+//   paid + no ticket → READY: show the scannable QR
+//   queued/washing/done → CLAIMED: QR spent, show the ticket instead
+//   voided/refunded → dead
+type PrepaidState =
+  | { kind: "pending" }
+  | { kind: "ready" }
+  | { kind: "claimed"; ticket: string | null }
+  | { kind: "dead"; status: string }
+  | null;
+
+function prepaidState(o: OrderRow): PrepaidState {
+  if (o.qr_provider !== "pocket_pay") return null;
+  if (o.status === "pending_payment") return { kind: "pending" };
+  if (o.status === "paid" && !o.ticket_code) return { kind: "ready" };
+  if (["queued", "washing", "done"].includes(o.status))
+    return { kind: "claimed", ticket: o.ticket_code ?? null };
+  if (o.status === "voided" || o.status === "refunded")
+    return { kind: "dead", status: o.status };
+  return null;
+}
+
+// Small inline chip shown on Activity list rows so a customer can spot
+// which washes have an actionable QR without opening each receipt.
+function PrepaidChip({ order }: { order: OrderRow }) {
+  const st = prepaidState(order);
+  if (!st) return null;
+  const map: Record<string, string> = {
+    ready: "bg-emerald-100 text-emerald-700",
+    claimed: "bg-gray-200 text-gray-600",
+    pending: "bg-amber-100 text-amber-700",
+    dead: "bg-rose-100 text-rose-700",
+  };
+  const label =
+    st.kind === "ready"
+      ? "Tap for wash QR"
+      : st.kind === "claimed"
+      ? st.ticket
+        ? `Claimed · ${st.ticket}`
+        : "Claimed"
+      : st.kind === "pending"
+      ? "Awaiting payment"
+      : st.status === "refunded"
+      ? "Refunded"
+      : "Voided";
+  return (
+    <span
+      className={`inline-flex items-center gap-1 px-2 py-0.5 rounded text-[11px] font-bold ${map[st.kind]}`}
+      data-testid={`chip-prepaid-${order.id}`}
+    >
+      <QrCode className="w-3 h-3" />
+      {label}
+    </span>
+  );
+}
+
+// The QR block rendered inside the receipt dialog. Only web-paid washes
+// reach here (non-prepaid orders render nothing). The QR is high-contrast
+// black-on-white at a generous size so the POS camera locks on instantly;
+// the payload is the minimal { type, order_id } the scanner expects, where
+// order_id is the Pocket Pay reference (orders.payment_ref).
+function PrepaidWashQrBlock({ order }: { order: OrderRow }) {
+  const st = prepaidState(order);
+  const [qr, setQr] = useState<string | null>(null);
+  const canShow = st?.kind === "ready" && !!order.payment_ref;
+
+  useEffect(() => {
+    if (!canShow) {
+      setQr(null);
+      return;
+    }
+    let cancelled = false;
+    const payload = JSON.stringify({
+      type: "CUCI_XPRESS_PAYMENT",
+      order_id: order.payment_ref,
+    });
+    QRCodeLib.toDataURL(payload, {
+      errorCorrectionLevel: "M",
+      width: 360,
+      margin: 2,
+      color: { dark: "#000000", light: "#FFFFFF" },
+    })
+      .then((url) => {
+        if (!cancelled) setQr(url);
+      })
+      .catch((err) => console.error("[activity] wash QR failed:", err));
+    return () => {
+      cancelled = true;
+    };
+  }, [canShow, order.payment_ref]);
+
+  if (!st) return null;
+
+  return (
+    <div
+      className="bg-white rounded-md shadow-2xl px-5 py-5 text-center print:hidden"
+      data-testid={`block-prepaid-qr-${order.id}`}
+    >
+      {st.kind === "ready" ? (
+        <>
+          <p className="text-sm font-black text-gray-900">Show this QR to staff</p>
+          <p className="text-xs text-gray-500 mb-3">
+            Scan at the lane to start your prepaid wash
+          </p>
+          {qr ? (
+            <img
+              src={qr}
+              alt="Wash QR code"
+              className="w-48 h-48 mx-auto rounded-md"
+              data-testid={`img-prepaid-qr-${order.id}`}
+            />
+          ) : (
+            <div className="h-48 flex items-center justify-center text-xs text-gray-400">
+              Generating QR…
+            </div>
+          )}
+          <p className="mt-3 text-[11px] text-gray-400">
+            One-time use · {order.plate}
+          </p>
+        </>
+      ) : st.kind === "claimed" ? (
+        <div className="space-y-1">
+          <p className="text-sm font-black text-emerald-700 inline-flex items-center gap-1.5">
+            <Sparkles className="w-4 h-4" /> Wash claimed
+          </p>
+          <p className="text-xs text-gray-500">
+            {st.ticket
+              ? `This wash is in the queue as ticket ${st.ticket}.`
+              : "This wash has been started by staff."}{" "}
+            The QR has been used and can't be scanned again.
+          </p>
+        </div>
+      ) : st.kind === "pending" ? (
+        <div className="space-y-1">
+          <p className="text-sm font-black text-amber-700">Confirming payment…</p>
+          <p className="text-xs text-gray-500">
+            Your wash QR appears here once Pocket Pay confirms the payment.
+          </p>
+        </div>
+      ) : (
+        <div className="space-y-1">
+          <p className="text-sm font-black text-rose-700">
+            {st.status === "refunded" ? "Refunded" : "Voided"}
+          </p>
+          <p className="text-xs text-gray-500">
+            This wash is no longer valid for service.
+          </p>
+        </div>
+      )}
+    </div>
+  );
 }
 
 type ViewMode = "timeline" | "receipts";
@@ -456,6 +613,7 @@ export function ActivityTab({ orders }: Props) {
                               <span className="text-[10px] font-mono text-gray-400">
                                 #{shortReceiptId(o.id)}
                               </span>
+                              <PrepaidChip order={o} />
                             </div>
                             <p className="mt-1.5 text-sm text-gray-700 truncate">
                               <MapPin className="w-3.5 h-3.5 inline mr-1 text-gray-400" />
@@ -531,6 +689,7 @@ export function ActivityTab({ orders }: Props) {
                     <span className="text-[11px] font-mono text-gray-500 bg-gray-50 px-1.5 py-0.5 rounded border border-gray-200">
                       {o.plate}
                     </span>
+                    <PrepaidChip order={o} />
                   </div>
                   <p className="text-xs text-gray-600 truncate inline-flex items-center gap-1">
                     <MapPin className="w-3 h-3 text-gray-400" />
@@ -734,6 +893,8 @@ function ReceiptView({ order }: { order: OrderRow }) {
           </p>
         </div>
       </div>
+
+      <PrepaidWashQrBlock order={order} />
 
       <div className="flex gap-2 print:hidden px-1">
         <Button
