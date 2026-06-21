@@ -721,7 +721,7 @@ export function ActivityTab({ orders }: Props) {
             <DialogTitle className="sr-only">Receipt</DialogTitle>
           </DialogHeader>
           {openReceipt && (
-            <div className="relative">
+            <div className="relative max-h-[85vh]">
               <DialogClose
                 className="absolute -right-2 -top-2 z-30 rounded-full bg-gray-900 text-white p-2 shadow-lg border-2 border-white hover:bg-gray-700 focus:outline-none focus:ring-2 focus:ring-purple-500 focus:ring-offset-2"
                 data-testid="button-receipt-close"
@@ -729,7 +729,7 @@ export function ActivityTab({ orders }: Props) {
                 <X className="h-5 w-5" />
                 <span className="sr-only">Close receipt</span>
               </DialogClose>
-              <div className="overflow-hidden rounded-md">
+              <div className="max-h-[85vh] overflow-y-auto overflow-x-hidden rounded-md overscroll-contain">
                 <ReceiptView order={openReceipt} />
               </div>
             </div>
