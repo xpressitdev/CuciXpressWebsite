@@ -61,9 +61,11 @@ import {
   Car,
   FlaskConical,
 } from "lucide-react";
+import { SiWhatsapp } from "react-icons/si";
 import { Link } from "wouter";
 import { motion } from "framer-motion";
 import { apiRequest } from "@/lib/queryClient";
+import { normalizeWaPhone } from "@/lib/receipt";
 import { useStaffAuth } from "@/hooks/useStaffAuth";
 import type { CollaborationSubmission, SubscriptionSignup } from "@shared/schema";
 import CustomersTab from "@/components/admin/CustomersTab";
@@ -828,7 +830,9 @@ export default function Admin() {
                 </Card>
               ) : (
                 <div className="space-y-4">
-                  {signups.map((signup, index) => (
+                  {signups.map((signup, index) => {
+                    const waPhone = normalizeWaPhone(signup.phone);
+                    return (
                     <motion.div
                       key={signup.id}
                       initial={{ opacity: 0, y: 20 }}
@@ -890,20 +894,43 @@ export default function Admin() {
                                 </div>
                               </div>
                             </div>
-                            <Badge
-                              variant="outline"
-                              className="text-cuci-primary border-cuci-primary capitalize flex-shrink-0"
-                              data-testid={`badge-signup-plan-${signup.id}`}
-                            >
-                              {signup.plan
-                                ? PLAN_LABELS[signup.plan] ?? signup.plan
-                                : "Awaiting Launch"}
-                            </Badge>
+                            <div className="flex flex-col items-end gap-2 flex-shrink-0">
+                              <Badge
+                                variant="outline"
+                                className="text-cuci-primary border-cuci-primary capitalize"
+                                data-testid={`badge-signup-plan-${signup.id}`}
+                              >
+                                {signup.plan
+                                  ? PLAN_LABELS[signup.plan] ?? signup.plan
+                                  : "Awaiting Launch"}
+                              </Badge>
+                              {waPhone && (
+                                <Button
+                                  asChild
+                                  size="sm"
+                                  className="bg-[#25D366] hover:bg-[#1da851] text-white"
+                                  data-testid={`button-signup-whatsapp-${signup.id}`}
+                                >
+                                  <a
+                                    href={`https://wa.me/${waPhone}?text=${encodeURIComponent(
+                                      goLiveMessage(signup.plan),
+                                    )}`}
+                                    target="_blank"
+                                    rel="noopener noreferrer"
+                                    aria-label="Notify via WhatsApp"
+                                  >
+                                    <SiWhatsapp className="w-4 h-4 mr-1.5" />
+                                    Notify
+                                  </a>
+                                </Button>
+                              )}
+                            </div>
                           </div>
                         </CardContent>
                       </Card>
                     </motion.div>
-                  ))}
+                    );
+                  })}
                 </div>
               )}
               </div>
@@ -1317,6 +1344,23 @@ const PLAN_LABELS: Record<string, string> = {
   family: "Multi-Car Family",
   corporate: "Corporate Fleet",
 };
+
+// Prefilled WhatsApp text used to tell an interested sign-up that the
+// subscription they registered interest in is now live. Kept friendly and
+// low-pressure to match the brand's soft business approach.
+function goLiveMessage(plan: string | null | undefined): string {
+  const planName = plan ? PLAN_LABELS[plan] ?? plan : null;
+  const offering = planName
+    ? `our ${planName} subscription`
+    : "our car wash subscriptions";
+  return (
+    `Hi! Good news from Cuci Xpress — ${offering} is now live. ` +
+    `You signed up earlier to be notified, so we wanted to let you know ` +
+    `you can now subscribe and start enjoying unlimited washes. ` +
+    `Visit cucixpress.com to get started, or just reply here if you have ` +
+    `any questions. Thank you for your interest!`
+  );
+}
 
 const paymentMethodLabels: Record<string, string> = {
   cash: "Cash",
