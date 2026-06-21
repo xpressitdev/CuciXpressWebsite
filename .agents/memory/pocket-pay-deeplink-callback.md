@@ -37,5 +37,29 @@ tab (status `paid` + no ticket = "ready"), and after staff scan it flips to
 
 **Watch out:** the callback UPDATE only flips rows still at
 `status='pending_payment'`, so an order wrongly voided by an earlier bad callback
-will NOT auto-recover — it needs manual/scripted reconciliation against the
-Pocket portal's successful-payments list.
+will NOT auto-recover — it needs manual/scripted reconciliation.
+
+## Reconciling stuck/voided orders against Pocket (the truth source)
+
+You do NOT need the Pocket merchant portal — query Pocket's own status API per
+order. The authoritative call (read-only):
+- `POST https://pocket-pay.threeg.asia/payments/status`
+- body `{ api_key, salt, order_id }` where `order_id` = our `orders.payment_ref`.
+  Auth is api_key+salt in the body (same as every other Pocket call) — NOT a
+  separate md5 hash.
+- response: `{ method, status_id, final_amount, order_ref }`. **`status_id: 1` =
+  PAID, `status_id: 0` = NOT paid.** Cross-check `final_amount` against
+  `total_cents/100`.
+
+**Gotcha:** the in-code helper `queryTransactionStatus()` in `server/payment.ts`
+is broken — it posts to the TEST url with the wrong shape `{api_key,order_id,hash}`
+and gets `"Insufficient information POSTed."`. Use the body shape above instead.
+
+Candidate stuck rows to check: `status IN ('voided','pending_payment') AND
+qr_provider='pocket_pay'`. A `voided` pocket_pay row almost always WAS paid (the
+callback only voids after the successIndicator authenticated); `pending_payment`
+rows are a genuine mix — check each `payment_ref` individually (same plate can
+have one paid attempt and one abandoned). Recover a confirmed-paid order the same
+way as a normal completed wash (status `done` if already washed, or `paid` if the
+customer still needs to claim the wash QR); the +1 loyalty stamp auto-counts when
+`package_id='pkg_basic_tyre_wax'`.
