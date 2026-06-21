@@ -262,6 +262,13 @@ function paymentDisplayLabel(
     (o) => o.method === method && (o.qrProvider ?? null) === (qrProvider ?? null),
   );
   if (opt) return opt.label;
+  // Web checkout orders pay via Pocket Pay on cucixpress.com and store
+  // qr_provider 'pocket_pay' (distinct from the in-store 'pocket_pay_qr').
+  // They are not in PAYMENT_OPTIONS (web-only, never selectable at POS), so
+  // name them explicitly instead of humanising to a bare "Pocket Pay".
+  if (method === "qr_code" && qrProvider === "pocket_pay") {
+    return "Website cucixpress.com";
+  }
   // Owner-added wallets (e.g. 'progresif_ding') aren't in the static list —
   // humanise the slug so the receipt names them instead of falling back to a
   // generic "QR Payment".
