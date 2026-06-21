@@ -2984,9 +2984,11 @@ function LaneControl({
                   data-testid={`row-washing-${o.id}`}
                 >
                   <div className="min-w-0">
-                    <p className="font-mono font-bold text-sm">{o.ticket_code}</p>
-                    <p className="text-xs text-gray-600 truncate">
-                      {o.plate} · {o.package_name}
+                    <p className="font-mono font-extrabold text-lg leading-tight truncate">
+                      {o.plate}
+                    </p>
+                    <p className="text-xs text-gray-500 truncate">
+                      {o.ticket_code} · {o.package_name}
                     </p>
                   </div>
                   <div className="flex items-center gap-1.5 shrink-0">
@@ -3066,9 +3068,11 @@ function LaneControl({
                         {i + 1}
                       </span>
                       <div className="min-w-0">
-                        <p className="font-mono font-bold text-sm">{o.ticket_code}</p>
-                        <p className="text-xs text-gray-600 truncate">
-                          {o.plate} · {o.package_name}
+                        <p className="font-mono font-extrabold text-lg leading-tight truncate">
+                          {o.plate}
+                        </p>
+                        <p className="text-xs text-gray-500 truncate">
+                          {o.ticket_code} · {o.package_name}
                         </p>
                       </div>
                     </div>
