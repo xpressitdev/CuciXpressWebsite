@@ -48,6 +48,7 @@ const PACKAGES = [
       "Basic drying",
       "Drive-thru convenience",
     ],
+    popular: false,
   },
   {
     id: "full",
