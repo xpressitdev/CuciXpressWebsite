@@ -33,7 +33,7 @@ import { db } from "../db";
 // ---- Constants ----------------------------------------------
 
 /** Allowed values of `staff.role`. Mirrors the CHECK constraint in the migration. */
-export const STAFF_ROLES = ["owner", "manager", "lane", "cashier"] as const;
+export const STAFF_ROLES = ["owner", "manager", "lane", "cashier", "investor"] as const;
 export type StaffRole = (typeof STAFF_ROLES)[number];
 
 /** Minimum password length. Owner / manager passwords protect the whole

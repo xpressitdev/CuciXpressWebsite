@@ -770,7 +770,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
   // GET /api/admin/dashboard?branch_id=N|all&date=YYYY-MM-DD
   // Returns 12 KPI tiles + 24-hour sales/refund breakdown.
-  app.get('/api/admin/dashboard', requireStaff, requireStaffRole('owner', 'manager', 'cashier'), async (req, res) => {
+  app.get('/api/admin/dashboard', requireStaff, requireStaffRole('owner', 'manager', 'cashier', 'investor'), async (req, res) => {
     const branchParam = String(req.query.branch_id ?? 'all').trim();
     const branchId =
       branchParam === '' || branchParam === 'all' ? null : Number(branchParam);
@@ -894,7 +894,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
   //   &staff_id=text|all
   //   &search=ticket_code|plate|customer_name (>=2 chars)
   //   &page=1&per_page=50                (10..200)
-  app.get('/api/admin/reports/orders', requireStaff, requireStaffRole('owner', 'manager', 'cashier'), async (req, res) => {
+  app.get('/api/admin/reports/orders', requireStaff, requireStaffRole('owner', 'manager', 'cashier', 'investor'), async (req, res) => {
     const branchParam = String(req.query.branch_id ?? 'all').trim();
     const branchId =
       branchParam === '' || branchParam === 'all' ? null : Number(branchParam);
@@ -1138,7 +1138,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
   // Receipt Date / Time are Excel serial numbers (Asia/Brunei wall clock)
   // for parity with the KedaiPOS export the user has been uploading.
   // Hard-capped at 100,000 rows per call.
-  app.get('/api/admin/reports/orders/export', requireStaff, requireStaffRole('owner', 'manager', 'cashier'), async (req, res) => {
+  app.get('/api/admin/reports/orders/export', requireStaff, requireStaffRole('owner', 'manager', 'cashier', 'investor'), async (req, res) => {
     const branchParam = String(req.query.branch_id ?? 'all').trim();
     const branchId =
       branchParam === '' || branchParam === 'all' ? null : Number(branchParam);
@@ -1335,7 +1335,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
   // Same range/branch filters as the orders report. Aggregates orders by
   // payment_method (+ qr_provider for QR payments) so the owner can see
   // the cash/card/transfer/QR mix at a glance.
-  app.get('/api/admin/reports/payment-methods', requireStaff, requireStaffRole('owner', 'manager', 'cashier'), async (req, res) => {
+  app.get('/api/admin/reports/payment-methods', requireStaff, requireStaffRole('owner', 'manager', 'cashier', 'investor'), async (req, res) => {
     const branchParam = String(req.query.branch_id ?? 'all').trim();
     const branchId =
       branchParam === '' || branchParam === 'all' ? null : Number(branchParam);
@@ -1428,7 +1428,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
   // price_cents}). Revenue for the package = total_cents minus the sum
   // of its addon snapshot prices (so package + addons sum back to the
   // order total). Returns the top N (default 25, capped at 100).
-  app.get('/api/admin/reports/best-selling', requireStaff, requireStaffRole('owner', 'manager', 'cashier'), async (req, res) => {
+  app.get('/api/admin/reports/best-selling', requireStaff, requireStaffRole('owner', 'manager', 'cashier', 'investor'), async (req, res) => {
     const branchParam = String(req.query.branch_id ?? 'all').trim();
     const branchId =
       branchParam === '' || branchParam === 'all' ? null : Number(branchParam);
@@ -1540,7 +1540,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
   //   - totals (range KPIs)
   // Owner + manager only. Cashier intentionally excluded — this is the
   // strategic "where do I spend my staffing budget" view.
-  app.get('/api/admin/reports/trends', requireStaff, requireStaffRole('owner', 'manager'), async (req, res) => {
+  app.get('/api/admin/reports/trends', requireStaff, requireStaffRole('owner', 'manager', 'investor'), async (req, res) => {
     const branchParam = String(req.query.branch_id ?? 'all').trim();
     const branchId =
       branchParam === '' || branchParam === 'all' ? null : Number(branchParam);
@@ -3636,12 +3636,13 @@ export async function registerRoutes(app: Express): Promise<Server> {
     const parsed = staffCreateSchema.safeParse(req.body);
     if (!parsed.success) return res.status(400).json({ error: 'invalid_body', details: parsed.error.flatten() });
     const { email, name, role, branch_id, password } = parsed.data;
-    // Lane/cashier/manager are branch-bound; owner is global.
-    if (role !== 'owner' && branch_id == null) {
+    // Lane/cashier/manager are branch-bound; owner and investor are global.
+    if (role !== 'owner' && role !== 'investor' && branch_id == null) {
       return res.status(400).json({ error: 'branch_required_for_role' });
     }
     try {
-      const id = await createStaff({ email, name, role, branchId: role === 'owner' ? null : branch_id, password });
+      const isGlobalRole = role === 'owner' || role === 'investor';
+      const id = await createStaff({ email, name, role, branchId: isGlobalRole ? null : branch_id, password });
       const row = (await db.execute(sql`
         SELECT s.id, s.email, s.name, s.role, s.branch_id, s.is_active, s.created_at,
                b.name AS branch_name
@@ -3696,10 +3697,11 @@ export async function registerRoutes(app: Express): Promise<Server> {
       }
 
       const newRole = p.role ?? target.role;
-      // Keep the branch rule consistent with create: only owner may be global.
+      // Keep the branch rule consistent with create: owner and investor are global.
+      const isGlobalRole = newRole === 'owner' || newRole === 'investor';
       const branchSql =
         p.branch_id !== undefined
-          ? (newRole === 'owner' ? null : p.branch_id)
+          ? (isGlobalRole ? null : p.branch_id)
           : undefined;
       const passwordHash = p.password ? await hashStaffPassword(p.password) : null;
 
@@ -3708,7 +3710,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
            SET name          = COALESCE(${p.name ?? null}, name),
                role          = COALESCE(${p.role ?? null}, role),
                branch_id     = CASE
-                                 WHEN ${newRole === 'owner'} THEN NULL
+                                 WHEN ${isGlobalRole} THEN NULL
                                  WHEN ${branchSql !== undefined} THEN ${branchSql ?? null}
                                  ELSE branch_id
                                END,
@@ -4516,7 +4518,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
   // flip status from 'paid' -> 'queued'. Idempotent: rescanning a
   // ticket that's already in the queue returns the existing ticket
   // code instead of allocating a new one.
-  app.post('/api/verify-qr', requireStaff, async (req, res) => {
+  app.post('/api/verify-qr', requireStaff, requireStaffRole('owner', 'manager', 'lane', 'cashier'), async (req, res) => {
     const { qr_data, branch_id: scanBranchRaw } = req.body ?? {};
     if (typeof qr_data !== 'string' || qr_data.length === 0) {
       return res.status(400).json({ success: false, message: 'Missing qr_data' });
@@ -7377,7 +7379,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
     promo_code: z.string().trim().min(1).max(40).optional().nullable(),
   });
 
-  app.post('/api/pos/orders', requireStaff, async (req, res) => {
+  app.post('/api/pos/orders', requireStaff, requireStaffRole('owner', 'manager', 'lane', 'cashier'), async (req, res) => {
     const parsed = posOrderSchema.safeParse(req.body);
     if (!parsed.success) {
       return res.status(400).json({
@@ -7906,7 +7908,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
   // Branch authorisation mirrors POST /api/pos/orders. Runs in a
   // transaction with FOR UPDATE so two cashiers can't double-
   // refund the same row.
-  app.post('/api/pos/orders/:id/refund', requireStaff, async (req, res) => {
+  app.post('/api/pos/orders/:id/refund', requireStaff, requireStaffRole('owner', 'manager', 'lane', 'cashier'), async (req, res) => {
     const orderId = String(req.params.id ?? '');
     if (!orderId) return res.status(400).json({ error: 'invalid_id' });
 
@@ -7985,7 +7987,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
   // "Start wash" at the same instant produce one transition + one
   // 409 instead of corrupting the row.
   // ==========================================================================
-  app.patch('/api/pos/orders/:id/status', requireStaff, async (req, res) => {
+  app.patch('/api/pos/orders/:id/status', requireStaff, requireStaffRole('owner', 'manager', 'lane', 'cashier'), async (req, res) => {
     const orderId = String(req.params.id);
     const to = String(req.body?.to ?? '');
     // queued: send a car already washing back into the queue (lane-control
@@ -8083,7 +8085,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
   // The optional note is a short, customer-facing reason shown on the live
   // queue (empty/omitted clears it).
   // ==========================================================================
-  app.patch('/api/pos/branch/status', requireStaff, async (req, res) => {
+  app.patch('/api/pos/branch/status', requireStaff, requireStaffRole('owner', 'manager', 'lane', 'cashier'), async (req, res) => {
     const staffUser = req.staff!.user as any;
     const staffRole = staffUser.role as 'owner' | 'manager' | 'lane' | 'cashier';
     const staffBranchId = staffUser.branchId as number | null;
@@ -8313,7 +8315,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
   // index so the "Up next" list (and public snapshot) follow it. Lane/cashier
   // are LOCKED to their own branch; owner/manager can reorder any branch.
   // ==========================================================================
-  app.patch('/api/pos/queue/reorder', requireStaff, async (req, res) => {
+  app.patch('/api/pos/queue/reorder', requireStaff, requireStaffRole('owner', 'manager', 'lane', 'cashier'), async (req, res) => {
     const branchId = Number(req.body?.branch_id);
     const orderIds = Array.isArray(req.body?.order_ids)
       ? req.body.order_ids.map((x: unknown) => String(x))
@@ -8378,11 +8380,11 @@ export async function registerRoutes(app: Express): Promise<Server> {
       return res.status(400).json({ error: 'branch_id required' });
     }
     // Branch lock: lane/cashier may only read their own branch's orders;
-    // owner/manager can read any branch. Mirrors the status/reorder routes.
+    // owner/manager/investor can read any branch. Mirrors the status/reorder routes.
     const staffUser = req.staff!.user as any;
-    const staffRole = staffUser.role as 'owner' | 'manager' | 'lane' | 'cashier';
+    const staffRole = staffUser.role as 'owner' | 'manager' | 'lane' | 'cashier' | 'investor';
     const staffBranchId = staffUser.branchId as number | null;
-    if (staffRole !== 'owner' && staffRole !== 'manager') {
+    if (staffRole !== 'owner' && staffRole !== 'manager' && staffRole !== 'investor') {
       if (staffBranchId == null || branchId !== staffBranchId) {
         return res.status(403).json({ error: 'branch_mismatch' });
       }
@@ -8525,7 +8527,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
   // Cashier opens a drawer with a starting cash float. Server enforces
   // "one open shift per staff" via the partial unique index — concurrent
   // opens fail with 23505 and we surface a friendly 409.
-  app.post('/api/pos/shifts/open', requireStaff, async (req, res) => {
+  app.post('/api/pos/shifts/open', requireStaff, requireStaffRole('owner', 'manager', 'lane', 'cashier'), async (req, res) => {
     const schema = z.object({
       branch_id: z.number().int().positive(),
       opening_float_cents: z.number().int().min(0).max(10_000_00),
@@ -8637,7 +8639,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
   // tagged with this shift (cash sales - cash refunds + opening float),
   // computes variance = counted - expected, persists everything for
   // audit, returns the close summary.
-  app.post('/api/pos/shifts/close', requireStaff, async (req, res) => {
+  app.post('/api/pos/shifts/close', requireStaff, requireStaffRole('owner', 'manager', 'lane', 'cashier'), async (req, res) => {
     const schema = z.object({
       counted_cents: z.number().int().min(0).max(100_000_00),
       closing_note: z.string().trim().max(500).optional().nullable(),
@@ -8852,7 +8854,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
   });
 
   // POST /api/pos/customers — upsert a POS walk-in customer by phone.
-  app.post('/api/pos/customers', requireStaff, async (req, res) => {
+  app.post('/api/pos/customers', requireStaff, requireStaffRole('owner', 'manager', 'lane', 'cashier'), async (req, res) => {
     const schema = z.object({
       phone: z.string().trim().min(4).max(40),
       name: z.string().trim().min(1).max(120),
@@ -8934,7 +8936,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
   // order flow.
   //
   // Body: { image_base64, image_mime, branch_id }
-  app.post('/api/pos/lpr/recognize', requireStaff, async (req, res) => {
+  app.post('/api/pos/lpr/recognize', requireStaff, requireStaffRole('owner', 'manager', 'lane', 'cashier'), async (req, res) => {
     const VALID_BRANCH_IDS = [1, 2, 3, 4, 5];
     const schema = z.object({
       // ~15MB cap on the base64 string itself = ~11MB raw bytes; the
@@ -9253,7 +9255,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
     d => d.kind !== 'unlimited' || !!d.expires_at,
     { message: 'unlimited_requires_expires_at', path: ['expires_at'] },
   );
-  app.post('/api/pos/memberships', requireStaff, async (req, res) => {
+  app.post('/api/pos/memberships', requireStaff, requireStaffRole('owner', 'manager', 'lane', 'cashier'), async (req, res) => {
     const parsed = sellMembershipSchema.safeParse(req.body);
     if (!parsed.success) {
       return res.status(400).json({ error: 'invalid_request', details: parsed.error.flatten() });
@@ -9357,7 +9359,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
   // suggestions and the vehicle-history card all JOIN to `cars` and read
   // brand/model from it. So a single UPDATE here is reflected everywhere
   // the car appears.
-  app.patch('/api/pos/vehicles/:id', requireStaff, async (req, res) => {
+  app.patch('/api/pos/vehicles/:id', requireStaff, requireStaffRole('owner', 'manager', 'lane', 'cashier'), async (req, res) => {
     const id = Number(req.params.id);
     if (!Number.isFinite(id)) return res.status(400).json({ error: 'bad_id' });
     const schema = z.object({
@@ -9409,7 +9411,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
   // Trunk-owned cars (cars.user_id IS NOT NULL) are NEVER re-bound to a
   // different user from the POS surface; we only ever attach a POS
   // customer_id when it's currently null. This protects trunk semantics.
-  app.post('/api/pos/vehicles', requireStaff, async (req, res) => {
+  app.post('/api/pos/vehicles', requireStaff, requireStaffRole('owner', 'manager', 'lane', 'cashier'), async (req, res) => {
     const schema = z.object({
       license_plate: z.string().trim().min(1).max(20),
       brand: z.string().trim().max(80).optional().nullable(),
@@ -9489,12 +9491,12 @@ export async function registerRoutes(app: Express): Promise<Server> {
   // Update queue status from KedaiPOS.
   // Locked to staff (Task 2.3): a queue status change is a destructive
   // operation that must be tied to a known operator.
-  app.patch('/api/kedaipos/queue/:transaction_id', requireStaff, updateQueueStatus);
+  app.patch('/api/kedaipos/queue/:transaction_id', requireStaff, requireStaffRole('owner', 'manager', 'lane', 'cashier'), updateQueueStatus);
 
   // Manual POS integration endpoint for staff to add customers to queue.
   // Locked to staff (Task 2.3): mutates KedaiPOS state on behalf of the
   // shop, only operators may call it.
-  app.post('/api/add-to-queue', requireStaff, async (req, res) => {
+  app.post('/api/add-to-queue', requireStaff, requireStaffRole('owner', 'manager', 'lane', 'cashier'), async (req, res) => {
     try {
       const { transaction_id, status = 'IN_PROGRESS' } = req.body;
       
@@ -9612,7 +9614,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
   // Locked to staff (Task 2.3): writing a service-history row is a
   // privileged operation. The KedaiPOS webhook path is separate and uses
   // its own HMAC signature check (`/api/kedaipos-webhook`).
-  app.post('/api/service-history', requireStaff, async (req, res) => {
+  app.post('/api/service-history', requireStaff, requireStaffRole('owner', 'manager', 'lane', 'cashier'), async (req, res) => {
     try {
       const { carPlate, phone, serviceType, branch, amount, status, transactionId, paymentReference } = req.body;
       
@@ -9663,7 +9665,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
   });
 
   // Locked to staff (Task 2.3): only operators flip status / mark complete.
-  app.patch('/api/service-history/:id', requireStaff, async (req, res) => {
+  app.patch('/api/service-history/:id', requireStaff, requireStaffRole('owner', 'manager', 'lane', 'cashier'), async (req, res) => {
     try {
       const id = parseInt(req.params.id);
       const updates = req.body;

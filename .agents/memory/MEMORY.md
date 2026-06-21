@@ -34,5 +34,6 @@
 - [Prepaid web-wash QR lifecycle](prepaid-wash-qr.md) — online walk-in wash QR is single-use enforced ONLY in verify-qr (paid+no-ticket); dashboard/success page just mirror ready/claimed. payment_ref is customer-visible, successIndicator is not.
 - [Subscription launch gate](subscription-launch-gate.md) — Subscribe→lead-capture (not payment) is the LAUNCH_TS countdown working as designed; prod cutover = move LAUNCH_TS + CyberSource prod keys/env + republish.
 - [Subscription billing idempotency](subscription-billing-idempotency.md) — two partial unique indexes (one-live-per-user + invoice per period) are the ONLY double-charge guard; never drop them, keep periods row-derived.
+- [Staff role write-route audit](staff-role-write-audit.md) — restricting a staff role: write endpoints aren't only under /api/pos|/api/admin; grep ALL write verbs minus requireStaffRole (verify-qr, add-to-queue, kedaipos, service-history).
 - [Claim-date revenue](claim-date-revenue.md) — web Pocket Pay orders bucket by claimed_at (scan day) not created_at; every revenue query must use bizDay(); unclaimed = NULL = excluded.
 - [Subscription test sandbox](subscription-test-sandbox.md) — owner-only CyberSource test subs stay invisible via membership_id/user_id/customer_id NULL; gate sandbox routes on isCyberSourceTestMode().

@@ -22,7 +22,7 @@ import {
 import { apiRequest } from "@/lib/queryClient";
 import { useToast } from "@/hooks/use-toast";
 
-type Role = "owner" | "manager" | "lane" | "cashier";
+type Role = "owner" | "manager" | "lane" | "cashier" | "investor";
 
 interface StaffRow {
   id: string;
@@ -50,13 +50,17 @@ interface BranchListResp {
   rows: BranchRow[];
 }
 
-const ROLES: Role[] = ["owner", "manager", "lane", "cashier"];
+const ROLES: Role[] = ["owner", "manager", "lane", "cashier", "investor"];
+
+// Roles that are global across all branches (no single branch assignment).
+const GLOBAL_ROLES: Role[] = ["owner", "investor"];
 
 const ROLE_LABEL: Record<Role, string> = {
   owner: "Owner",
   manager: "Manager",
   lane: "Lane",
   cashier: "Cashier",
+  investor: "Investor",
 };
 
 const ROLE_BADGE: Record<Role, string> = {
@@ -64,6 +68,7 @@ const ROLE_BADGE: Record<Role, string> = {
   manager: "bg-blue-600 text-white",
   lane: "bg-amber-600 text-white",
   cashier: "bg-teal-600 text-white",
+  investor: "bg-rose-600 text-white",
 };
 
 const formatBND = (cents: number) => `B$${(cents / 100).toFixed(2)}`;
@@ -333,6 +338,8 @@ function StaffEditDialog({
   const [password, setPassword] = useState("");
 
   const isOwner = role === "owner";
+  // Owner + investor are global (all branches); never tied to one branch.
+  const isGlobalRole = GLOBAL_ROLES.includes(role);
 
   const save = useMutation({
     mutationFn: async () => {
@@ -341,14 +348,14 @@ function StaffEditDialog({
           email: email.trim(),
           name: name.trim(),
           role,
-          branch_id: isOwner ? null : branchId,
+          branch_id: isGlobalRole ? null : branchId,
           password,
         });
       }
       const body: Record<string, unknown> = {
         name: name.trim(),
         role,
-        branch_id: isOwner ? null : branchId,
+        branch_id: isGlobalRole ? null : branchId,
       };
       if (password.trim().length > 0) body.password = password;
       return apiRequest("PATCH", `/api/admin/staff/${staff!.id}`, body);
@@ -367,7 +374,7 @@ function StaffEditDialog({
   const passwordValid = isCreate
     ? password.length >= 12
     : password.length === 0 || password.length >= 12;
-  const branchValid = isOwner || branchId !== null;
+  const branchValid = isGlobalRole || branchId !== null;
   const valid =
     name.trim().length > 0 &&
     emailValid &&
@@ -413,7 +420,7 @@ function StaffEditDialog({
               onValueChange={(v) => {
                 const next = v as Role;
                 setRole(next);
-                if (next === "owner") setBranchId(null);
+                if (GLOBAL_ROLES.includes(next)) setBranchId(null);
               }}
             >
               <SelectTrigger data-testid="select-staff-role">
@@ -428,20 +435,26 @@ function StaffEditDialog({
               </SelectContent>
             </Select>
             <p className="text-[10px] text-gray-500 mt-1">
-              Owners are global. All other roles must be tied to a branch.
+              Owners and investors are global (all branches). Managers, lane,
+              and cashier roles must be tied to a branch.
             </p>
           </div>
           {!isOwner && (
             <div>
               <Label>Branch</Label>
               <Select
-                value={branchId !== null ? String(branchId) : ""}
-                onValueChange={(v) => setBranchId(Number(v))}
+                value={branchId !== null ? String(branchId) : (isGlobalRole ? "all" : "")}
+                onValueChange={(v) => setBranchId(v === "all" ? null : Number(v))}
               >
                 <SelectTrigger data-testid="select-staff-branch">
-                  <SelectValue placeholder="Select branch" />
+                  <SelectValue placeholder={isGlobalRole ? "All branches" : "Select branch"} />
                 </SelectTrigger>
                 <SelectContent>
+                  {isGlobalRole && (
+                    <SelectItem value="all" data-testid="select-staff-branch-all">
+                      All branches
+                    </SelectItem>
+                  )}
                   {branches.map((b) => (
                     <SelectItem key={b.id} value={String(b.id)} data-testid={`select-staff-branch-${b.id}`}>
                       {b.name}

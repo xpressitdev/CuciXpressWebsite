@@ -159,19 +159,24 @@ export default function Admin() {
   const queryClient = useQueryClient();
   const [selectedSubmission, setSelectedSubmission] = useState<CollaborationSubmission | null>(null);
 
+  // Collaborations + subscriptions are owner/manager-only endpoints. Gating
+  // the queries (not just the tabs) avoids background 403s for cashier/lane/
+  // investor sessions, who never see these tabs.
+  const canSeeManagerData = isAuthenticated && (staff?.role === 'owner' || staff?.role === 'manager');
+
   const { data: collaborationsData, error: collaborationsError } = useQuery<CollaborationsResponse>({
     queryKey: ['/api/admin/collaborations'],
-    enabled: isAuthenticated,
+    enabled: canSeeManagerData,
   });
 
   const { data: subscriptionsData, error: subscriptionsError } = useQuery<SubscriptionsResponse>({
     queryKey: ['/api/admin/subscriptions'],
-    enabled: isAuthenticated,
+    enabled: canSeeManagerData,
   });
 
   const { data: subRevenue, isLoading: subRevenueLoading } = useQuery<SubscriptionRevenueResponse>({
     queryKey: ['/api/admin/subscriptions/revenue'],
-    enabled: isAuthenticated,
+    enabled: canSeeManagerData,
   });
 
   const markAsReadMutation = useMutation({
@@ -310,6 +315,10 @@ export default function Admin() {
             const role = staff?.role;
             const isOwner = role === "owner";
             const isManagerOrOwner = role === "owner" || role === "manager";
+            // Investor: read-only insights (Dashboard, Order Report, Payment
+            // Methods, Best Selling, Trends) across all branches. No edit tabs.
+            const isInvestor = role === "investor";
+            const canSeeTrends = isManagerOrOwner || isInvestor;
             return (
           <Tabs defaultValue="dashboard" className="w-full">
             <TabsList
@@ -322,7 +331,7 @@ export default function Admin() {
                 <BarChart3 className="w-4 h-4" />
                 Dashboard
               </TabsTrigger>
-              {isManagerOrOwner && (
+              {canSeeTrends && (
                 <TabsTrigger value="trends" className="flex items-center gap-2" data-testid="tab-trends">
                   <LineChartIcon className="w-4 h-4" />
                   Trends
@@ -423,7 +432,7 @@ export default function Admin() {
               <DashboardTab />
             </TabsContent>
 
-            {isManagerOrOwner && (
+            {canSeeTrends && (
               <TabsContent value="trends" className="mt-6">
                 <TrendsTab />
               </TabsContent>

@@ -321,7 +321,7 @@ export const staff = pgTable("staff", {
   id: text("id").primaryKey(),
   email: text("email").notNull().unique(),
   name: text("name").notNull(),
-  role: text("role").notNull(), // 'owner' | 'manager' | 'lane' | 'cashier'
+  role: text("role").notNull(), // 'owner' | 'manager' | 'lane' | 'cashier' | 'investor'
   branch_id: integer("branch_id").references(() => branches.id),
   password_hash: text("password_hash"),
   is_active: boolean("is_active").default(true).notNull(),

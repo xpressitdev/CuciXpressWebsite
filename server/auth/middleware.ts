@@ -125,7 +125,7 @@ export function requireStaff(
  * Stricter gate that requires the staff member to have one of the
  * allowed roles. Use for owner/manager-only endpoints.
  */
-export function requireStaffRole(...allowed: Array<"owner" | "manager" | "lane" | "cashier">) {
+export function requireStaffRole(...allowed: Array<"owner" | "manager" | "lane" | "cashier" | "investor">) {
   return (req: Request, res: Response, next: NextFunction) => {
     const user = req.staff?.user;
     if (!user) {

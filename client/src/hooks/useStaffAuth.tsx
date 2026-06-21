@@ -9,7 +9,7 @@
 
 import { useCallback, useEffect, useState } from 'react';
 
-export type StaffRole = 'owner' | 'manager' | 'lane' | 'cashier';
+export type StaffRole = 'owner' | 'manager' | 'lane' | 'cashier' | 'investor';
 
 export interface StaffUser {
   id: string;

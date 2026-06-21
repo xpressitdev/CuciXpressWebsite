@@ -152,7 +152,7 @@ export const staffLucia = new Lucia(new StaffSessionAdapter(), {
   getUserAttributes: (attrs) => ({
     email: attrs.email as string,
     name: attrs.name as string,
-    role: attrs.role as "owner" | "manager" | "lane" | "cashier",
+    role: attrs.role as "owner" | "manager" | "lane" | "cashier" | "investor",
     branchId: attrs.branchId as number | null,
   }),
 });
