@@ -31,28 +31,25 @@ export default function PaymentReceipt({ orderDetails }: PaymentReceiptProps) {
 
   const generateQRCode = async () => {
     try {
-      // Create comprehensive QR code data for POS system
+      // Keep the payload MINIMAL — the POS scanner (/api/verify-qr) only
+      // reads `type` + `order_id`. order_id MUST equal the order's
+      // payment_ref (the Pocket Pay order id, also the ?OrderId= on the
+      // success URL). A tiny payload = far fewer modules = a low-density
+      // code that a phone camera can lock onto instantly.
       const qrData = {
         type: "CUCI_XPRESS_PAYMENT",
-        transaction_id: orderDetails.transaction_id,
         order_id: orderDetails.order_id || orderDetails.transaction_id,
-        service: orderDetails.service,
-        amount: orderDetails.amount,
-        branch: orderDetails.branch,
-        car_plate: orderDetails.car_plate,
-        phone: orderDetails.phone,
-        timestamp: new Date().toISOString(),
-        verify_url: `https://cucixpress.com/verify/${orderDetails.transaction_id}`,
-        status: "PAID"
       };
 
-      // Generate QR code with high error correction for scanning reliability
+      // High-contrast BLACK on white at a generous size. The previous
+      // purple-on-white render was too low-contrast for camera scanners
+      // reading it off a glossy phone screen, so the POS couldn't decode it.
       const qrCodeDataUrl = await QRCodeLib.toDataURL(JSON.stringify(qrData), {
-        errorCorrectionLevel: 'H',
-        width: 200,
+        errorCorrectionLevel: 'M',
+        width: 360,
         margin: 2,
         color: {
-          dark: '#6C5CE7',  // Purple brand color
+          dark: '#000000',
           light: '#FFFFFF'
         }
       });
@@ -184,7 +181,7 @@ export default function PaymentReceipt({ orderDetails }: PaymentReceiptProps) {
                 <img 
                   src={qrCodeUrl} 
                   alt="Receipt QR Code"
-                  className="w-32 h-32 mx-auto"
+                  className="w-48 h-48 mx-auto"
                 />
               ) : (
                 <div className="w-32 h-32 mx-auto flex items-center justify-center bg-gray-200 rounded">
