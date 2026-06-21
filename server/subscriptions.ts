@@ -1051,6 +1051,33 @@ export function registerSubscriptionRoutes(app: Express) {
       res.json({ ok: true });
     },
   );
+
+  // ---- DELETE /api/admin/subscription-test (bulk) -----------------------
+  // Purge ALL test subscriptions and their invoices in one action. Owner-only
+  // and gated on test mode so it can never touch live (is_test = false) rows.
+  app.delete(
+    "/api/admin/subscription-test",
+    requireStaff,
+    requireStaffRole("owner"),
+    async (_req, res) => {
+      if (!isCyberSourceTestMode()) {
+        return res.status(409).json({ error: "not_in_test_mode" });
+      }
+      const deleted = await db.transaction(async (tx) => {
+        await tx.execute(sql`
+          DELETE FROM subscription_invoices
+           WHERE subscription_id IN (
+             SELECT id FROM subscriptions WHERE is_test = true
+           )
+        `);
+        const result = await tx.execute(sql`
+          DELETE FROM subscriptions WHERE is_test = true
+        `);
+        return result.rowCount ?? 0;
+      });
+      res.json({ ok: true, deleted });
+    },
+  );
 }
 
 // ---------------------------------------------------------------------------

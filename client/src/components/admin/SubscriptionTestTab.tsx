@@ -19,6 +19,16 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from "@/components/ui/alert-dialog";
 import { Badge } from "@/components/ui/badge";
 import { apiRequest, queryClient } from "@/lib/queryClient";
 import { useToast } from "@/hooks/use-toast";
@@ -244,6 +254,7 @@ export default function SubscriptionTestTab() {
   const [dialogOpen, setDialogOpen] = useState(false);
   const [planId, setPlanId] = useState("unlimited");
   const [checkoutKey, setCheckoutKey] = useState(0);
+  const [clearAllOpen, setClearAllOpen] = useState(false);
 
   const { data, isLoading, error } = useQuery<{
     subscriptions: TestSubscription[];
@@ -292,6 +303,32 @@ export default function SubscriptionTestTab() {
     },
   });
 
+  const clearAll = useMutation({
+    mutationFn: () =>
+      apiRequest("DELETE", "/api/admin/subscription-test", {}),
+    onSuccess: async (res: any) => {
+      const body = await res.json().catch(() => ({}));
+      const count = typeof body?.deleted === "number" ? body.deleted : 0;
+      toast({
+        title: "Test subscriptions cleared",
+        description: count
+          ? `Removed ${count} test subscription(s) and their invoices.`
+          : "No test subscriptions to remove.",
+      });
+      setClearAllOpen(false);
+      qc.invalidateQueries({ queryKey: ["/api/admin/subscription-test/list"] });
+    },
+    onError: (err: any) => {
+      toast({
+        title: "Clear failed",
+        description:
+          err?.message?.replace(/^\d+:\s*/, "") ||
+          "Could not clear test subscriptions.",
+        variant: "destructive",
+      });
+    },
+  });
+
   const openDialog = () => {
     setCheckoutKey((k) => k + 1); // remount the widget fresh each open
     setDialogOpen(true);
@@ -328,10 +365,28 @@ export default function SubscriptionTestTab() {
                 never appear in live reports, POS, or customer accounts.
               </p>
             </div>
-            <Button onClick={openDialog} data-testid="button-new-test-subscription">
-              <Plus className="w-4 h-4 mr-1" />
-              New test subscription
-            </Button>
+            <div className="flex items-center gap-2">
+              {subs.length > 0 && (
+                <Button
+                  variant="outline"
+                  className="text-red-600 border-red-300 hover:bg-red-50 hover:text-red-700"
+                  onClick={() => setClearAllOpen(true)}
+                  disabled={clearAll.isPending}
+                  data-testid="button-clear-all-test-subscriptions"
+                >
+                  {clearAll.isPending ? (
+                    <Loader2 className="w-4 h-4 mr-1 animate-spin" />
+                  ) : (
+                    <Trash2 className="w-4 h-4 mr-1" />
+                  )}
+                  Clear all
+                </Button>
+              )}
+              <Button onClick={openDialog} data-testid="button-new-test-subscription">
+                <Plus className="w-4 h-4 mr-1" />
+                New test subscription
+              </Button>
+            </div>
           </div>
         </CardHeader>
         <CardContent>
@@ -531,6 +586,40 @@ export default function SubscriptionTestTab() {
           </CardContent>
         </Card>
       )}
+
+      <AlertDialog open={clearAllOpen} onOpenChange={setClearAllOpen}>
+        <AlertDialogContent data-testid="dialog-clear-all-test-subscriptions">
+          <AlertDialogHeader>
+            <AlertDialogTitle>Clear all test subscriptions?</AlertDialogTitle>
+            <AlertDialogDescription>
+              This permanently deletes every test subscription and its invoices
+              from the database. Live subscriptions are never touched. This
+              cannot be undone.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel disabled={clearAll.isPending}>
+              Cancel
+            </AlertDialogCancel>
+            <AlertDialogAction
+              className="bg-red-600 hover:bg-red-700 focus:ring-red-600"
+              disabled={clearAll.isPending}
+              onClick={(e) => {
+                e.preventDefault();
+                clearAll.mutate();
+              }}
+              data-testid="button-confirm-clear-all"
+            >
+              {clearAll.isPending ? (
+                <Loader2 className="w-4 h-4 mr-1 animate-spin" />
+              ) : (
+                <Trash2 className="w-4 h-4 mr-1" />
+              )}
+              Delete all
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </div>
   );
 }
