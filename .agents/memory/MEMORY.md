@@ -30,6 +30,7 @@
 - [Admin DashboardTab role gating](admin-dashboard-role-gating.md) — DashboardTab is shown to ALL staff incl cashiers; owner/manager-only widgets there must be UI-gated or they 401-error.
 - [Subscription car binding](subscription-car-binding.md) — unlimited memberships MUST set vehicle_id (redemption rejects null); Family = 1 membership/car but full price on primary only, B$0 on extras.
 - [Pocket Pay callback authenticity](pocket-pay-callback-auth.md) — callback has no hash; auth by matching stored per-order successIndicator. NEVER return it to the client or paid callbacks can be forged.
+- [Pocket Pay deeplink callback](pocket-pay-deeplink-callback.md) — in-app/deeplink callback has Message:null; confirm payment by the authenticated successIndicator, not message text, or real paid orders get voided.
 - [Prepaid web-wash QR lifecycle](prepaid-wash-qr.md) — online walk-in wash QR is single-use enforced ONLY in verify-qr (paid+no-ticket); dashboard/success page just mirror ready/claimed. payment_ref is customer-visible, successIndicator is not.
 - [Subscription launch gate](subscription-launch-gate.md) — Subscribe→lead-capture (not payment) is the LAUNCH_TS countdown working as designed; prod cutover = move LAUNCH_TS + CyberSource prod keys/env + republish.
 - [Subscription billing idempotency](subscription-billing-idempotency.md) — two partial unique indexes (one-live-per-user + invoice per period) are the ONLY double-charge guard; never drop them, keep periods row-derived.
