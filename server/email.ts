@@ -1,5 +1,6 @@
 import nodemailer from 'nodemailer';
 import sgMail from '@sendgrid/mail';
+import QRCode from 'qrcode';
 
 const GMAIL_USER = 'cucixpress.bn@gmail.com';
 const GMAIL_APP_PASSWORD = process.env.GMAIL_APP_PASSWORD;
@@ -43,6 +44,7 @@ async function sendEmail(opts: {
   html: string;
   text?: string;
   replyTo?: string;
+  attachments?: Array<{ filename: string; content: Buffer; cid: string; contentType?: string }>;
 }): Promise<boolean> {
   // 1. Preferred: SendGrid.
   if (SENDGRID_API_KEY) {
@@ -54,6 +56,17 @@ async function sendEmail(opts: {
         html: opts.html,
         ...(opts.text ? { text: opts.text } : {}),
         ...(opts.replyTo ? { replyTo: opts.replyTo } : {}),
+        ...(opts.attachments
+          ? {
+              attachments: opts.attachments.map((a) => ({
+                content: a.content.toString('base64'),
+                filename: a.filename,
+                type: a.contentType ?? 'application/octet-stream',
+                disposition: 'inline',
+                contentId: a.cid,
+              })),
+            }
+          : {}),
       });
       return true;
     } catch (err: any) {
@@ -77,6 +90,16 @@ async function sendEmail(opts: {
         html: opts.html,
         ...(opts.text ? { text: opts.text } : {}),
         ...(opts.replyTo ? { replyTo: opts.replyTo } : {}),
+        ...(opts.attachments
+          ? {
+              attachments: opts.attachments.map((a) => ({
+                filename: a.filename,
+                content: a.content,
+                cid: a.cid,
+                contentType: a.contentType,
+              })),
+            }
+          : {}),
       });
       return true;
     } catch (err) {
@@ -97,6 +120,9 @@ interface PaymentConfirmationData {
   amount: number;
   branch: string;
   customerName?: string;
+  // Web checkout: the buyer hasn't picked a branch yet (the lane stamps it at
+  // scan-in), so the receipt is branch-agnostic and embeds a scannable QR.
+  isOnline?: boolean;
 }
 
 export async function sendPaymentConfirmation(data: PaymentConfirmationData): Promise<boolean> {
@@ -112,6 +138,21 @@ export async function sendPaymentConfirmation(data: PaymentConfirmationData): Pr
     tutong: 'Tutong',
   };
   const branchDisplay = branchNames[data.branch] || data.branch;
+  const branchLabel = data.isOnline ? 'Any Cuci Xpress branch' : branchDisplay;
+
+  // Generate a scannable QR that our lane / POS reads at scan-in. Same payload
+  // the website success page renders. Non-fatal: if it fails we still send the
+  // receipt (with the Order ID) so staff can look it up manually.
+  let qrAttachment: { filename: string; content: Buffer; cid: string; contentType: string } | undefined;
+  try {
+    const qrBuf = await QRCode.toBuffer(
+      JSON.stringify({ type: 'CUCI_XPRESS_PAYMENT', order_id: data.orderId }),
+      { errorCorrectionLevel: 'M', width: 300, margin: 2, color: { dark: '#000000', light: '#FFFFFF' } }
+    );
+    qrAttachment = { filename: 'cuci-xpress-qr.png', content: qrBuf, cid: 'wash-qr', contentType: 'image/png' };
+  } catch (qrErr) {
+    console.error('[email] QR generation failed — sending receipt without embedded QR:', qrErr);
+  }
 
   const emailHtml = `
   <!DOCTYPE html>
@@ -170,18 +211,24 @@ export async function sendPaymentConfirmation(data: PaymentConfirmationData): Pr
           </div>
           <div class="detail-row">
             <span class="detail-label">Branch</span>
-            <span class="detail-value">${branchDisplay}</span>
+            <span class="detail-value">${data.isOnline ? 'Any branch (chosen at your wash)' : branchDisplay}</span>
           </div>
           <div class="detail-row">
             <span class="detail-label">Amount Paid</span>
             <span class="detail-value amount-value">BND ${data.amount}</span>
           </div>
         </div>
+${qrAttachment ? `
+        <div style="text-align:center; margin: 24px 0;">
+          <p style="font-size:14px; color:#555; margin:0 0 12px;">Show this QR code to our staff at the branch:</p>
+          <img src="cid:wash-qr" alt="Cuci Xpress wash QR code" width="220" height="220" style="border:1px solid #eee; border-radius:12px; padding:8px; background:#fff;" />
+          <p style="font-size:12px; color:#999; margin:8px 0 0;">Order ID: ${data.orderId}</p>
+        </div>` : ''}
 
         <div class="next-steps">
           <h3>📍 What to Do Next</h3>
-          <div class="step"><div class="step-num">1</div>Drive to <strong>${branchDisplay} branch</strong> (Daily: 8:00 AM – 7:00 PM)</div>
-          <div class="step"><div class="step-num">2</div>Show your <strong>QR receipt</strong> (from the website) or quote your Transaction ID to our staff</div>
+          <div class="step"><div class="step-num">1</div>${data.isOnline ? 'Drive to <strong>any Cuci Xpress branch</strong> — Tungku Link, Salar, Bengkurong or Tutong' : `Drive to <strong>${branchDisplay} branch</strong>`} (Daily: 8:00 AM – 7:00 PM)</div>
+          <div class="step"><div class="step-num">2</div>Show the <strong>QR code in this email</strong> (or quote your Order ID) to our staff</div>
           <div class="step"><div class="step-num">3</div>Sit back and enjoy your premium Cuci Xpress car wash!</div>
         </div>
 
@@ -210,12 +257,12 @@ ORDER DETAILS:
 Transaction ID: ${data.transactionId}
 Order ID:       ${data.orderId}
 Service:        ${data.service}
-Branch:         ${branchDisplay}
+Branch:         ${data.isOnline ? 'Any branch (chosen at your wash)' : branchDisplay}
 Amount Paid:    BND ${data.amount}
 
 WHAT TO DO NEXT:
-1. Drive to ${branchDisplay} branch (Daily: 8:00 AM - 7:00 PM)
-2. Show your QR receipt or quote your Transaction ID to our staff
+1. Drive to ${data.isOnline ? 'any Cuci Xpress branch' : `${branchDisplay} branch`} (Daily: 8:00 AM - 7:00 PM)
+2. Show the QR code in this email (or quote your Order ID) to our staff
 3. Enjoy your premium car wash!
 
 Need help? Call +673 838 7000 or visit cucixpress.com
@@ -226,9 +273,10 @@ Cuci Xpress | 120,000+ cars cleaned | BND 1M+ revenue | 5 branches
 
   const ok = await sendEmail({
     to: data.customerEmail,
-    subject: `Payment Confirmed ✅ – ${data.service} at ${branchDisplay}`,
+    subject: `Payment Confirmed ✅ – ${data.service}${data.isOnline ? '' : ` at ${branchDisplay}`}`,
     text: emailText,
     html: emailHtml,
+    ...(qrAttachment ? { attachments: [qrAttachment] } : {}),
   });
   if (ok) console.log(`Payment confirmation email sent to ${data.customerEmail}`);
   return ok;

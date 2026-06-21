@@ -4103,6 +4103,61 @@ export async function registerRoutes(app: Express): Promise<Server> {
   });
 
   // Payment processing endpoint
+  // Sends the web-checkout receipt (+ QR) for a paid Pocket Pay order exactly
+  // once. Claims the send atomically via receipt_email_sent_at so the two
+  // triggers (payment-callback + success-page rehydration) can both call it
+  // without double-emailing; on a send failure the claim is released so a later
+  // trigger retries. Never throws — all paths are best-effort.
+  async function sendReceiptEmailIfUnsent(ppOrderId: string): Promise<void> {
+    let claimed:
+      | { customer_email: string | null; plate: string | null; package_name: string | null; total_cents: number | null; payment_ref: string | null }
+      | undefined;
+    try {
+      const claim = await db.execute(sql`
+        UPDATE orders
+           SET receipt_email_sent_at = now()
+         WHERE qr_provider = 'pocket_pay'
+           AND payment_ref = ${ppOrderId}
+           AND status = 'paid'
+           AND customer_email IS NOT NULL
+           AND receipt_email_sent_at IS NULL
+        RETURNING customer_email, plate, package_name, total_cents, payment_ref
+      `);
+      claimed = claim.rows[0] as typeof claimed;
+    } catch (claimErr) {
+      console.error('[receipt-email] claim failed (non-blocking):', claimErr);
+      return;
+    }
+    if (!claimed?.customer_email) return; // already sent, not paid yet, or no email on file
+
+    let ok = false;
+    try {
+      ok = await sendPaymentConfirmation({
+        customerEmail: claimed.customer_email,
+        transactionId: claimed.payment_ref ?? ppOrderId,
+        orderId: claimed.payment_ref ?? ppOrderId,
+        service: claimed.package_name ?? 'Car Wash Service',
+        amount: Number(claimed.total_cents ?? 0) / 100,
+        branch: 'Any Cuci Xpress branch',
+        customerName: claimed.plate ?? undefined,
+        isOnline: true,
+      });
+    } catch (mailErr) {
+      console.error('[receipt-email] send threw:', mailErr);
+    }
+    if (!ok) {
+      // Release the claim so the next trigger (callback retry / success page) can retry.
+      try {
+        await db.execute(sql`
+          UPDATE orders SET receipt_email_sent_at = NULL
+           WHERE qr_provider = 'pocket_pay' AND payment_ref = ${ppOrderId}
+        `);
+      } catch (relErr) {
+        console.error('[receipt-email] failed to release claim after send failure:', relErr);
+      }
+    }
+  }
+
   app.post("/api/process-payment", async (req, res) => {
     try {
       const paymentData = req.body;
@@ -4110,13 +4165,23 @@ export async function registerRoutes(app: Express): Promise<Server> {
       // Validate required fields. Note: branch is intentionally NOT
       // required — customers buy from anywhere and the branch is set
       // when they scan the QR at the lane (see /api/verify-qr).
-      const requiredFields = ['serviceName', 'amount', 'carPlate', 'phone'];
+      const requiredFields = ['serviceName', 'amount', 'carPlate', 'phone', 'email'];
       const missingFields = requiredFields.filter(field => !paymentData[field]);
       
       if (missingFields.length > 0) {
         return res.status(400).json({
           success: false,
           message: `Missing required fields: ${missingFields.join(', ')}`
+        });
+      }
+
+      // Website checkout requires a valid email — that's where the receipt
+      // (and scannable QR) is sent once /api/payment-callback confirms payment.
+      const customerEmail = String(paymentData.email).trim();
+      if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(customerEmail)) {
+        return res.status(400).json({
+          success: false,
+          message: 'A valid email address is required.'
         });
       }
 
@@ -4233,13 +4298,13 @@ export async function registerRoutes(app: Express): Promise<Server> {
                 package_id, package_name, package_price_cents,
                 addons, subtotal_cents, total_cents,
                 payment_method, payment_ref, pocket_pay_success_indicator, qr_provider,
-                status, customer_name_walkin
+                status, customer_name_walkin, customer_email
               ) VALUES (
                 ${orderId}, ${branchId}, ${plateUpper}, ${vehicleId}, ${customerId},
                 ${packageId}, ${packageName}, ${priceCents},
                 '[]'::jsonb, ${priceCents}, ${priceCents},
                 'qr_code', ${result.order_id}, ${result.success_indicator ?? null}, 'pocket_pay',
-                'pending_payment', ${fallbackName}
+                'pending_payment', ${fallbackName}, ${customerEmail || null}
               )
             `);
           });
@@ -4728,6 +4793,14 @@ export async function registerRoutes(app: Express): Promise<Server> {
         }
       }
 
+      // Email the receipt + scannable QR the moment payment is confirmed. The
+      // helper claims the send atomically (receipt_email_sent_at), so Pocket
+      // Pay's callback retries never double-send, and a transient failure is
+      // released so the success-page fallback can retry. Non-blocking.
+      if (result.success) {
+        await sendReceiptEmailIfUnsent(ppOrderId);
+      }
+
       if (result.success) {
         return res.json({ status: 'OK', message: 'Callback processed' });
       }
@@ -4805,6 +4878,13 @@ export async function registerRoutes(app: Express): Promise<Server> {
         return res.status(404).json({ success: false, message: 'Order not found' });
       }
       const o = rows[0];
+      // Fallback receipt sender: if the Pocket Pay callback was missed or its
+      // email send failed transiently, fire it here when the buyer lands on the
+      // success page. The helper's atomic claim prevents a double-send with the
+      // callback. Fire-and-forget — never blocks the receipt response.
+      if (o.status === 'paid') {
+        void sendReceiptEmailIfUnsent(o.payment_ref);
+      }
       res.json({
         success: true,
         order_details: {

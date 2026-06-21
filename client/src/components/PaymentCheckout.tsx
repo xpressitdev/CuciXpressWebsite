@@ -181,19 +181,21 @@ export default function PaymentCheckout({ selectedService, onBack }: PaymentChec
   };
 
 
-  // Email is no longer required — the QR receipt goes via WhatsApp
-  // (and is shown on the success page + saved to /dashboard). We still
-  // accept an email if the customer types one, for a paper-trail.
+  // Email is required — after Pocket Pay confirms the payment we email the
+  // receipt + scannable QR to this address (the order is also linked to the
+  // customer's dashboard, activity and car-plate history).
   const validateForm = () => {
-    const required = ['carPlate', 'phone'];
-    return required.every(field => formData[field as keyof typeof formData]);
+    const required = ['carPlate', 'phone', 'email'];
+    const allPresent = required.every(field => formData[field as keyof typeof formData]);
+    const emailValid = /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(formData.email.trim());
+    return allPresent && emailValid;
   };
 
   const handlePayment = async () => {
     if (!validateForm()) {
       toast({
         title: "Missing Information",
-        description: "Please fill in your car plate and phone number.",
+        description: "Please fill in your car plate, phone number, and a valid email address.",
         variant: "destructive"
       });
       return;
@@ -224,6 +226,7 @@ export default function PaymentCheckout({ selectedService, onBack }: PaymentChec
         amount: pkg.price,
         carPlate: formData.carPlate,
         phone: formData.phone,
+        email: formData.email.trim(),
       };
 
       const response = await fetch('/api/process-payment', {
@@ -476,7 +479,7 @@ export default function PaymentCheckout({ selectedService, onBack }: PaymentChec
                       <div className="flex items-center justify-between px-3 py-2.5">
                         <span className="text-xs text-gray-500">Email</span>
                         <span className="text-gray-900 text-sm" data-testid="text-locked-email">
-                          {formData.email || <span className="text-gray-400 text-xs">— (optional)</span>}
+                          {formData.email || <span className="text-amber-600 text-xs">Not set — add in your dashboard</span>}
                         </span>
                       </div>
                     </div>
@@ -507,15 +510,16 @@ export default function PaymentCheckout({ selectedService, onBack }: PaymentChec
                       </div>
 
                       <div>
-                        <Label htmlFor="email">Email Address <span className="text-gray-400 font-normal text-xs">(optional)</span></Label>
+                        <Label htmlFor="email">Email Address *</Label>
                         <Input
                           id="email"
                           type="email"
                           value={formData.email}
                           onChange={(e) => handleInputChange('email', e.target.value)}
                           placeholder="your@email.com"
+                          required
                         />
-                        <p className="text-xs text-gray-500 mt-1">We'll send your QR code via WhatsApp — email is just for a paper-trail receipt.</p>
+                        <p className="text-xs text-gray-500 mt-1">We'll email your receipt and QR code to this address once payment is confirmed.</p>
                       </div>
                     </>
                   )}

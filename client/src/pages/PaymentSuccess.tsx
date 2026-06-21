@@ -42,7 +42,9 @@ export default function PaymentSuccess() {
 
       if (isVerified) {
         showSuccessToast(orderData.service);
-        sendConfirmationEmail(orderData);
+        // Receipt email (+ QR) is sent server-side from /api/payment-callback
+        // the moment Pocket Pay confirms payment — no client-side send here, so
+        // we never double-email on redirect + refresh.
       } else {
         toast({
           title: "Payment Not Completed",
@@ -104,41 +106,6 @@ export default function PaymentSuccess() {
     setPaymentVerified(true);
     showSuccessToast();
   }, []);
-
-  const sendConfirmationEmail = async (orderData: any) => {
-    try {
-      if (!orderData.car_plate || !orderData.phone) {
-        console.log('No customer information found - skipping confirmation');
-        return;
-      }
-
-      const response = await fetch('/api/send-payment-confirmation', {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({
-          carPlate: orderData.car_plate,
-          phone: orderData.phone,
-          customerEmail: orderData.customer_email,
-          transactionId: orderData.transaction_id,
-          orderId: orderData.order_id || orderData.transaction_id,
-          service: orderData.service,
-          amount: orderData.amount,
-          branch: orderData.branch
-        })
-      });
-
-      const result = await response.json();
-      if (result.success) {
-        console.log('Payment confirmation processed successfully');
-      } else {
-        console.error('Failed to process confirmation:', result.message);
-      }
-    } catch (error) {
-      console.error('Error processing confirmation:', error);
-    }
-  };
 
   // Payment failed / not completed screen
   if (paymentVerified === false) {

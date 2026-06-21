@@ -625,6 +625,8 @@ export const orders = pgTable("orders", {
   kedaipos_pos_name: text("kedaipos_pos_name"),               // e.g. "POS 1", "Default"
   original_receipt_no: text("original_receipt_no"),           // for refund chains: links a refund row to the original receipt
   customer_name_walkin: text("customer_name_walkin"),         // when a walk-in gives a name but isn't a registered user
+  customer_email: text("customer_email"),                     // web checkout: where we email the receipt + QR (2026-06-21_02)
+  receipt_email_sent_at: timestamp("receipt_email_sent_at", { withTimezone: true }), // web checkout: atomic claim marker so callback + success-page don't double-send (2026-06-21_03)
   qr_provider: text("qr_provider"),                           // when payment_method='qr_code': 'pocket_pay' | 'dst_easy' | etc.
   service_charge_cents: integer("service_charge_cents").default(0).notNull(),
   tax_cents: integer("tax_cents").default(0).notNull(),
