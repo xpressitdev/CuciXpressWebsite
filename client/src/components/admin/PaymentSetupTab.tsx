@@ -367,6 +367,22 @@ function FeeRateRowCard({ rate }: { rate: FeeRateRow }) {
 const feeKey = (method: string, provider: string | null) =>
   `${method}|${provider ?? ""}`;
 
+// The automated website checkout records its sales under the reserved
+// qr_provider 'pocket_pay' (tied to the Pocket Pay callback idempotency index),
+// which can never exist as an owner-created payment_methods row. Expose it here
+// as a virtual gateway so the owner can still set its MDR fee. It self-hides
+// from the picker once a rate for it exists (see takenKeys below).
+const WEB_POCKET_PAY_GATEWAY: PaymentMethodRow = {
+  id: "__web_pocket_pay__",
+  label: "Website cucixpress.com (Web Pocket QR)",
+  method: "qr_code",
+  qr_provider: "pocket_pay",
+  is_active: true,
+  sort_order: 0,
+  is_system: true,
+  created_at: "",
+};
+
 function FeeRateEditDialog({ existing, onClose }: { existing: FeeRateRow[]; onClose: () => void }) {
   const queryClient = useQueryClient();
   const { toast } = useToast();
@@ -382,7 +398,7 @@ function FeeRateEditDialog({ existing, onClose }: { existing: FeeRateRow[]; onCl
   // A gateway already covered by a fee rate would just produce a duplicate, so
   // hide it. Cash / bank transfer always have no fee, so they're hidden too.
   const takenKeys = new Set(existing.map((r) => feeKey(r.payment_method, r.qr_provider)));
-  const options = (pmData?.rows ?? [])
+  const options = [WEB_POCKET_PAY_GATEWAY, ...(pmData?.rows ?? [])]
     .filter((p) => p.method !== "cash" && p.method !== "bank_transfer")
     .filter((p) => !takenKeys.has(feeKey(p.method, p.qr_provider)));
 

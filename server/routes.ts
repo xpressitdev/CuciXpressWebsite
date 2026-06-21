@@ -1201,7 +1201,8 @@ export async function registerRoutes(app: Express): Promise<Server> {
           case 'voucher':       return 'Voucher';
           case 'subscription':  return 'Subscription';
           case 'qr_code':
-            if (qrProvider === 'pocket_pay' || qrProvider === 'pocket_pay_qr') return 'Pocket Payment QR';
+            if (qrProvider === 'pocket_pay')          return 'Website cucixpress.com (Web Pocket QR)';
+            if (qrProvider === 'pocket_pay_qr')       return 'Pocket Payment QR';
             if (qrProvider === 'pocket_pay_invoice')  return 'Pocket Payment Invoice';
             if (qrProvider === 'dst_easy' || qrProvider === 'quickpay') return 'Quickpay';
             if (qrProvider === 'baiduri_ms')          return 'Baiduri MS Payment Request';

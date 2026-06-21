@@ -1666,7 +1666,7 @@ interface PaymentMethodsResponse {
 }
 
 const qrProviderLabels: Record<string, string> = {
-  pocket_pay: "Pocket Pay",
+  pocket_pay: "Website cucixpress.com (Web Pocket QR)",
   pocket_pay_invoice: "Pocket Pay (Invoice)",
   baiduri_ms: "Baiduri MS",
   dst_easy: "DST Easy / Quickpay",
@@ -3134,7 +3134,7 @@ interface ShiftDetailResp {
 const SHIFT_PROVIDER_LABELS: Record<string, string> = {
   progresif_ding: "Progresif Ding",
   pocket_pay_qr: "Pocket QR",
-  pocket_pay: "Pocket Web",
+  pocket_pay: "Website cucixpress.com (Web Pocket QR)",
 };
 const shiftRowLabel = (r: { payment_method: string; qr_provider?: string | null }): string =>
   r.qr_provider

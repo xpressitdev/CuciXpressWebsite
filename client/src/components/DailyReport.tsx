@@ -77,7 +77,7 @@ const PAYMENT_LABELS: Record<string, string> = {
 const PROVIDER_LABELS: Record<string, string> = {
   progresif_ding: "Progresif Ding",
   pocket_pay_qr: "Pocket QR",
-  pocket_pay: "Pocket Web",
+  pocket_pay: "Website cucixpress.com (Web Pocket QR)",
 };
 
 // Rows are grouped per (payment_method, qr_provider), so a friendly label and

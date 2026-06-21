@@ -21,6 +21,7 @@ export const LOYALTY_PROMO =
 export function payLabel(method: string, qrProvider?: string | null) {
   if (method === "cash") return "Cash";
   if (method === "qr_code") {
+    if (qrProvider === "pocket_pay") return "Website cucixpress.com (Web Pocket QR)";
     if (qrProvider === "pocket_pay_invoice") return "Pocket Payment Invoice";
     if (qrProvider === "baiduri_ms") return "Baiduri MS Payment Request";
     return "Pocket Payment QR";
