@@ -31,6 +31,16 @@ the claim marker. Email is required at web checkout (`orders.customer_email`,
 web checkout validates it route-side). `users.email` IS `.notNull()`, so
 logged-in customers always have an address.
 
+**Success page must verify real status — never optimistic.** `/payment-success`
+(PaymentSuccess.tsx) MUST gate the green "confirmed" screen on the server's real
+`order_details.status === 'paid'` (via secret-gated `/api/payment-success-order`).
+**Why:** it used to show "confirmed" + wash QR purely from landing on the success
+URL (trusting the redirect / sessionStorage), so a VOIDED/never-captured payment
+still rendered success — staff could be shown a QR for an unpaid wash (value
+leakage). It polls ~6×2s while `pending_payment` to absorb the redirect-vs-callback
+race, then fails safe. NEVER reintroduce an optimistic "trust the redirect" path,
+and keep `order_details.status` in that endpoint's response contract.
+
 **Known limitation (follow-up, not a bug in this flow):** if Pocket Pay never
 delivers the callback, the order never reaches `paid`, so no email — same gap as
 the order never being finalized at all. A true delivery guarantee needs an outbox
