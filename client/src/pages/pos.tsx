@@ -2980,28 +2980,29 @@ function LaneControl({
               {washing.map((o) => (
                 <div
                   key={o.id}
-                  className="flex items-center justify-between gap-2 border-2 border-cuci-secondary/40 bg-cuci-secondary/5 rounded-lg px-3 py-2"
+                  className="border-2 border-cuci-secondary/40 bg-cuci-secondary/5 rounded-lg px-3 py-2.5"
                   data-testid={`row-washing-${o.id}`}
                 >
-                  <div className="min-w-0">
-                    <p className="font-mono font-extrabold text-lg leading-tight truncate">
+                  <div className="mb-2">
+                    <p className="font-mono font-extrabold text-xl leading-tight break-words">
                       {o.plate}
                     </p>
-                    <p className="text-xs text-gray-500 truncate">
+                    <p className="text-sm text-gray-600 break-words">
                       {o.ticket_code} · {o.package_name}
                     </p>
                   </div>
-                  <div className="flex items-center gap-1.5 shrink-0">
+                  <div className="flex items-center gap-2">
                     <Button
                       size="sm"
                       variant="outline"
+                      className="flex-1"
                       disabled={pendingId === o.id}
                       onClick={() => advance(o.id, "queued")}
                       data-testid={`button-send-back-${o.id}`}
                       title="Send this car back to Up next"
                     >
                       <Undo2 className="w-3.5 h-3.5 mr-1" />
-                      Send back
+                      Back
                     </Button>
                     <Button
                       size="sm"
@@ -3009,14 +3010,14 @@ function LaneControl({
                       disabled={pendingId === o.id}
                       onClick={() => advance(o.id, "done")}
                       data-testid={`button-mark-done-${o.id}`}
-                      className="bg-emerald-600 hover:bg-emerald-700 text-white"
+                      className="flex-1 bg-emerald-600 hover:bg-emerald-700 text-white"
                     >
                       {pendingId === o.id ? (
                         <Loader2 className="w-3.5 h-3.5 animate-spin" />
                       ) : (
                         <>
                           <CheckCheck className="w-3.5 h-3.5 mr-1" />
-                          Mark done
+                          Done
                         </>
                       )}
                     </Button>
@@ -3037,10 +3038,10 @@ function LaneControl({
               {queued.map((o, i) => (
                   <div
                     key={o.id}
-                    className="flex items-center justify-between gap-2 border border-gray-200 rounded-lg px-3 py-2"
+                    className="border border-gray-200 rounded-lg px-3 py-2.5"
                     data-testid={`row-queued-${o.id}`}
                   >
-                    <div className="flex items-center gap-2 min-w-0">
+                    <div className="flex items-center gap-2 mb-2">
                       {/* Reorder controls — move this car up/down the queue. */}
                       <div className="flex flex-col">
                         <button
@@ -3068,10 +3069,10 @@ function LaneControl({
                         {i + 1}
                       </span>
                       <div className="min-w-0">
-                        <p className="font-mono font-extrabold text-lg leading-tight truncate">
+                        <p className="font-mono font-extrabold text-xl leading-tight break-words">
                           {o.plate}
                         </p>
-                        <p className="text-xs text-gray-500 truncate">
+                        <p className="text-sm text-gray-600 break-words">
                           {o.ticket_code} · {o.package_name}
                         </p>
                       </div>
@@ -3082,7 +3083,7 @@ function LaneControl({
                       disabled={pendingId === o.id}
                       onClick={() => advance(o.id, "washing")}
                       data-testid={`button-start-wash-${o.id}`}
-                      className="bg-cuci-primary hover:bg-cuci-primary/90"
+                      className="w-full bg-cuci-primary hover:bg-cuci-primary/90"
                     >
                       {pendingId === o.id ? (
                         <Loader2 className="w-3.5 h-3.5 animate-spin" />
