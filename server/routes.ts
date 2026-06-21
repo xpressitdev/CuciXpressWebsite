@@ -219,6 +219,12 @@ export async function registerRoutes(app: Express): Promise<Server> {
       `(CASE WHEN ${prefix}qr_provider = 'pocket_pay' THEN ${prefix}claimed_at ELSE ${prefix}created_at END)`,
     );
 
+  // Failed (voided) and abandoned (pending_payment) web checkouts are not real
+  // sales — exclude them from every revenue/report surface so they are neither
+  // listed nor counted. Refunds stay in (shown separately and subtracted).
+  const realOrders = (prefix: '' | 'o.' = '') =>
+    sql.raw(`AND ${prefix}status NOT IN ('voided', 'pending_payment')`);
+
   // ===================================================================
   // Public Live Queue snapshot (no auth). Polled ~every 15s by both
   // the /queue page and the home-page widget.
@@ -793,7 +799,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
           SELECT *
             FROM orders
            WHERE date(${bizDay()} AT TIME ZONE 'Asia/Brunei') = ${targetDate}::date
-             ${branchFilter}
+             ${branchFilter} ${realOrders()}
         ),
         paid AS (SELECT * FROM day_orders WHERE status <> 'refunded'),
         ref  AS (SELECT * FROM day_orders WHERE status =  'refunded')
@@ -815,7 +821,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
                COALESCE(SUM(CASE WHEN status =  'refunded' THEN total_cents ELSE 0 END), 0)::bigint AS refund_cents
           FROM orders
          WHERE date(${bizDay()} AT TIME ZONE 'Asia/Brunei') = ${targetDate}::date
-           ${branchFilter}
+           ${branchFilter} ${realOrders()}
          GROUP BY 1
          ORDER BY 1
       `)).rows as Array<{ hour: number; sales_cents: string | number; refund_cents: string | number }>;
@@ -841,7 +847,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
                COALESCE(SUM(CASE WHEN status =  'refunded' THEN total_cents ELSE 0 END),0)::int AS refund_cents
           FROM orders
          WHERE date(${bizDay()} AT TIME ZONE 'Asia/Brunei') = ${targetDate}::date
-           ${branchFilter}
+           ${branchFilter} ${realOrders()}
          GROUP BY payment_method, qr_provider
       `)).rows as Array<{ payment_method: string; qr_provider: string | null; sales_cents: number; refund_cents: number }>;
       const rateMap = await loadMdrRateMap(db);
@@ -940,14 +946,14 @@ export async function registerRoutes(app: Express): Promise<Server> {
           COALESCE(SUM(CASE WHEN o.status <> 'refunded' THEN 1 + COALESCE(jsonb_array_length(o.addons),0) ELSE 0 END),0)::int AS items_sold
           FROM orders o
          WHERE date(${bizDay('o.')} AT TIME ZONE 'Asia/Brunei') BETWEEN ${from}::date AND ${to}::date
-           ${branchFilter} ${pmFilter} ${staffFilter} ${searchFilter}
+           ${branchFilter} ${pmFilter} ${staffFilter} ${searchFilter} ${realOrders('o.')}
       `)).rows[0] as any;
 
       const countRow = (await db.execute(sql`
         SELECT COUNT(*)::int AS n
           FROM orders o
          WHERE date(${bizDay('o.')} AT TIME ZONE 'Asia/Brunei') BETWEEN ${from}::date AND ${to}::date
-           ${branchFilter} ${pmFilter} ${staffFilter} ${searchFilter}
+           ${branchFilter} ${pmFilter} ${staffFilter} ${searchFilter} ${realOrders('o.')}
       `)).rows[0] as { n: number };
 
       const rows = (await db.execute(sql`
@@ -961,7 +967,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
           LEFT JOIN branches b ON b.id = o.branch_id
           LEFT JOIN staff    s ON s.id = o.staff_id
          WHERE date(${bizDay('o.')} AT TIME ZONE 'Asia/Brunei') BETWEEN ${from}::date AND ${to}::date
-           ${branchFilter} ${pmFilter} ${staffFilter} ${searchFilter}
+           ${branchFilter} ${pmFilter} ${staffFilter} ${searchFilter} ${realOrders('o.')}
          ORDER BY ${bizDay('o.')} DESC
          LIMIT ${perPage} OFFSET ${offset}
       `)).rows;
@@ -981,7 +987,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
                COALESCE(SUM(CASE WHEN o.status =  'refunded' THEN o.total_cents ELSE 0 END),0)::int AS refund_cents
           FROM orders o
          WHERE date(${bizDay('o.')} AT TIME ZONE 'Asia/Brunei') BETWEEN ${from}::date AND ${to}::date
-           ${branchFilter} ${pmFilter} ${staffFilter} ${searchFilter}
+           ${branchFilter} ${pmFilter} ${staffFilter} ${searchFilter} ${realOrders('o.')}
          GROUP BY o.payment_method, o.qr_provider
       `)).rows as Array<{ payment_method: string; qr_provider: string | null; sales_cents: number; refund_cents: number }>;
       const rateMap = await loadMdrRateMap(db);
@@ -1169,7 +1175,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
         SELECT COUNT(*)::int AS n
           FROM orders o
          WHERE date(${bizDay('o.')} AT TIME ZONE 'Asia/Brunei') BETWEEN ${from}::date AND ${to}::date
-           ${branchFilter} ${pmFilter} ${staffFilter} ${searchFilter}
+           ${branchFilter} ${pmFilter} ${staffFilter} ${searchFilter} ${realOrders('o.')}
       `)).rows[0] as { n: number };
 
       const ROW_CAP = 100_000;
@@ -1200,7 +1206,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
           LEFT JOIN staff    s ON s.id = o.staff_id
           LEFT JOIN cars     c ON c.id = o.vehicle_id
          WHERE date(${bizDay('o.')} AT TIME ZONE 'Asia/Brunei') BETWEEN ${from}::date AND ${to}::date
-           ${branchFilter} ${pmFilter} ${staffFilter} ${searchFilter}
+           ${branchFilter} ${pmFilter} ${staffFilter} ${searchFilter} ${realOrders('o.')}
          ORDER BY ${bizDay('o.')} ASC
       `)).rows as Array<any>;
 
@@ -1359,7 +1365,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
           COALESCE(SUM(CASE WHEN o.status =  'refunded' THEN o.total_cents ELSE 0 END),0)::bigint  AS refund_cents
           FROM orders o
          WHERE date(${bizDay('o.')} AT TIME ZONE 'Asia/Brunei') BETWEEN ${from}::date AND ${to}::date
-           ${branchFilter}
+           ${branchFilter} ${realOrders('o.')}
          GROUP BY 1, 2
          ORDER BY sales_cents DESC
       `)).rows as Array<any>;
@@ -1448,7 +1454,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
             FROM orders
            WHERE status <> 'refunded'
              AND date(${bizDay()} AT TIME ZONE 'Asia/Brunei') BETWEEN ${from}::date AND ${to}::date
-             ${branchFilter}
+             ${branchFilter} ${realOrders()}
         ),
         pkg_items AS (
           SELECT
@@ -1492,7 +1498,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
           FROM orders
          WHERE status <> 'refunded'
            AND date(${bizDay()} AT TIME ZONE 'Asia/Brunei') BETWEEN ${from}::date AND ${to}::date
-           ${branchFilter}
+           ${branchFilter} ${realOrders()}
       `)).rows[0] as { items_sold: number; revenue_cents: number };
 
       const totalQty     = Number(totalsRow.items_sold ?? 0);
@@ -1571,7 +1577,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
           FROM days
           LEFT JOIN orders o
             ON date(${bizDay('o.')} AT TIME ZONE 'Asia/Brunei') = d
-            ${branchFilter}
+            ${branchFilter} ${realOrders('o.')}
          GROUP BY d
          ORDER BY d
       `)).rows as Array<{ date: string; sales_cents: string | number; refund_cents: string | number; transactions: number }>;
@@ -1586,6 +1592,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
           LEFT JOIN orders o
             ON o.branch_id = b.id
            AND date(${bizDay('o.')} AT TIME ZONE 'Asia/Brunei') BETWEEN ${from}::date AND ${to}::date
+           ${realOrders('o.')}
          ${branchId !== null ? sql`WHERE b.id = ${branchId}` : sql``}
          GROUP BY b.id, b.name
          ORDER BY sales_cents DESC, b.name
@@ -1600,7 +1607,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
           FROM orders o
          WHERE date(${bizDay('o.')} AT TIME ZONE 'Asia/Brunei') BETWEEN ${from}::date AND ${to}::date
            AND o.status <> 'refunded'
-           ${branchFilter}
+           ${branchFilter} ${realOrders('o.')}
          GROUP BY 1, 2
          ORDER BY 1, 2
       `)).rows as Array<{ dow: number; hour: number; transactions: number; sales_cents: string | number }>;
@@ -1613,7 +1620,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
                COUNT(*) FILTER (WHERE o.status =  'refunded')::int AS refund_count
           FROM orders o
          WHERE date(${bizDay('o.')} AT TIME ZONE 'Asia/Brunei') BETWEEN ${from}::date AND ${to}::date
-           ${branchFilter}
+           ${branchFilter} ${realOrders('o.')}
       `)).rows[0] as any;
 
       const sales = Number(totalsRow.sales_cents ?? 0);
@@ -8374,6 +8381,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
           FROM orders
          WHERE branch_id = ${branchId}
            AND date(${bizDay()} AT TIME ZONE 'Asia/Brunei') = (now() AT TIME ZONE 'Asia/Brunei')::date
+           ${realOrders()}
          ORDER BY ${bizDay()} DESC
          LIMIT 50
       `)).rows;
@@ -8455,7 +8463,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
              COALESCE(SUM(CASE WHEN status =  'refunded' THEN 1 ELSE 0 END), 0)::int          AS refund_count
         FROM orders
        WHERE branch_id = ${branchId}
-         AND ${dayFilter}
+         AND ${dayFilter} ${realOrders()}
        GROUP BY payment_method, qr_provider
        ORDER BY payment_method, qr_provider
     `)).rows as Array<{
