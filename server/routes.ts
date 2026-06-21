@@ -4764,6 +4764,67 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
+  // GET /api/payment-success-order — secret-gated receipt rehydration.
+  // The /payment-success page reads ?OrderId= and ?successIndicator= from the
+  // Pocket Pay redirect. sessionStorage is the fast path, but it is gone on a
+  // page refresh (we removeItem it on first load) or if the gateway round-trip
+  // dropped it — which is exactly why the receipt used to fall back to
+  // "UNKNOWN"/"N/A". This rehydrates the real order straight from the DB so the
+  // plate, phone, package and branch always show.
+  //
+  // Auth: the per-order `successIndicator` is a secret Pocket Pay handed the
+  // buyer in the redirect URL; we require it to match the value stored at create
+  // time (the same secret /api/payment-callback authenticates with). That keeps
+  // this from being a plate/phone enumeration oracle. We NEVER echo the
+  // indicator back to the client.
+  app.get("/api/payment-success-order", async (req, res) => {
+    const orderId = String(req.query.orderId ?? '').trim();
+    const successIndicator = String(req.query.successIndicator ?? '').trim();
+    if (!orderId || !successIndicator) {
+      return res.status(400).json({ success: false, message: 'Missing order id or indicator' });
+    }
+    try {
+      const rows = (await db.execute(sql`
+        SELECT o.payment_ref, o.plate, o.package_name, o.total_cents,
+               o.status, o.created_at,
+               b.name  AS branch_name,
+               c.phone AS customer_phone
+          FROM orders o
+          LEFT JOIN branches  b ON b.id = o.branch_id
+          LEFT JOIN customers c ON c.id = o.customer_id
+         WHERE o.payment_ref = ${orderId}
+           AND o.qr_provider = 'pocket_pay'
+           AND o.pocket_pay_success_indicator = ${successIndicator}
+         LIMIT 1
+      `)).rows as Array<{
+        payment_ref: string; plate: string | null; package_name: string | null;
+        total_cents: number | null; status: string | null; created_at: string;
+        branch_name: string | null; customer_phone: string | null;
+      }>;
+      if (rows.length === 0) {
+        return res.status(404).json({ success: false, message: 'Order not found' });
+      }
+      const o = rows[0];
+      res.json({
+        success: true,
+        order_details: {
+          transaction_id: o.payment_ref,
+          order_id: o.payment_ref,
+          service: o.package_name ?? 'Car Wash Service',
+          amount: Number(o.total_cents ?? 0) / 100,
+          branch: o.branch_name ?? null,
+          car_plate: o.plate ?? null,
+          phone: o.customer_phone ?? null,
+          status: o.status ?? null,
+          timestamp: o.created_at,
+        },
+      });
+    } catch (err) {
+      console.error('[payment-success-order] lookup failed:', err);
+      res.status(500).json({ success: false, message: 'Lookup failed' });
+    }
+  });
+
 
 
   // Payment cancel page route

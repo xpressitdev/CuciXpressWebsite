@@ -17,7 +17,15 @@ export default function PaymentSuccess() {
   useEffect(() => {
     const urlParams = new URLSearchParams(window.location.search);
     const urlSuccessIndicator = urlParams.get('successIndicator');
+    const urlOrderId = urlParams.get('OrderId');
     const storedOrder = sessionStorage.getItem('lastPaymentOrder');
+
+    const showSuccessToast = (service?: string) =>
+      toast({
+        title: "Payment Successful! 🎉",
+        description: `Your ${service || 'car wash service'} has been confirmed. Please show your QR receipt to the staff.`,
+        duration: 6000,
+      });
 
     if (storedOrder) {
       const orderData = JSON.parse(storedOrder);
@@ -33,11 +41,7 @@ export default function PaymentSuccess() {
       setPaymentVerified(isVerified);
 
       if (isVerified) {
-        toast({
-          title: "Payment Successful! 🎉",
-          description: `Your ${orderData.service || 'car wash service'} has been confirmed. Please show your QR receipt to the staff.`,
-          duration: 6000,
-        });
+        showSuccessToast(orderData.service);
         sendConfirmationEmail(orderData);
       } else {
         toast({
@@ -47,25 +51,58 @@ export default function PaymentSuccess() {
           duration: 6000,
         });
       }
-    } else {
-      // No stored order — build a fallback from URL params (no stored indicator to verify against)
-      const fallbackOrder = {
-        transaction_id: urlParams.get('OrderId') || 'CX_UNKNOWN',
-        service: 'Car Wash Service',
-        amount: 12,
-        branch: 'Tungku Link',
-        car_plate: 'UNKNOWN',
-        phone: 'N/A'
-      };
-      setOrderDetails(fallbackOrder);
-      setPaymentVerified(true);
-      toast({
-        title: "Payment Successful! 🎉",
-        description: "Your car wash service has been confirmed. Please show your QR receipt to the staff.",
-        duration: 6000,
-      });
-      sendConfirmationEmail(fallbackOrder);
+      return;
     }
+
+    // No stored order (page refresh — we removeItem it on first load — or the
+    // gateway round-trip dropped sessionStorage). Rehydrate the REAL order from
+    // the server using the secret successIndicator Pocket Pay put in the redirect
+    // URL. This is what fixes the receipt showing "UNKNOWN"/"N/A".
+    if (urlOrderId && urlSuccessIndicator) {
+      (async () => {
+        try {
+          const res = await fetch(
+            `/api/payment-success-order?orderId=${encodeURIComponent(urlOrderId)}&successIndicator=${encodeURIComponent(urlSuccessIndicator)}`
+          );
+          const data = await res.json();
+          if (res.ok && data.success && data.order_details) {
+            setOrderDetails(data.order_details);
+            setPaymentVerified(true);
+            showSuccessToast(data.order_details.service);
+            return;
+          }
+        } catch (error) {
+          console.error('Failed to load order details:', error);
+        }
+        // Couldn't authenticate/find the order. The redirect itself implies a
+        // completed payment, so still show success — but with no fabricated
+        // plate/phone data.
+        setOrderDetails({
+          transaction_id: urlOrderId,
+          order_id: urlOrderId,
+          service: 'Car Wash Service',
+          amount: 0,
+          branch: null,
+          car_plate: null,
+          phone: null,
+        });
+        setPaymentVerified(true);
+        showSuccessToast();
+      })();
+      return;
+    }
+
+    // Nothing to identify the order at all.
+    setOrderDetails({
+      transaction_id: urlOrderId || 'CX_UNKNOWN',
+      service: 'Car Wash Service',
+      amount: 0,
+      branch: null,
+      car_plate: null,
+      phone: null,
+    });
+    setPaymentVerified(true);
+    showSuccessToast();
   }, []);
 
   const sendConfirmationEmail = async (orderData: any) => {
