@@ -616,6 +616,12 @@ export const orders = pgTable("orders", {
   refund_reason: text("refund_reason"),
   created_at: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
   completed_at: timestamp("completed_at", { withTimezone: true }),
+  // Web-prepaid revenue realization (2026-06-21_04): set when a web Pocket Pay
+  // order's wash QR is scanned at the lane. Reports/POS bucket web orders
+  // (qr_provider='pocket_pay') by this CLAIM day, not created_at (paid day), so
+  // a wash paid one day and claimed the next counts on the claim day. NULL until
+  // scanned (= revenue not yet realized).
+  claimed_at: timestamp("claimed_at", { withTimezone: true }),
 
   // --- KedaiPOS sync columns (added 2026-05-03_02) -----------
   // Mirror the fields KedaiPOS exports so historical backfill (Month 3)
