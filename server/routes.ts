@@ -4848,8 +4848,12 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
-  // Payment status query endpoint
-  app.post("/api/payment-status", async (req, res) => {
+  // Payment status query endpoint — asks Pocket Pay for the real, current status
+  // of an order (used for back-office reconciliation of stuck/voided orders).
+  // Staff-only: the response reveals whether an order_id was paid and its amount,
+  // and order_ids are short sequential integers, so leaving this public would make
+  // it a payment-enumeration oracle. Owner/manager only.
+  app.post("/api/payment-status", requireStaff, requireStaffRole('owner', 'manager'), async (req, res) => {
     try {
       const { order_id } = req.body;
       

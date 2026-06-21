@@ -310,47 +310,63 @@ export function handlePaymentCallback(callbackData: any): NormalizedPaymentCallb
   }
 }
 
-// Query transaction status
-export async function queryTransactionStatus(orderId: string): Promise<any> {
+// Query the real, current status of a Pocket Pay order straight from Pocket.
+// This is the source of truth for reconciling orders that never received a
+// callback (or received a malformed/deeplink one). Two things the old version
+// got wrong and broke it:
+//   1. It POSTed to the TEST url. Live orders live on PROD.
+//   2. It sent { api_key, order_id, hash:md5(...) }. This endpoint — like every
+//      other Pocket call — authenticates with api_key + salt in the body and has
+//      NO separate hash, so it answered "Insufficient information POSTed."
+// The order is keyed by the order_id Pocket gave us at create time (stored as
+// orders.payment_ref). Pocket replies { method, status_id, final_amount,
+// order_ref } where status_id 1 = PAID and 0 = not paid.
+export async function queryTransactionStatus(orderId: string): Promise<{
+  success: boolean;
+  order_id?: string;
+  paid?: boolean;
+  status_id?: number | null;
+  amount?: string | null;
+  method?: string | null;
+  order_ref?: string | null;
+  message?: string;
+}> {
   try {
-    const statusRequest = {
-      api_key: POCKET_PAY_CONFIG.API_KEY,
-      order_id: orderId,
-      hash: generateStatusHash(orderId)
-    };
+    if (!POCKET_PAY_CONFIG.API_KEY || !POCKET_PAY_CONFIG.SALT) {
+      return { success: false, order_id: orderId, message: 'Pocket Pay credentials not configured' };
+    }
 
-    const response = await fetch(`${POCKET_PAY_CONFIG.TEST_API_URL}/payments/status`, {
+    const response = await fetch(`${POCKET_PAY_CONFIG.PROD_API_URL}/payments/status`, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
-        'Accept': 'application/json'
+        'Accept': 'application/json',
       },
-      body: JSON.stringify(statusRequest)
+      body: JSON.stringify({
+        api_key: POCKET_PAY_CONFIG.API_KEY,
+        salt: POCKET_PAY_CONFIG.SALT,
+        order_id: orderId,
+      }),
     });
 
-    if (!response.ok) {
-      throw new Error(`Status query failed: ${response.status}`);
+    const result = await response.json().catch(() => null);
+    if (!response.ok || !result) {
+      console.error('Transaction status query failed:', response.status, result);
+      return { success: false, order_id: orderId, message: 'Status query failed' };
     }
 
-    const result = await response.json();
-    return result;
-    
+    const statusId = Number(result.status_id);
+    return {
+      success: true,
+      order_id: orderId,
+      paid: statusId === 1,
+      status_id: Number.isNaN(statusId) ? null : statusId,
+      amount: result.final_amount ?? null,
+      method: result.method ?? null,
+      order_ref: result.order_ref != null ? String(result.order_ref) : null,
+    };
   } catch (error) {
     console.error('Transaction status query error:', error);
-    return {
-      success: false,
-      message: 'Status query failed'
-    };
+    return { success: false, order_id: orderId, message: 'Status query failed' };
   }
-}
-
-// Generate hash for status query
-function generateStatusHash(orderId: string): string {
-  const hashString = `${POCKET_PAY_CONFIG.API_KEY}|${orderId}|${POCKET_PAY_CONFIG.SALT}`;
-  
-  return crypto
-    .createHash('md5')
-    .update(hashString)
-    .digest('hex')
-    .toUpperCase();
 }

@@ -51,9 +51,14 @@ order. The authoritative call (read-only):
   PAID, `status_id: 0` = NOT paid.** Cross-check `final_amount` against
   `total_cents/100`.
 
-**Gotcha:** the in-code helper `queryTransactionStatus()` in `server/payment.ts`
-is broken — it posts to the TEST url with the wrong shape `{api_key,order_id,hash}`
-and gets `"Insufficient information POSTed."`. Use the body shape above instead.
+The in-code helper `queryTransactionStatus(orderId)` in `server/payment.ts` now
+implements exactly this call (PROD url + `{api_key,salt,order_id}`, no md5 hash)
+and returns a normalized `{success, paid, status_id, amount, method, order_ref}`
+(`paid = status_id===1`). Its only route, `POST /api/payment-status`, is
+staff-only (owner/manager) — keep it gated: order_ids are short sequential ints,
+so a public version is a payment-enumeration oracle. (It was previously broken,
+posting to the TEST url with `{api_key,order_id,hash}` → "Insufficient
+information POSTed.")
 
 Candidate stuck rows to check: `status IN ('voided','pending_payment') AND
 qr_provider='pocket_pay'`. A `voided` pocket_pay row almost always WAS paid (the
