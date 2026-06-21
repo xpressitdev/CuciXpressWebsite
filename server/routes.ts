@@ -4783,12 +4783,24 @@ export async function registerRoutes(app: Express): Promise<Server> {
         return res.status(400).json({ status: 'ERROR', message: 'Invalid callback authentication' });
       }
 
-      // ── Phase 12a: flip the pending_payment order to 'paid' (callback
-      // success) or 'voided' (failure/cancellation). The partial unique index
-      // on payment_ref (WHERE qr_provider='pocket_pay') + the status guard make
-      // this idempotent — Pocket Pay can safely re-deliver the callback, and a
-      // manual override (refund, void) sticks.
-      const newStatus = result.success ? 'paid' : 'voided';
+      // ── Determine the outcome. Pocket Pay only echoes the per-order
+      // `successIndicator` on a GENUINE successful payment, so an AUTHENTICATED
+      // callback (we already returned above when the indicator didn't match) is
+      // itself the success signal. The deeplink / in-app flow (customer completes
+      // payment inside the Pocket app rather than the web gateway) omits the
+      // "Successful Payment" Message that the web flow sends — it arrives as
+      // `Message: null`. So we must NOT require the message text to confirm
+      // success; doing so wrongly voided real paid orders completed in the app.
+      // Only an EXPLICIT failure message marks the order voided.
+      const msg = (result.message ?? '').trim().toLowerCase();
+      const explicitFailure =
+        /unsuccess|fail|cancel|declin|reject|expired|timeout/.test(msg);
+      const paid = !explicitFailure;
+      // ── Phase 12a: flip the pending_payment order to 'paid' or 'voided'. The
+      // partial unique index on payment_ref (WHERE qr_provider='pocket_pay') +
+      // the status guard make this idempotent — Pocket Pay can safely re-deliver
+      // the callback, and a manual override (refund, void) sticks.
+      const newStatus = paid ? 'paid' : 'voided';
       try {
         await db.execute(sql`
           UPDATE orders
@@ -4808,7 +4820,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
       // If this Pocket Pay order funded a ONE-TIME subscription purchase,
       // finalize it now (activate the 1-month unlimited membership per car).
       // Idempotent and a no-op for ordinary single-wash order callbacks.
-      if (result.success) {
+      if (paid) {
         try {
           await activatePocketPaySubscription(ppOrderId);
         } catch (subErr) {
@@ -4820,11 +4832,11 @@ export async function registerRoutes(app: Express): Promise<Server> {
       // helper claims the send atomically (receipt_email_sent_at), so Pocket
       // Pay's callback retries never double-send, and a transient failure is
       // released so the success-page fallback can retry. Non-blocking.
-      if (result.success) {
+      if (paid) {
         await sendReceiptEmailIfUnsent(ppOrderId);
       }
 
-      if (result.success) {
+      if (paid) {
         return res.json({ status: 'OK', message: 'Callback processed' });
       }
       // Authentic but a non-success status (failed/cancelled): ack so Pocket Pay
