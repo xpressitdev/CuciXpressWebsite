@@ -30,6 +30,7 @@ import {
   FormLabel,
   FormMessage,
 } from "@/components/ui/form";
+import { Label } from "@/components/ui/label";
 import { Input } from "@/components/ui/input";
 import { apiRequest } from "@/lib/queryClient";
 import { useToast } from "@/hooks/use-toast";
@@ -393,7 +394,7 @@ function EditProfileDialog({
               Enter it below to save your changes.
             </p>
             <div className="space-y-1.5">
-              <FormLabel htmlFor="profile-otp-code">Verification code</FormLabel>
+              <Label htmlFor="profile-otp-code">Verification code</Label>
               <Input
                 id="profile-otp-code"
                 autoFocus
