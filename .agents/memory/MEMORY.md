@@ -35,6 +35,7 @@
 - [Prepaid web-wash QR lifecycle](prepaid-wash-qr.md) — online walk-in wash QR is single-use enforced ONLY in verify-qr (paid+no-ticket); dashboard/success page just mirror ready/claimed. payment_ref is customer-visible, successIndicator is not.
 - [Subscription launch gate](subscription-launch-gate.md) — Subscribe→lead-capture (not payment) is the LAUNCH_TS countdown working as designed; prod cutover = move LAUNCH_TS + CyberSource prod keys/env + republish.
 - [Subscription billing idempotency](subscription-billing-idempotency.md) — two partial unique indexes (one-live-per-user + invoice per period) are the ONLY double-charge guard; never drop them, keep periods row-derived.
+- [Excel master vs app DB lineage](excel-master-data-lineage.md) — OneDrive sheet vs web Order Report not tallying for pre-live months = legacy KedaiPOS rows (numeric ids) vs app UUIDs, 0 shared ids; web=DB exact, sheet drift isn't an app bug.
 - [Staff role write-route audit](staff-role-write-audit.md) — restricting a staff role: write endpoints aren't only under /api/pos|/api/admin; grep ALL write verbs minus requireStaffRole (verify-qr, add-to-queue, kedaipos, service-history).
 - [OTP purpose DB constraint drift](otp-purpose-constraint.md) — "Could not send code" = new ALLOWED_PURPOSES value missing from otp_codes_purpose_check CHECK; add via idempotent migration to both DBs.
 - [Claim-date revenue](claim-date-revenue.md) — web Pocket Pay orders bucket by claimed_at (scan day) not created_at; every revenue query must use bizDay(); unclaimed = NULL = excluded.
