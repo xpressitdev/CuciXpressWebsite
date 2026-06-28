@@ -204,19 +204,31 @@ function processGoogleReviews(data: any) {
 }
 
 export async function registerRoutes(app: Express): Promise<Server> {
-  // Revenue is realized on the day a wash is CLAIMED, not the day it was paid.
-  // Web-checkout orders pay via Pocket Pay on cucixpress.com
-  // (qr_provider='pocket_pay') and are prepaid: a customer can pay one day and
-  // scan the wash QR at the lane on another. For those, the business day is the
-  // scan/claim timestamp (claimed_at); every other (in-person POS) order keeps
-  // created_at. Web orders that are paid but not yet claimed have
-  // claimed_at = NULL, so they drop out of every day bucket until they are
-  // scanned — exactly the "realize on claim" rule. `prefix` is '' or 'o.' to
-  // match the alias used by the surrounding query. Only literal column names and
-  // a constant are interpolated (no user input) so sql.raw is safe here.
+  // Revenue/queue is realized on the day a wash is CLAIMED, not the day it was
+  // paid or when its QR was generated. Prepaid QR orders create the order row
+  // up front and are only redeemed when staff scan the QR at the lane
+  // (claimed_at). Three providers behave this way:
+  //   - 'pocket_pay'  : web checkout on cucixpress.com — carries real money, so
+  //     it uses claimed_at with NO fallback. A paid-but-unscanned web order
+  //     stays out of every day bucket until scanned (revenue realized on claim).
+  //   - 'loyalty'     : free-wash vouchers (B$0).
+  //   - 'membership'  : subscription / unlimited washes (B$0).
+  // loyalty + membership are B$0 and some legacy rows were scanned before
+  // claimed_at was recorded, so they COALESCE to created_at when claimed_at is
+  // missing — this keeps historical washes counted while still bucketing new
+  // scans to their actual scan day. Without this, a subscription wash whose QR
+  // was generated on one day but scanned on another vanished from that day's
+  // queue and sales log. Every other (in-person POS) order has no QR and keeps
+  // created_at. `prefix` is '' or 'o.' to match the alias used by the
+  // surrounding query. Only literal column names and a constant are interpolated
+  // (no user input) so sql.raw is safe here.
   const bizDay = (prefix: '' | 'o.' = '') =>
     sql.raw(
-      `(CASE WHEN ${prefix}qr_provider = 'pocket_pay' THEN ${prefix}claimed_at ELSE ${prefix}created_at END)`,
+      `(CASE ` +
+        `WHEN ${prefix}qr_provider = 'pocket_pay' THEN ${prefix}claimed_at ` +
+        `WHEN ${prefix}qr_provider IN ('loyalty', 'membership') ` +
+        `THEN COALESCE(${prefix}claimed_at, ${prefix}created_at) ` +
+        `ELSE ${prefix}created_at END)`,
     );
 
   // Failed (voided) and abandoned (pending_payment) web checkouts are not real
@@ -257,7 +269,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
         SELECT branch_id, plate, package_name, status, created_at, queue_position
         FROM orders
         WHERE status IN ('paid','queued','washing')
-          AND date(created_at AT TIME ZONE 'Asia/Brunei')
+          AND date(${bizDay()} AT TIME ZONE 'Asia/Brunei')
             = (now() AT TIME ZONE 'Asia/Brunei')::date
         ORDER BY branch_id ASC,
           CASE status WHEN 'washing' THEN 0 ELSE 1 END,
@@ -273,7 +285,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
         SELECT branch_id, COUNT(*)::int AS done_count
         FROM orders
         WHERE status = 'done'
-          AND date(created_at AT TIME ZONE 'Asia/Brunei')
+          AND date(${bizDay()} AT TIME ZONE 'Asia/Brunei')
             = (now() AT TIME ZONE 'Asia/Brunei')::date
         GROUP BY branch_id
       `);

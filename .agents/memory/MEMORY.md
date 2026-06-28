@@ -1,5 +1,6 @@
 - [Auth session cookies](auth-session-cookies.md) — customer login dropping on mobile? Check Lucia `sessionCookie.expires` (true=persistent, false=dies on tab close), not session-expiry bugs.
 - [Lane queue ordering](queue-ordering.md) — queue ordered by queue_position NULLS LAST then created_at; the 3 readers (snapshot SQL, LaneControl sort, today route SELECT) must stay in lockstep.
+- [Prepaid-QR day bucketing](prepaid-qr-day-bucketing.md) — every prepaid-QR provider (pocket_pay, loyalty, membership) must bucket by claim/scan day in bizDay() AND queue/snapshot, or a wash whose QR was generated one day and scanned another vanishes from that day's queue + sales log.
 - [Staging test DB](staging-test-db.md) — vitest integration tests hit STAGING (not dev/prod); a 42703 "column does not exist" 500 means staging missed a manual migration — re-apply it.
 - [Payment methods & qr_provider](payment-methods-qr-provider.md) — wallet methods are qr_code + qr_provider (not new enums); manual Pocket QR must use `pocket_pay_qr`, never `pocket_pay` (unique-index landmine).
 - [WhatsApp receipt file share](whatsapp-receipt-share.md) — wa.me link is text-only; attach files via navigator.share, probe canShare synchronously or the fallback popup gets blocked.
