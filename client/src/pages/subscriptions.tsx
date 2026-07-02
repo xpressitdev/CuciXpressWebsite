@@ -429,7 +429,7 @@ export default function Subscriptions() {
                 )}
               </div>
             </div>
-            <div className="grid md:grid-cols-3 gap-6">
+            <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
               {PLANS.map((plan, i) => {
                 const Icon = plan.icon;
 
@@ -454,7 +454,7 @@ export default function Subscriptions() {
                       whileInView={{ opacity: 1, y: 0 }}
                       transition={{ duration: 0.45, delay: i * 0.08 }}
                       viewport={{ once: true }}
-                      className="relative md:-translate-y-2"
+                      className="relative lg:-translate-y-2"
                       data-testid={`plan-card-${plan.id}`}
                     >
                       {/* ★ MOST PICKED badge — lives on the OUTER wrapper so
@@ -482,13 +482,12 @@ export default function Subscriptions() {
                       </div>
                       {/* Inner gradient card — clips the shimmer/gloss/twinkles. */}
                       <div
-                        className="relative overflow-hidden flex flex-col h-full"
+                        className="relative overflow-hidden flex flex-col h-full p-6 sm:p-8"
                         style={{
                           background:
                             "linear-gradient(135deg, #7C5CE7 0%, #B47CF7 45%, #FF9500 100%)",
                           border: "2px solid #000",
                           borderRadius: 20,
-                          padding: 32,
                           boxShadow:
                             "8px 8px 0 0 rgba(0,0,0,0.92), 0 0 60px rgba(255,149,0,0.45), 0 0 100px rgba(124,92,231,0.35)",
                         }}
@@ -549,8 +548,8 @@ export default function Subscriptions() {
                         <div className="flex items-baseline justify-center gap-2 mb-7">
                           {plan.oldPrice && (
                             <span
+                              className="text-xl sm:text-2xl"
                               style={{
-                                fontSize: 26,
                                 fontWeight: 700,
                                 color: "rgba(255,255,255,0.6)",
                                 textDecoration: "line-through",
@@ -562,8 +561,8 @@ export default function Subscriptions() {
                             </span>
                           )}
                           <span
+                            className="text-5xl sm:text-6xl"
                             style={{
-                              fontSize: 64,
                               fontWeight: 900,
                               color: "#fff",
                               letterSpacing: "-2.5px",
@@ -652,7 +651,7 @@ export default function Subscriptions() {
                           {plan.oldPrice}
                         </span>
                       )}
-                      <span className="text-5xl font-black tracking-tight text-cuci-primary">
+                      <span className="text-4xl sm:text-5xl font-black tracking-tight text-cuci-primary">
                         {plan.price}
                       </span>
                       <span className="text-sm text-gray-500 font-medium">
