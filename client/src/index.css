@@ -282,3 +282,38 @@ html {
   transform: translate(2px, 2px);
   box-shadow: 1px 1px 0px 0px rgba(0, 0, 0, 0.9);
 }
+
+/* Subscription plan cards — respond to the container's real width, not the
+   viewport. The logged-in customer AppShell has a sidebar, so viewport
+   breakpoints misfire (3 columns show while each column is still too narrow).
+   Container queries fix this; fluid cqw-based price sizing keeps the big
+   prices from ever overflowing their card. */
+.plan-cards {
+  container-type: inline-size;
+}
+.plan-cards-grid {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  gap: 1.5rem;
+}
+@container (min-width: 880px) {
+  .plan-cards-grid {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+  }
+  .plan-card-popular {
+    transform: translateY(-0.5rem);
+  }
+}
+/* Each card is its own query container so the price scales to the card. */
+.plan-card {
+  container-type: inline-size;
+}
+.plan-price {
+  font-size: clamp(2.25rem, 17cqw, 3.75rem);
+  line-height: 1;
+  white-space: nowrap;
+}
+.plan-price-old {
+  font-size: clamp(1.05rem, 8cqw, 1.6rem);
+  white-space: nowrap;
+}

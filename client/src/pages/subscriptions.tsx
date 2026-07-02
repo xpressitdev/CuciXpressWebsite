@@ -429,7 +429,8 @@ export default function Subscriptions() {
                 )}
               </div>
             </div>
-            <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
+            <div className="plan-cards">
+             <div className="plan-cards-grid">
               {PLANS.map((plan, i) => {
                 const Icon = plan.icon;
 
@@ -454,7 +455,7 @@ export default function Subscriptions() {
                       whileInView={{ opacity: 1, y: 0 }}
                       transition={{ duration: 0.45, delay: i * 0.08 }}
                       viewport={{ once: true }}
-                      className="relative lg:-translate-y-2"
+                      className="relative plan-card-popular"
                       data-testid={`plan-card-${plan.id}`}
                     >
                       {/* ★ MOST PICKED badge — lives on the OUTER wrapper so
@@ -482,7 +483,7 @@ export default function Subscriptions() {
                       </div>
                       {/* Inner gradient card — clips the shimmer/gloss/twinkles. */}
                       <div
-                        className="relative overflow-hidden flex flex-col h-full p-6 sm:p-8"
+                        className="plan-card relative overflow-hidden flex flex-col h-full p-6 sm:p-8"
                         style={{
                           background:
                             "linear-gradient(135deg, #7C5CE7 0%, #B47CF7 45%, #FF9500 100%)",
@@ -548,7 +549,7 @@ export default function Subscriptions() {
                         <div className="flex items-baseline justify-center gap-2 mb-7">
                           {plan.oldPrice && (
                             <span
-                              className="text-xl sm:text-2xl"
+                              className="plan-price-old"
                               style={{
                                 fontWeight: 700,
                                 color: "rgba(255,255,255,0.6)",
@@ -561,7 +562,7 @@ export default function Subscriptions() {
                             </span>
                           )}
                           <span
-                            className="text-5xl sm:text-6xl"
+                            className="plan-price"
                             style={{
                               fontWeight: 900,
                               color: "#fff",
@@ -630,7 +631,7 @@ export default function Subscriptions() {
                     whileInView={{ opacity: 1, y: 0 }}
                     transition={{ duration: 0.45, delay: i * 0.08 }}
                     viewport={{ once: true }}
-                    className="relative cuci-card p-7 flex flex-col"
+                    className="relative cuci-card p-7 flex flex-col plan-card"
                     data-testid={`plan-card-${plan.id}`}
                   >
                     <div
@@ -645,13 +646,13 @@ export default function Subscriptions() {
                     <div className="flex items-baseline justify-center gap-1 mb-6">
                       {plan.oldPrice && (
                         <span
-                          className="text-2xl font-bold text-gray-400 line-through mr-1"
+                          className="plan-price-old font-bold text-gray-400 line-through mr-1"
                           data-testid={`text-oldprice-${plan.id}`}
                         >
                           {plan.oldPrice}
                         </span>
                       )}
-                      <span className="text-4xl sm:text-5xl font-black tracking-tight text-cuci-primary">
+                      <span className="plan-price font-black tracking-tight text-cuci-primary">
                         {plan.price}
                       </span>
                       <span className="text-sm text-gray-500 font-medium">
@@ -680,6 +681,7 @@ export default function Subscriptions() {
                   </motion.div>
                 );
               })}
+             </div>
             </div>
             <p className="text-center text-xs text-gray-500 mt-6 flex items-center justify-center gap-1.5">
               <ShieldCheck className="w-3.5 h-3.5" />
