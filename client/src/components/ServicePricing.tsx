@@ -53,18 +53,18 @@ const serviceOptions: ServiceOption[] = [
     ]
   },
   {
-    name: "Coming Soon",
+    name: "Founding Offer",
     price: "Subscriptions",
     duration: "Monthly plans",
     description: "Unlimited washes with monthly subscription",
     icon: <Shield className="w-6 h-6" />,
     features: [
       "Unlimited exterior washes",
+      "Founding price: BND 39/mo (was 45)",
+      "Locked in for life while subscribed",
       "Rain re-wash guarantee",
-      "All locations included",
-      "Family & corporate plans",
-      "Starting from BND 45/month",
-      "Sign up for early access!"
+      "All 5 branches included",
+      "Only 250 founding spots — claim now!"
     ]
   }
 ];
@@ -94,8 +94,8 @@ export default function ServicePricing() {
             const currency = hasNumericPrice ? priceParts.slice(0, -1).join(" ") : null;
             const ctaLabel = service.popular
               ? "Pick this one"
-              : service.name === "Coming Soon"
-              ? "Learn More"
+              : service.name === "Founding Offer"
+              ? "Claim now"
               : `Choose ${service.name}`;
 
             return (
@@ -199,12 +199,12 @@ export default function ServicePricing() {
                     className={`cuci-cta mt-auto w-full rounded-lg py-3 flex items-center justify-center gap-2 ${
                       service.popular
                         ? "bg-white text-cuci-primary"
-                        : service.name === "Coming Soon"
+                        : service.name === "Founding Offer"
                         ? "bg-cuci-secondary text-white"
                         : "bg-cuci-primary text-white"
                     }`}
                     onClick={() => {
-                      if (service.name === "Coming Soon") {
+                      if (service.name === "Founding Offer") {
                         window.location.href = "/subscriptions";
                       } else {
                         const serviceData = encodeURIComponent(JSON.stringify(service));
