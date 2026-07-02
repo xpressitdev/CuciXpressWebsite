@@ -4547,6 +4547,35 @@ export async function registerRoutes(app: Express): Promise<Server> {
           return { http: 409, body: { success: false, code: order.status, message: `Order is ${order.status}. Do not service this car.` } };
         }
 
+        // 2a. Membership expiry fail-safe. A membership check-in QR is a
+        //     B$0 voucher whose pre-created order stays 'paid' indefinitely,
+        //     so it can be screenshotted and re-presented after the plan
+        //     lapses. Before admitting a *fresh* membership wash, re-verify
+        //     the vehicle still has an active, unexpired Unlimited plan.
+        //     (Rescans of an already-queued ticket skip this — that wash was
+        //     admitted while the plan was valid, and the car is mid-service.)
+        if (order.qr_provider === 'membership' && order.status === 'paid' && !order.ticket_code) {
+          const memRows = (await tx.execute(sql`
+            SELECT 1
+              FROM memberships
+             WHERE vehicle_id = ${order.vehicle_id}
+               AND kind   = 'unlimited'
+               AND status = 'active'
+               AND (expires_at IS NULL OR expires_at > now())
+             LIMIT 1
+          `)).rows as any[];
+          if (memRows.length === 0) {
+            return {
+              http: 409,
+              body: {
+                success: false,
+                code: 'membership_expired',
+                message: 'Unlimited Xpress membership has expired or is no longer active. This QR is likely an old screenshot — do not service. Ask the customer to renew in the app.',
+              },
+            };
+          }
+        }
+
         // 2b. Branch-at-scan stamping (2026-05-06_01). Web orders and
         //     free-wash vouchers are created branchless. The first
         //     scan stamps the cashier's branch onto the order so it

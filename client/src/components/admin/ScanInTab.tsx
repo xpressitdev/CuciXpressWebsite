@@ -207,6 +207,11 @@ export default function ScanInTab({
       icon: <Ban className="w-12 h-12 text-rose-600" />,
       title: "Order was refunded",
     },
+    membership_expired: {
+      color: "rose",
+      icon: <Ban className="w-12 h-12 text-rose-600" />,
+      title: "Membership expired",
+    },
     order_not_found: {
       color: "slate",
       icon: <Search className="w-12 h-12 text-slate-500" />,
