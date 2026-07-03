@@ -103,6 +103,9 @@ interface SubscriptionsResponse {
 interface SubscriptionRevenueRow {
   id: string;
   customer_name: string | null;
+  plate: string | null;
+  car_brand: string | null;
+  car_model: string | null;
   plan_label: string;
   status: string;
   created_at: string;
@@ -784,6 +787,7 @@ export default function Admin() {
                           <thead>
                             <tr className="text-left text-gray-500 border-b">
                               <th className="p-3 font-medium">Customer</th>
+                              <th className="p-3 font-medium">Plate</th>
                               <th className="p-3 font-medium">Plan</th>
                               <th className="p-3 font-medium">Sold</th>
                               <th className="p-3 font-medium text-center">Day</th>
@@ -796,7 +800,15 @@ export default function Admin() {
                           <tbody>
                             {subRevenue.subscriptions.map((s) => (
                               <tr key={s.id} className="border-b last:border-0 hover:bg-gray-50">
-                                <td className="p-3 text-gray-900">{s.customer_name || "Walk-in"}</td>
+                                <td className="p-3 text-gray-900">
+                                  {s.customer_name || "Walk-in"}
+                                  {(s.car_brand || s.car_model) && (
+                                    <div className="text-xs text-gray-500">
+                                      {[s.car_brand, s.car_model].filter(Boolean).join(" ")}
+                                    </div>
+                                  )}
+                                </td>
+                                <td className="p-3 font-mono text-gray-700">{s.plate || "—"}</td>
                                 <td className="p-3 text-gray-700">
                                   {s.plan_label}
                                   {s.status !== "active" && (

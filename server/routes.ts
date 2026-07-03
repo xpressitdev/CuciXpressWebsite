@@ -636,15 +636,20 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
       const rows = (await db.execute(sql`
         SELECT m.id, m.price_cents, m.status, m.created_at, m.expires_at,
-               c.name AS customer_name
+               c.name AS customer_name,
+               car.license_plate AS plate,
+               car.brand AS car_brand,
+               car.model AS car_model
           FROM memberships m
           LEFT JOIN customers c ON c.id = m.customer_id
+          LEFT JOIN cars      car ON car.id = m.vehicle_id
          WHERE m.kind = 'unlimited'
          ORDER BY m.created_at DESC
       `)).rows as Array<{
         id: string; price_cents: number; status: string;
         created_at: string | Date; expires_at: string | Date | null;
         customer_name: string | null;
+        plate: string | null; car_brand: string | null; car_model: string | null;
       }>;
 
       // recognized(net, daysElapsed) = round(net * clamp(daysElapsed,0,30) / 30)
@@ -668,6 +673,9 @@ export async function registerRoutes(app: Express): Promise<Server> {
         return {
           id: r.id,
           customer_name: r.customer_name,
+          plate: r.plate ?? null,
+          car_brand: r.car_brand ?? null,
+          car_model: r.car_model ?? null,
           plan_label: planLabel(gross),
           status: r.status,
           created_at: r.created_at,
