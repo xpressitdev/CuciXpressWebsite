@@ -129,6 +129,7 @@ const SEGMENT_OPTIONS = [
   { value: "multi_branch", label: "Multi-branch",      icon: Building2,    hint: "Visited 2+ branches" },
   { value: "new",          label: "New (14 days)",     icon: Sparkles,     hint: "Joined in last 14 days" },
   { value: "legacy",       label: "Legacy customers",  icon: History,      hint: "Has imported historical visits" },
+  { value: "registered",   label: "Registered",        icon: UserPlus,     hint: "Signed up with an account" },
   { value: "no_account",   label: "Not signed up",     icon: Users,        hint: "Walk-in / legacy plate, no account yet" },
 ] as const;
 
@@ -1428,9 +1429,18 @@ function CustomerStatsHeader({
       testId: "tile-cust-legacy",
     },
     {
+      label: "Registered",
+      value: stats.has_account_count.toLocaleString(),
+      sub: "Signed up with account",
+      icon: UserPlus,
+      seg: "registered",
+      accent: "border-cuci-primary bg-cuci-primary/5",
+      testId: "tile-cust-registered",
+    },
+    {
       label: "Not signed up",
       value: (stats.total_customers - stats.has_account_count).toLocaleString(),
-      sub: `${stats.has_account_count} signed in`,
+      sub: "Walk-in / legacy plate",
       icon: Users,
       seg: "no_account",
       accent: "border-gray-400 bg-gray-50",

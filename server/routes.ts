@@ -1759,7 +1759,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
   // ---- Phase 12b-3: customer segment filters --------------------------------
   // Composable AND-fragments evaluated against alias `c` (customers).
   // Returned as Drizzle SQL fragments so they slot into list + CSV queries.
-  const SEGMENTS = ['vip', 'gold', 'silver', 'bronze', 'at_risk', 'online', 'multi_branch', 'new', 'legacy', 'no_account'] as const;
+  const SEGMENTS = ['vip', 'gold', 'silver', 'bronze', 'at_risk', 'online', 'multi_branch', 'new', 'legacy', 'no_account', 'registered'] as const;
   type Segment = (typeof SEGMENTS)[number];
 
   // All filtering happens against the unified `person` CTE (alias `p`),
@@ -1775,6 +1775,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
     if (seg === 'multi_branch') return sql`AND p.branches_visited >= 2`;
     if (seg === 'new')          return sql`AND p.created_at > NOW() - INTERVAL '14 days'`;
     if (seg === 'no_account')   return sql`AND p.has_account = FALSE`;
+    if (seg === 'registered')   return sql`AND p.has_account = TRUE`;
     if (seg === 'at_risk')
       return sql`AND p.visits >= 2 AND p.last_visit_at < NOW() - INTERVAL '30 days'`;
     return sql``;
