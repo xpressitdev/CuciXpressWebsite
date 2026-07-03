@@ -249,7 +249,6 @@ export default function CustomersTab() {
 
   return (
     <div className="space-y-6">
-      <LiabilitiesPanel />
       {stats && <CustomerStatsHeader stats={stats} onSegment={(s) => { setSegment(s); setPage(1); }} /> }
       <div className="grid lg:grid-cols-3 gap-6">
       {/* Left: list */}
@@ -586,7 +585,7 @@ interface LiabilityResp {
   grand_liability_cents: number;
 }
 
-function LiabilitiesPanel() {
+export function LiabilitiesPanel() {
   const { data, isLoading } = useQuery<LiabilityResp>({
     queryKey: ["/api/admin/liabilities"],
     queryFn: async () => {

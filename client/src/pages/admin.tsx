@@ -68,7 +68,7 @@ import { apiRequest } from "@/lib/queryClient";
 import { normalizeWaPhone } from "@/lib/receipt";
 import { useStaffAuth } from "@/hooks/useStaffAuth";
 import type { CollaborationSubmission, SubscriptionSignup } from "@shared/schema";
-import CustomersTab from "@/components/admin/CustomersTab";
+import CustomersTab, { LiabilitiesPanel } from "@/components/admin/CustomersTab";
 import { PendingPaymentsPanel } from "@/components/admin/PendingPaymentsPanel";
 import BranchesTab from "@/components/admin/BranchesTab";
 import DiscountsTab from "@/components/admin/DiscountsTab";
@@ -674,6 +674,7 @@ export default function Admin() {
             {isManagerOrOwner && (
             <TabsContent value="subscriptions" className="mt-6">
               <div className="space-y-10">
+              <LiabilitiesPanel />
               {/* ---- Subscription revenue (recognized daily over 30 days) ---- */}
               <div>
                 <div className="flex flex-wrap items-end justify-between gap-2 mb-1">
