@@ -90,6 +90,10 @@ export default function PaymentCheckout({ selectedService, onBack }: PaymentChec
   const [otpName, setOtpName] = useState('');
   const [otpCode, setOtpCode] = useState('');
   const [otpBusy, setOtpBusy] = useState(false);
+  // Set true when the server tells us this is a brand-new customer who must
+  // supply a name before their account can be created. Returning customers
+  // never trigger this, so their name field stays optional.
+  const [nameRequired, setNameRequired] = useState(false);
   const [formData, setFormData] = useState({
     carPlate: "",
     phone: "",
@@ -162,6 +166,19 @@ export default function PaymentCheckout({ selectedService, onBack }: PaymentChec
       });
       const data = await res.json();
       if (!res.ok || !data.ok) {
+        if (data.reason === 'name_required') {
+          // Brand-new customer left the name blank. The code they just used is
+          // now spent, so send them back to enter a name and request a fresh
+          // code — but only new customers ever see this.
+          setNameRequired(true);
+          setOtpStep('phone');
+          setOtpCode('');
+          toast({
+            title: 'One more thing',
+            description: 'Please enter your name, then request a new code to finish signing up.',
+          });
+          return;
+        }
         toast({
           title: 'Could not sign in',
           description: OTP_REASON_TEXT[data.reason] ?? 'Please try again.',
@@ -175,6 +192,7 @@ export default function PaymentCheckout({ selectedService, onBack }: PaymentChec
       setShowAuth(false);
       setOtpStep('phone');
       setOtpCode('');
+      setNameRequired(false);
       toast({ title: 'Welcome!', description: "You're signed in." });
     } finally {
       setOtpBusy(false);
@@ -408,7 +426,15 @@ export default function PaymentCheckout({ selectedService, onBack }: PaymentChec
                           <Button
                             variant="outline"
                             size="sm"
-                            onClick={() => setShowAuth(true)}
+                            onClick={() => {
+                              // Start each sign-in attempt fresh so a prior
+                              // "name required" prompt never sticks for the
+                              // next (possibly returning) customer.
+                              setNameRequired(false);
+                              setOtpStep('phone');
+                              setOtpCode('');
+                              setShowAuth(true);
+                            }}
                             className="bg-white hover:bg-amber-50"
                             data-testid="button-open-signin"
                           >
@@ -618,7 +644,12 @@ export default function PaymentCheckout({ selectedService, onBack }: PaymentChec
                       </div>
                       <div className="space-y-1">
                         <Label htmlFor="otp-name">
-                          Name <span className="text-gray-400 font-normal text-xs">(optional, first time only)</span>
+                          Name{' '}
+                          {nameRequired ? (
+                            <span className="text-red-500 font-normal text-xs">(required)</span>
+                          ) : (
+                            <span className="text-gray-400 font-normal text-xs">(optional, first time only)</span>
+                          )}
                         </Label>
                         <Input
                           id="otp-name"
@@ -627,6 +658,11 @@ export default function PaymentCheckout({ selectedService, onBack }: PaymentChec
                           placeholder="Your name"
                           data-testid="input-checkout-name"
                         />
+                        {nameRequired && (
+                          <p className="text-[11px] text-red-500">
+                            We need your name to create your account.
+                          </p>
+                        )}
                       </div>
                       <div className="flex gap-2 pt-1">
                         <Button type="button" variant="outline" onClick={() => setShowAuth(false)} className="flex-1">
@@ -635,7 +671,7 @@ export default function PaymentCheckout({ selectedService, onBack }: PaymentChec
                         <Button
                           type="button"
                           onClick={sendOtp}
-                          disabled={otpBusy || !otpPhone.trim()}
+                          disabled={otpBusy || !otpPhone.trim() || (nameRequired && !otpName.trim())}
                           className="flex-1 bg-cuci-primary hover:bg-cuci-primary/90 text-white"
                           data-testid="button-checkout-send-code"
                         >

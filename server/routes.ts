@@ -5484,7 +5484,20 @@ export async function registerRoutes(app: Express): Promise<Server> {
         if (userByPhone) {
           userId = userByPhone.id;
         } else {
-          // 3) Brand-new sign-up. Synthesise the legacy required fields.
+          // 3) Brand-new sign-up. Require a real name so new customers don't
+          // land as the "Customer <last4>" placeholder. We only reach this
+          // branch for genuinely new phone numbers (no linked user), so
+          // returning customers are never asked. Enforced here — after OTP
+          // verification — so it can't be used to enumerate which phones
+          // already have an account.
+          const isPlaceholderName = (n: string) =>
+            n.length === 0 || /^customer\s*\d{2,4}$/i.test(n);
+          const providedName = (parsed.data.name ?? '').trim();
+          const existingName = (cust?.name ?? '').trim();
+          if (providedName.length === 0 && isPlaceholderName(existingName)) {
+            return res.status(400).json({ ok: false, reason: 'name_required' });
+          }
+          // Synthesise the legacy required fields.
           const fakeEmail = `phone-${phone}@cucixpress.local`;
           const fakePass = crypto.randomUUID() + crypto.randomUUID();
           const rawName = (parsed.data.name ?? cust?.name ?? `Customer ${phone.slice(-4)}`).trim();
