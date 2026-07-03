@@ -12,4 +12,4 @@ A background sweep auto-voids `orders` in `status='pending_payment'` AND `qr_pro
 **How to apply:**
 - If a customer reports a stuck pending web payment vanished, that's the 72h sweep, not a bug.
 - Keep the `qr_provider='pocket_pay'` guard on both the sweep and the pending-payments list endpoint — if a future flow ever creates `pending_payment` with a different provider, it must NOT be swept without re-checking callback safety for that provider.
-- The manual "pending web payments" reconciliation panel is a shared component rendered at the top of the admin **Dashboard** tab, gated to owner/manager (its endpoints require that role; the Dashboard tab itself is shown to all staff). It returns null when empty, so it only appears when there's something to act on.
+- The manual "pending web payments" reconciliation panel is a shared component rendered at the bottom of the admin **Dashboard** tab (after the "Accounts & Logins" card), gated to owner/manager (its endpoints require that role; the Dashboard tab itself is shown to all staff). It returns null when empty, so it only appears when there's something to act on.

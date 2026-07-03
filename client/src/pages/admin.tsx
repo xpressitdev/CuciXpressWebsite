@@ -441,7 +441,6 @@ export default function Admin() {
             </TabsList>
 
             <TabsContent value="dashboard" className="mt-6 space-y-6">
-              {isManagerOrOwner && <PendingPaymentsPanel />}
               <DashboardTab />
             </TabsContent>
 
@@ -1162,6 +1161,8 @@ function DashboardTab() {
       </Card>
 
       {canSeeAccounts && <AccountsLoginsCard />}
+
+      {canSeeAccounts && <PendingPaymentsPanel />}
     </div>
   );
 }
