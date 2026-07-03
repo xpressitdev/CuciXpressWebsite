@@ -66,6 +66,7 @@ interface CustomerRow {
   branches_visited: number;
   has_legacy: boolean;
   is_online: boolean;
+  plates: string | null;
 }
 
 interface CustomerStats {
@@ -436,6 +437,12 @@ export default function CustomersTab() {
                               </span>
                             )}
                           </div>
+                          {c.kind === "customer" && c.plates && (
+                            <div className="text-[11px] text-gray-600 flex items-center gap-1 mt-0.5" title="Vehicle plate(s)">
+                              <CarIcon className="w-3 h-3 text-gray-400" />
+                              <span className="font-mono font-semibold">{c.plates}</span>
+                            </div>
+                          )}
                         </TableCell>
                         <TableCell>
                           {c.vip_tier ? <VipBadge tier={c.vip_tier} /> : <span className="text-[11px] text-gray-400">—</span>}

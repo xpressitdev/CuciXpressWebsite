@@ -1962,7 +1962,8 @@ export async function registerRoutes(app: Express): Promise<Server> {
                p.favourite_branch,
                p.branches_visited,
                p.has_legacy,
-               p.is_online
+               p.is_online,
+               p.plates
           FROM person p
          WHERE 1=1 ${searchFilter} ${branchFilter} ${segmentFilter}
          ORDER BY ${orderBy}
