@@ -1,5 +1,5 @@
-import { useState } from "react";
-import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
+import { useState, useEffect } from "react";
+import { useQuery, useMutation, useQueryClient, keepPreviousData } from "@tanstack/react-query";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -19,6 +19,7 @@ import {
   Pencil, Save, X, MapPin, Globe, Clock, AlertTriangle, CheckCircle2, Mail,
   Download, Crown, AlertCircle, Building2, Sparkles, Users, History,
   TrendingUp, Award, Medal, UserPlus, Trash2, ArrowUp, ArrowDown, ArrowUpDown,
+  Loader2,
 } from "lucide-react";
 import { apiRequest } from "@/lib/queryClient";
 import { useToast } from "@/hooks/use-toast";
@@ -166,9 +167,22 @@ export default function CustomersTab() {
   const queryClient = useQueryClient();
   const { toast } = useToast();
   const [search, setSearch] = useState("");
+  // Debounced copy of `search` — this is what actually drives the query so we
+  // don't fire a network request on every keystroke. Typing feels instant
+  // (the input is controlled by `search`), but the list only refetches ~300ms
+  // after the user stops typing.
+  const [debouncedSearch, setDebouncedSearch] = useState("");
   const [branch, setBranch] = useState("all");
   const [segment, setSegment] = useState("all");
   const [page, setPage] = useState(1);
+
+  useEffect(() => {
+    const t = setTimeout(() => {
+      setDebouncedSearch(search);
+      setPage(1);
+    }, 300);
+    return () => clearTimeout(t);
+  }, [search]);
   const [selectedId, setSelectedId] = useState<number | null>(null);
   const [sortKey, setSortKey] = useState<string>("last_visit_at");
   const [sortDir, setSortDir] = useState<"asc" | "desc">("desc");
@@ -223,7 +237,7 @@ export default function CustomersTab() {
   });
 
   const qs = new URLSearchParams();
-  if (search.trim().length >= 2) qs.set("search", search.trim());
+  if (debouncedSearch.trim().length >= 2) qs.set("search", debouncedSearch.trim());
   if (branch !== "all") qs.set("branch_id", branch);
   if (segment !== "all") qs.set("segment", segment);
   qs.set("page", String(page));
@@ -231,13 +245,16 @@ export default function CustomersTab() {
   qs.set("sort", sortKey);
   qs.set("dir", sortDir);
 
-  const { data, isLoading, error } = useQuery<CustomerListResp>({
-    queryKey: ["/api/admin/customers", search, branch, segment, page, sortKey, sortDir],
+  const { data, isLoading, isFetching, error } = useQuery<CustomerListResp>({
+    queryKey: ["/api/admin/customers", debouncedSearch, branch, segment, page, sortKey, sortDir],
     queryFn: async () => {
       const res = await fetch(`/api/admin/customers?${qs.toString()}`, { credentials: "include" });
       if (!res.ok) throw new Error("list_failed");
       return res.json();
     },
+    // Keep the previous page/filter's rows on screen while the next result
+    // loads, so paging and filtering don't flash an empty "Loading…" state.
+    placeholderData: keepPreviousData,
   });
 
   // Aggregate header stats (independent of filters — show overall CRM health).
@@ -252,7 +269,7 @@ export default function CustomersTab() {
   });
 
   const exportQs = new URLSearchParams();
-  if (search.trim().length >= 2) exportQs.set("search", search.trim());
+  if (debouncedSearch.trim().length >= 2) exportQs.set("search", debouncedSearch.trim());
   if (branch !== "all") exportQs.set("branch_id", branch);
   if (segment !== "all") exportQs.set("segment", segment);
   const exportHref = `/api/admin/customers/export.csv${exportQs.toString() ? `?${exportQs}` : ""}`;
@@ -300,7 +317,7 @@ export default function CustomersTab() {
                     placeholder="Name, phone, or plate (≥ 2 chars)"
                     className="pl-9"
                     value={search}
-                    onChange={(e) => { setSearch(e.target.value); setPage(1); }}
+                    onChange={(e) => setSearch(e.target.value)}
                     data-testid="input-customer-search"
                   />
                 </div>
@@ -339,11 +356,18 @@ export default function CustomersTab() {
             </div>
 
             <div className="flex items-center justify-between flex-wrap gap-2">
-              <div className="text-xs text-gray-600">
-                {segmentMeta && segmentMeta.value !== "all" && (
-                  <span className="italic">{segmentMeta.hint} · </span>
+              <div className="text-xs text-gray-600 flex items-center gap-2">
+                <span>
+                  {segmentMeta && segmentMeta.value !== "all" && (
+                    <span className="italic">{segmentMeta.hint} · </span>
+                  )}
+                  <span className="font-semibold tabular-nums">{data?.total_count ?? 0}</span> match{(data?.total_count ?? 0) === 1 ? "" : "es"}
+                </span>
+                {isFetching && !isLoading && (
+                  <span className="inline-flex items-center gap-1 text-cuci-primary" data-testid="text-customers-updating">
+                    <Loader2 className="w-3 h-3 animate-spin" /> Updating…
+                  </span>
                 )}
-                <span className="font-semibold tabular-nums">{data?.total_count ?? 0}</span> match{(data?.total_count ?? 0) === 1 ? "" : "es"}
               </div>
               <a href={exportHref} download data-testid="link-export-csv">
                 <Button size="sm" variant="outline" className="border-2 border-black gap-1.5">
@@ -355,13 +379,28 @@ export default function CustomersTab() {
             {error && <p className="text-sm text-red-600">Failed to load customers.</p>}
 
             {isLoading ? (
-              <p className="text-sm text-gray-500">Loading…</p>
+              <div className="border-2 border-black rounded-md overflow-hidden" data-testid="customers-skeleton">
+                {Array.from({ length: 8 }).map((_, i) => (
+                  <div
+                    key={i}
+                    className="flex items-center gap-3 px-4 py-3 border-b border-gray-200 last:border-b-0"
+                  >
+                    <div className="flex-1 space-y-1.5">
+                      <div className="h-3 w-1/3 rounded bg-gray-100 animate-pulse" />
+                      <div className="h-2.5 w-1/4 rounded bg-gray-100 animate-pulse" />
+                    </div>
+                    <div className="h-4 w-14 rounded-full bg-gray-100 animate-pulse" />
+                    <div className="h-3 w-10 rounded bg-gray-100 animate-pulse" />
+                    <div className="h-3 w-16 rounded bg-gray-100 animate-pulse" />
+                  </div>
+                ))}
+              </div>
             ) : rows.length === 0 ? (
               <p className="text-sm text-gray-500 italic py-6 text-center">
                 No customers match these filters.
               </p>
             ) : (
-              <div className="border-2 border-black rounded-md overflow-x-auto">
+              <div className={`border-2 border-black rounded-md overflow-x-auto transition-opacity ${isFetching ? "opacity-60" : ""}`}>
                 <Table>
                   <TableHeader>
                     <TableRow>
