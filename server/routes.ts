@@ -1916,6 +1916,28 @@ export async function registerRoutes(app: Express): Promise<Server> {
     const perPage = Math.min(100, Math.max(10, Number(req.query.per_page ?? 25) || 25));
     const offset = (page - 1) * perPage;
 
+    // Sorting — whitelist of sortable columns (keys must match the client).
+    const SORT_COLUMNS: Record<string, string> = {
+      name: 'p.name',
+      has_account: 'p.has_account',
+      favourite_branch: 'p.favourite_branch',
+      vehicle_count: 'p.vehicle_count',
+      visits: 'p.visits',
+      total_spent_cents: 'p.total_spent_cents',
+      last_visit_at: 'p.last_visit_at',
+    };
+    const sortKey = String(req.query.sort ?? '');
+    const dir = String(req.query.dir ?? 'desc').toLowerCase() === 'asc' ? 'ASC' : 'DESC';
+    let orderExpr: string;
+    if (sortKey === 'vip_tier') {
+      orderExpr = `(CASE p.vip_tier WHEN 'gold' THEN 3 WHEN 'silver' THEN 2 WHEN 'bronze' THEN 1 ELSE 0 END) ${dir}, p.total_spent_cents DESC`;
+    } else if (SORT_COLUMNS[sortKey]) {
+      orderExpr = `${SORT_COLUMNS[sortKey]} ${dir} NULLS LAST`;
+    } else {
+      orderExpr = 'p.last_visit_at DESC NULLS LAST, p.created_at DESC';
+    }
+    const orderBy = sql.raw(`${orderExpr}, p.ref_id`);
+
     try {
       const countRow = (await db.execute(sql`
         ${personCte()}
@@ -1943,7 +1965,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
                p.is_online
           FROM person p
          WHERE 1=1 ${searchFilter} ${branchFilter} ${segmentFilter}
-         ORDER BY p.last_visit_at DESC NULLS LAST, p.created_at DESC
+         ORDER BY ${orderBy}
          LIMIT ${perPage} OFFSET ${offset}
       `)).rows.map((r: any) => ({
         ...r,

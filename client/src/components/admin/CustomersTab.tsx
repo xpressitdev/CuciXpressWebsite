@@ -18,7 +18,7 @@ import {
   Search, Phone, Car as CarIcon, Receipt, ChevronLeft, ChevronRight,
   Pencil, Save, X, MapPin, Globe, Clock, AlertTriangle, CheckCircle2, Mail,
   Download, Crown, AlertCircle, Building2, Sparkles, Users, History,
-  TrendingUp, Award, Medal, UserPlus, Trash2,
+  TrendingUp, Award, Medal, UserPlus, Trash2, ArrowUp, ArrowDown, ArrowUpDown,
 } from "lucide-react";
 import { apiRequest } from "@/lib/queryClient";
 import { useToast } from "@/hooks/use-toast";
@@ -169,6 +169,19 @@ export default function CustomersTab() {
   const [segment, setSegment] = useState("all");
   const [page, setPage] = useState(1);
   const [selectedId, setSelectedId] = useState<number | null>(null);
+  const [sortKey, setSortKey] = useState<string>("last_visit_at");
+  const [sortDir, setSortDir] = useState<"asc" | "desc">("desc");
+
+  const toggleSort = (col: string) => {
+    if (sortKey === col) {
+      setSortDir((d) => (d === "asc" ? "desc" : "asc"));
+    } else {
+      setSortKey(col);
+      // Text columns read best ascending; numbers/dates read best descending.
+      setSortDir(col === "name" || col === "favourite_branch" ? "asc" : "desc");
+    }
+    setPage(1);
+  };
 
   // POS Control Room: walk-in customer create.
   const [newOpen, setNewOpen] = useState(false);
@@ -214,9 +227,11 @@ export default function CustomersTab() {
   if (segment !== "all") qs.set("segment", segment);
   qs.set("page", String(page));
   qs.set("per_page", "25");
+  qs.set("sort", sortKey);
+  qs.set("dir", sortDir);
 
   const { data, isLoading, error } = useQuery<CustomerListResp>({
-    queryKey: ["/api/admin/customers", search, branch, segment, page],
+    queryKey: ["/api/admin/customers", search, branch, segment, page, sortKey, sortDir],
     queryFn: async () => {
       const res = await fetch(`/api/admin/customers?${qs.toString()}`, { credentials: "include" });
       if (!res.ok) throw new Error("list_failed");
@@ -349,14 +364,40 @@ export default function CustomersTab() {
                 <Table>
                   <TableHeader>
                     <TableRow>
-                      <TableHead>Customer</TableHead>
-                      <TableHead>Tier</TableHead>
-                      <TableHead>Account</TableHead>
-                      <TableHead>Favourite branch</TableHead>
-                      <TableHead className="text-center">Vehicles</TableHead>
-                      <TableHead className="text-center">Visits</TableHead>
-                      <TableHead className="text-right">Lifetime spend</TableHead>
-                      <TableHead>Last visit</TableHead>
+                      {([
+                        { key: "name",              label: "Customer",        align: "left" },
+                        { key: "vip_tier",          label: "Tier",            align: "left" },
+                        { key: "has_account",       label: "Account",         align: "left" },
+                        { key: "favourite_branch",  label: "Favourite branch", align: "left" },
+                        { key: "vehicle_count",     label: "Vehicles",        align: "center" },
+                        { key: "visits",            label: "Visits",          align: "center" },
+                        { key: "total_spent_cents", label: "Lifetime spend",  align: "right" },
+                        { key: "last_visit_at",     label: "Last visit",      align: "left" },
+                      ] as const).map((h) => {
+                        const active = sortKey === h.key;
+                        const justify = h.align === "center" ? "justify-center" : h.align === "right" ? "justify-end" : "justify-start";
+                        return (
+                          <TableHead
+                            key={h.key}
+                            className={h.align === "center" ? "text-center" : h.align === "right" ? "text-right" : ""}
+                          >
+                            <button
+                              type="button"
+                              onClick={() => toggleSort(h.key)}
+                              className={`inline-flex items-center gap-1 w-full ${justify} font-semibold hover:text-cuci-primary transition-colors ${active ? "text-cuci-primary" : ""}`}
+                              data-testid={`sort-${h.key}`}
+                              title={`Sort by ${h.label}`}
+                            >
+                              {h.label}
+                              {active ? (
+                                sortDir === "asc" ? <ArrowUp className="w-3 h-3" /> : <ArrowDown className="w-3 h-3" />
+                              ) : (
+                                <ArrowUpDown className="w-3 h-3 opacity-30" />
+                              )}
+                            </button>
+                          </TableHead>
+                        );
+                      })}
                     </TableRow>
                   </TableHeader>
                   <TableBody>
