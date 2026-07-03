@@ -249,7 +249,6 @@ export default function CustomersTab() {
 
   return (
     <div className="space-y-6">
-      <PendingPaymentsPanel />
       <LiabilitiesPanel />
       {stats && <CustomerStatsHeader stats={stats} onSegment={(s) => { setSegment(s); setPage(1); }} /> }
       <div className="grid lg:grid-cols-3 gap-6">
@@ -547,21 +546,6 @@ export default function CustomersTab() {
   );
 }
 
-interface PendingOrder {
-  id: string;
-  plate: string;
-  created_at: string;
-  total_cents: number;
-  package_name: string;
-  payment_ref: string | null;
-  qr_provider: string | null;
-  age_seconds: number;
-  branch_name: string | null;
-  customer_id: number | null;
-  customer_name: string | null;
-  customer_phone: string | null;
-}
-
 function formatAge(seconds: number): string {
   if (seconds < 60) return `${seconds}s`;
   const m = Math.floor(seconds / 60);
@@ -570,157 +554,6 @@ function formatAge(seconds: number): string {
   if (h < 24) return `${h}h ${m % 60}m`;
   const d = Math.floor(h / 24);
   return `${d}d ${h % 24}h`;
-}
-
-function PendingPaymentsPanel() {
-  const queryClient = useQueryClient();
-  const { toast } = useToast();
-  const [confirmingId, setConfirmingId] = useState<string | null>(null);
-
-  const { data, isLoading } = useQuery<{ rows: PendingOrder[]; count: number }>({
-    queryKey: ["/api/admin/orders/pending-payments"],
-    queryFn: async () => {
-      const res = await fetch("/api/admin/orders/pending-payments", { credentials: "include" });
-      if (!res.ok) throw new Error("failed");
-      return res.json();
-    },
-    refetchInterval: 30_000,
-  });
-
-  const voidOrder = useMutation({
-    mutationFn: async (id: string) => apiRequest("POST", `/api/admin/orders/${id}/void-pending`, {}),
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ["/api/admin/orders/pending-payments"] });
-      queryClient.invalidateQueries({ queryKey: ["/api/admin/customers"] });
-      toast({ title: "Voided", description: "Pending payment marked as voided." });
-      setConfirmingId(null);
-    },
-    onError: () => toast({ title: "Failed to void", variant: "destructive" }),
-  });
-
-  const rows = data?.rows ?? [];
-  const count = data?.count ?? 0;
-
-  if (isLoading) {
-    return (
-      <Card className="cuci-card border-2 border-black">
-        <CardContent className="py-3 text-sm text-gray-500">Loading pending payments…</CardContent>
-      </Card>
-    );
-  }
-
-  if (count === 0) {
-    return (
-      <Card className="cuci-card border-2 border-green-600 bg-green-50">
-        <CardContent className="py-3 text-sm text-green-800 flex items-center gap-2">
-          <CheckCircle2 className="w-4 h-4" />
-          <span className="font-semibold">All clear.</span>
-          <span>No web checkouts awaiting Pocket Pay confirmation.</span>
-        </CardContent>
-      </Card>
-    );
-  }
-
-  return (
-    <Card className="cuci-card border-2 border-amber-500 bg-amber-50">
-      <CardHeader className="pb-3">
-        <div className="cuci-eyebrow text-amber-800">Operations · reconciliation</div>
-        <CardTitle className="text-xl font-extrabold tracking-tight flex items-center gap-2 text-amber-900">
-          <AlertTriangle className="w-5 h-5" />
-          {count} pending web payment{count !== 1 ? "s" : ""}
-        </CardTitle>
-        <p className="text-xs text-amber-800">
-          These customers started a Pocket Pay checkout but their payment hasn't confirmed yet.
-          A confirmation can still arrive — only void if the customer told you they cancelled,
-          or the order is over 24 hours old.
-        </p>
-      </CardHeader>
-      <CardContent>
-        <div className="border-2 border-black rounded-md overflow-x-auto bg-white">
-          <Table>
-            <TableHeader>
-              <TableRow>
-                <TableHead>Started</TableHead>
-                <TableHead>Customer</TableHead>
-                <TableHead>Plate</TableHead>
-                <TableHead>Package</TableHead>
-                <TableHead>Branch</TableHead>
-                <TableHead className="text-right">Amount</TableHead>
-                <TableHead className="text-right">Action</TableHead>
-              </TableRow>
-            </TableHeader>
-            <TableBody>
-              {rows.map((o) => {
-                const isStale = o.age_seconds > 86400;
-                return (
-                  <TableRow key={o.id} data-testid={`pending-order-${o.id}`}>
-                    <TableCell className="text-xs">
-                      <div className={`font-semibold ${isStale ? "text-red-700" : "text-amber-800"}`}>
-                        {formatAge(o.age_seconds)} ago
-                      </div>
-                      <div className="text-gray-500">{formatDateTime(o.created_at)}</div>
-                    </TableCell>
-                    <TableCell className="text-xs">
-                      {o.customer_name ? (
-                        <>
-                          <div className="font-semibold">{o.customer_name}</div>
-                          <div className="text-gray-500 flex items-center gap-1">
-                            <Phone className="w-3 h-3" /> {o.customer_phone}
-                          </div>
-                        </>
-                      ) : (
-                        <span className="italic text-gray-400">unknown</span>
-                      )}
-                    </TableCell>
-                    <TableCell className="text-xs font-mono font-bold">{o.plate}</TableCell>
-                    <TableCell className="text-xs">{o.package_name}</TableCell>
-                    <TableCell className="text-xs">{o.branch_name ?? "—"}</TableCell>
-                    <TableCell className="text-right tabular-nums font-semibold text-xs">
-                      {formatBND(o.total_cents)}
-                    </TableCell>
-                    <TableCell className="text-right">
-                      {confirmingId === o.id ? (
-                        <div className="flex gap-1 justify-end">
-                          <Button
-                            size="sm"
-                            variant="destructive"
-                            className="h-7 text-[11px]"
-                            disabled={voidOrder.isPending}
-                            onClick={() => voidOrder.mutate(o.id)}
-                            data-testid={`button-confirm-void-${o.id}`}
-                          >
-                            Confirm void
-                          </Button>
-                          <Button
-                            size="sm"
-                            variant="outline"
-                            className="h-7 text-[11px] border-2 border-black"
-                            onClick={() => setConfirmingId(null)}
-                          >
-                            Cancel
-                          </Button>
-                        </div>
-                      ) : (
-                        <Button
-                          size="sm"
-                          variant="outline"
-                          className="h-7 text-[11px] border-2 border-black"
-                          onClick={() => setConfirmingId(o.id)}
-                          data-testid={`button-void-${o.id}`}
-                        >
-                          Void
-                        </Button>
-                      )}
-                    </TableCell>
-                  </TableRow>
-                );
-              })}
-            </TableBody>
-          </Table>
-        </div>
-      </CardContent>
-    </Card>
-  );
 }
 
 interface LiabilityResp {

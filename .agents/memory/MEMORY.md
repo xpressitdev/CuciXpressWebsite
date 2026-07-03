@@ -32,6 +32,7 @@
 - [Subscription car binding](subscription-car-binding.md) — unlimited memberships MUST set vehicle_id (redemption rejects null); Family = 1 membership/car but full price on primary only, B$0 on extras.
 - [Pocket Pay callback authenticity](pocket-pay-callback-auth.md) — callback has no hash; auth by matching stored per-order successIndicator. NEVER return it to the client or paid callbacks can be forged.
 - [Pocket Pay deeplink callback](pocket-pay-deeplink-callback.md) — in-app/deeplink callback has Message:null; confirm payment by the authenticated successIndicator, not message text, or real paid orders get voided.
+- [Pending payment auto-void](pending-payment-autovoid.md) — abandoned web Pocket Pay pending orders auto-void at 72h (safe: callback only finalizes pending); reconciliation panel lives on Dashboard, owner/manager-gated.
 - [Prepaid web-wash QR lifecycle](prepaid-wash-qr.md) — online walk-in wash QR is single-use enforced ONLY in verify-qr (paid+no-ticket); dashboard/success page just mirror ready/claimed. payment_ref is customer-visible, successIndicator is not.
 - [Subscription launch gate](subscription-launch-gate.md) — Subscribe→lead-capture (not payment) is the LAUNCH_TS countdown working as designed; prod cutover = move LAUNCH_TS + CyberSource prod keys/env + republish.
 - [AppShell breaks viewport breakpoints](appshell-container-queries.md) — content shown both standalone AND in the sidebar'd AppShell must use container queries + clamp(cqw), not md:/lg:, or grids crowd & prices overflow.

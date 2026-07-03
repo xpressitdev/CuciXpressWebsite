@@ -6,6 +6,7 @@ import { requireJwtSecret } from "./unified-auth";
 import { attachLuciaSession, attachStaffSession } from "./auth/middleware";
 import { loadGoogleOAuthConfig } from "./auth/google";
 import { startSharePointOutboxWorker } from "./integrations/sharepointOutbox";
+import { startPendingPaymentSweeper } from "./integrations/pendingPaymentSweeper";
 import { startSubscriptionRenewalWorker } from "./subscriptions";
 
 // Fail-fast on missing or weak JWT_SECRET. Refuse to boot rather than
@@ -82,6 +83,7 @@ app.use((req, res, next) => {
 
   // Background workers (inert if their env vars are not configured).
   startSharePointOutboxWorker();
+  startPendingPaymentSweeper();
   startSubscriptionRenewalWorker();
 
   app.use((err: any, _req: Request, res: Response, _next: NextFunction) => {

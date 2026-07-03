@@ -2411,6 +2411,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
           LEFT JOIN cars      car ON car.id = o.vehicle_id
           LEFT JOIN customers c   ON c.id  = car.customer_id
          WHERE o.status = 'pending_payment'
+           AND o.qr_provider = 'pocket_pay'
          ORDER BY o.created_at DESC
          LIMIT 200
       `)).rows.map((r: any) => ({

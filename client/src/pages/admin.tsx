@@ -69,6 +69,7 @@ import { normalizeWaPhone } from "@/lib/receipt";
 import { useStaffAuth } from "@/hooks/useStaffAuth";
 import type { CollaborationSubmission, SubscriptionSignup } from "@shared/schema";
 import CustomersTab from "@/components/admin/CustomersTab";
+import { PendingPaymentsPanel } from "@/components/admin/PendingPaymentsPanel";
 import BranchesTab from "@/components/admin/BranchesTab";
 import DiscountsTab from "@/components/admin/DiscountsTab";
 import PromoCodesTab from "@/components/admin/PromoCodesTab";
@@ -430,7 +431,8 @@ export default function Admin() {
               )}
             </TabsList>
 
-            <TabsContent value="dashboard" className="mt-6">
+            <TabsContent value="dashboard" className="mt-6 space-y-6">
+              {isManagerOrOwner && <PendingPaymentsPanel />}
               <DashboardTab />
             </TabsContent>
 
