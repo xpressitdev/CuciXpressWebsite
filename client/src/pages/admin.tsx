@@ -435,7 +435,7 @@ export default function Admin() {
               {isManagerOrOwner && (
                 <TabsTrigger value="subscriptions" className="flex items-center gap-2">
                   <Users className="w-4 h-4" />
-                  Subscriptions ({signups.length})
+                  Subscriptions ({subRevenue?.totals.active_count ?? 0})
                 </TabsTrigger>
               )}
             </TabsList>
