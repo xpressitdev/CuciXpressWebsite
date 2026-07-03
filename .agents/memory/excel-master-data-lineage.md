@@ -32,3 +32,27 @@ dropped chunk silently misaligns separate single-column reads, so read the B:R b
 together per chunk. Reconciling the sheet to the DB requires deciding which system is
 source-of-truth for the overlap period; it's a destructive business decision — ask
 first.
+
+# Quarter/period reconciliation gotchas (sheet vs DB)
+
+- **Row source tag (col A / Source.Name) tells lineage.** App-exported rows are
+  `cucixpress_pos`; legacy rows are blank `""` or an import filename
+  (`excel_order_*.xlsx`). Filter on this to isolate live-app rows from legacy — they
+  sit contiguously at the **tail** of the sheet (appends go to the end), so a live-app
+  check only needs to scan the last few thousand rows, not the whole 130k+ file.
+- **Legacy refunds are in the sheet but NOT in the DB.** The old KedaiPOS export
+  writes a separate NEGATIVE Order-Total (R) refund row per reversal, so `SUM(R)` on
+  the sheet is net-of-refunds. The history import brought in **sale rows only** — the
+  DB has zero legacy refunds and no negative-total orders. So for legacy months the
+  sheet's net < its gross while the DB's net ≈ gross. This is the single biggest driver
+  of a pre-live quarter mismatch (sheet net slightly HIGHER than DB net once you also
+  add the small legacy gross drift).
+- **Date basis differs by design.** Sheet buckets sales by receipt date = `created_at`
+  (refunds by `refunded_at`); the app dashboard buckets by `bizDay()` (claimed_at for
+  pocket_pay). To compare sheet-vs-DB use `created_at`/`refunded_at`, NOT bizDay, or
+  web-QR orders shift across the period edge.
+- **append+retry can double-write a live-app row.** OneDrive can hold a few MORE
+  `cucixpress_pos` rows than `sharepoint_outbox` has `sent` (append succeeded but the
+  response timed out, so the retry appended again). Expect the live-app portion to tie
+  to within a handful of rows / sub-1%, with refund totals matching to the cent — not
+  a bug in accounting, a delivery-idempotency artifact.
