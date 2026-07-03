@@ -17,6 +17,12 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import {
+  Dialog,
+  DialogContent,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog";
+import {
   Table,
   TableBody,
   TableCell,
@@ -1188,7 +1194,12 @@ function fmtLoginTime(iso: string | null): string {
   });
 }
 
+type AccountMetric =
+  | "total_accounts" | "registered_today" | "registered_this_month"
+  | "logins_today" | "currently_logged_in" | "ever_logged_in";
+
 function AccountsLoginsCard() {
+  const [detailMetric, setDetailMetric] = useState<AccountMetric | null>(null);
   const { data, isLoading, isFetching, error, refetch } = useQuery<AccountsStats>({
     queryKey: ["/api/admin/accounts/stats"],
     queryFn: async () => {
@@ -1206,15 +1217,15 @@ function AccountsLoginsCard() {
     amber: "bg-amber-50 text-amber-800 ring-amber-200",
   };
 
-  const tileDefs: Array<{ label: string; value: string; tone: keyof typeof toneClass; testId: string }> =
+  const tileDefs: Array<{ label: string; value: string; tone: keyof typeof toneClass; testId: string; metric: AccountMetric }> =
     data
       ? [
-          { label: "Total Accounts",       value: data.total_accounts.toLocaleString(), tone: "blue",   testId: "tile-acct-total" },
-          { label: "Registered Today",     value: String(data.registered_today),        tone: "green",  testId: "tile-acct-reg-today" },
-          { label: "New Sign-ups (Month)", value: String(data.registered_this_month),   tone: "purple", testId: "tile-acct-reg-month" },
-          { label: "Logged In Today",      value: String(data.logins_today),            tone: "pink",   testId: "tile-acct-login-today" },
-          { label: "Currently Signed In",  value: String(data.currently_logged_in),     tone: "amber",  testId: "tile-acct-active" },
-          { label: "Ever Logged In",       value: String(data.ever_logged_in),          tone: "blue",   testId: "tile-acct-ever" },
+          { label: "Total Accounts",       value: data.total_accounts.toLocaleString(), tone: "blue",   testId: "tile-acct-total",       metric: "total_accounts" },
+          { label: "Registered Today",     value: String(data.registered_today),        tone: "green",  testId: "tile-acct-reg-today",   metric: "registered_today" },
+          { label: "New Sign-ups (Month)", value: String(data.registered_this_month),   tone: "purple", testId: "tile-acct-reg-month",   metric: "registered_this_month" },
+          { label: "Logged In Today",      value: String(data.logins_today),            tone: "pink",   testId: "tile-acct-login-today", metric: "logins_today" },
+          { label: "Currently Signed In",  value: String(data.currently_logged_in),     tone: "amber",  testId: "tile-acct-active",      metric: "currently_logged_in" },
+          { label: "Ever Logged In",       value: String(data.ever_logged_in),          tone: "blue",   testId: "tile-acct-ever",        metric: "ever_logged_in" },
         ]
       : [];
 
@@ -1252,12 +1263,19 @@ function AccountsLoginsCard() {
           <div className="space-y-6">
             <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-3">
               {tileDefs.map((t) => (
-                <div key={t.label} className="cuci-kpi flex flex-col gap-2" data-testid={t.testId}>
+                <button
+                  key={t.label}
+                  type="button"
+                  onClick={() => setDetailMetric(t.metric)}
+                  className="cuci-kpi flex flex-col gap-2 text-left cursor-pointer transition hover:ring-2 hover:ring-cuci-primary/40 hover:-translate-y-0.5 focus:outline-none focus:ring-2 focus:ring-cuci-primary/60 rounded-lg"
+                  data-testid={t.testId}
+                  title="Click to see the list"
+                >
                   <span className="cuci-eyebrow">{t.label}</span>
                   <span className={`inline-flex w-fit items-center rounded-full px-3 py-1 text-sm font-extrabold border-2 border-black ${toneClass[t.tone]}`}>
                     {t.value}
                   </span>
-                </div>
+                </button>
               ))}
             </div>
 
@@ -1315,7 +1333,75 @@ function AccountsLoginsCard() {
           </div>
         )}
       </CardContent>
+
+      <Dialog open={detailMetric !== null} onOpenChange={(o) => { if (!o) setDetailMetric(null); }}>
+        <DialogContent className="max-w-2xl max-h-[80vh] overflow-hidden flex flex-col">
+          {detailMetric && <AccountsDetailDialog metric={detailMetric} />}
+        </DialogContent>
+      </Dialog>
     </Card>
+  );
+}
+
+interface AccountsDetailResponse {
+  metric: AccountMetric;
+  title: string;
+  rows: Array<{ id: number; name: string; email: string | null; phone: string | null; at: string | null }>;
+}
+
+function AccountsDetailDialog({ metric }: { metric: AccountMetric }) {
+  const isLogin = metric === "logins_today" || metric === "currently_logged_in" || metric === "ever_logged_in";
+  const { data, isLoading, error } = useQuery<AccountsDetailResponse>({
+    queryKey: ["/api/admin/accounts/detail", metric],
+    queryFn: async () => {
+      const res = await fetch(`/api/admin/accounts/detail?metric=${metric}`, { credentials: "include" });
+      if (!res.ok) throw new Error("detail_failed");
+      return res.json();
+    },
+  });
+
+  return (
+    <>
+      <DialogHeader>
+        <DialogTitle className="flex items-center gap-2">
+          <Users className="w-4 h-4" />
+          {data?.title ?? "Details"}
+          {data && <span className="text-sm font-normal text-gray-500">({data.rows.length.toLocaleString()})</span>}
+        </DialogTitle>
+      </DialogHeader>
+      <div className="overflow-y-auto -mx-6 px-6">
+        {error ? (
+          <p className="text-sm text-red-600 py-4">Failed to load details.</p>
+        ) : isLoading ? (
+          <p className="text-sm text-gray-500 py-4">Loading…</p>
+        ) : !data || data.rows.length === 0 ? (
+          <p className="text-sm text-gray-500 py-6 text-center">No records.</p>
+        ) : (
+          <Table>
+            <TableHeader>
+              <TableRow>
+                <TableHead>Name</TableHead>
+                <TableHead>Contact</TableHead>
+                <TableHead className="text-right">{isLogin ? "Last login" : "Registered"}</TableHead>
+              </TableRow>
+            </TableHeader>
+            <TableBody>
+              {data.rows.map((r) => (
+                <TableRow key={r.id} data-testid={`row-account-detail-${r.id}`}>
+                  <TableCell className="font-medium">{r.name}</TableCell>
+                  <TableCell className="text-xs text-gray-600">
+                    {r.email || r.phone || <span className="italic text-gray-400">—</span>}
+                  </TableCell>
+                  <TableCell className="text-right text-xs text-gray-600 whitespace-nowrap">
+                    {fmtLoginTime(r.at)}
+                  </TableCell>
+                </TableRow>
+              ))}
+            </TableBody>
+          </Table>
+        )}
+      </div>
+    </>
   );
 }
 

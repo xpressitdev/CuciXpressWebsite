@@ -2087,6 +2087,81 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
+  // GET /api/admin/accounts/detail?metric=<key>
+  // Drill-down list behind each "Accounts & Logins" tile. Registration
+  // metrics list the app accounts (users); login metrics list the customers
+  // with matching sessions (deduped to their most recent session). "Today"/
+  // "this month" match the stats endpoint (Brunei-local). Capped at 1000 rows.
+  app.get('/api/admin/accounts/detail', requireStaff, requireStaffRole('owner', 'manager'), async (req, res) => {
+    const metric = String(req.query.metric ?? '');
+    const TITLES: Record<string, string> = {
+      total_accounts:        'All accounts',
+      registered_today:      'Registered today',
+      registered_this_month: 'New sign-ups this month',
+      logins_today:          'Logged in today',
+      currently_logged_in:   'Currently signed in',
+      ever_logged_in:        'Ever logged in',
+    };
+    if (!(metric in TITLES)) return res.status(400).json({ error: 'invalid_metric' });
+
+    const nameExpr = sql`NULLIF(TRIM(CONCAT(u.first_name, ' ', u.last_name)), '')`;
+    try {
+      let rows: Array<{ id: number; name: string | null; email: string | null; phone: string | null; at: string | null }>;
+
+      if (metric === 'total_accounts' || metric === 'registered_today' || metric === 'registered_this_month') {
+        const where =
+          metric === 'registered_today'
+            ? sql`WHERE (u.created_at AT TIME ZONE 'UTC' AT TIME ZONE 'Asia/Brunei')::date
+                        = (now() AT TIME ZONE 'Asia/Brunei')::date`
+            : metric === 'registered_this_month'
+              ? sql`WHERE date_trunc('month', u.created_at AT TIME ZONE 'UTC' AT TIME ZONE 'Asia/Brunei')
+                          = date_trunc('month', now() AT TIME ZONE 'Asia/Brunei')`
+              : sql``;
+        rows = (await db.execute(sql`
+          SELECT u.id, ${nameExpr} AS name, u.email, u.phone_number AS phone,
+                 u.created_at AS at
+            FROM users u
+            ${where}
+           ORDER BY u.created_at DESC NULLS LAST
+           LIMIT 1000
+        `)).rows as any;
+      } else {
+        const where =
+          metric === 'logins_today'
+            ? sql`AND (s.created_at AT TIME ZONE 'Asia/Brunei')::date
+                      = (now() AT TIME ZONE 'Asia/Brunei')::date`
+            : metric === 'currently_logged_in'
+              ? sql`AND s.expires_at > now()`
+              : sql``;
+        rows = (await db.execute(sql`
+          SELECT u.id, ${nameExpr} AS name, u.email, u.phone_number AS phone,
+                 MAX(s.created_at) AS at
+            FROM auth_sessions s
+            JOIN users u ON u.id::text = s.user_id
+           WHERE s.user_type = 'customer' ${where}
+           GROUP BY u.id, u.first_name, u.last_name, u.email, u.phone_number
+           ORDER BY MAX(s.created_at) DESC
+           LIMIT 1000
+        `)).rows as any;
+      }
+
+      res.json({
+        metric,
+        title: TITLES[metric],
+        rows: rows.map((r) => ({
+          id: Number(r.id),
+          name: r.name || 'Customer',
+          email: r.email ?? null,
+          phone: r.phone ?? null,
+          at: r.at,
+        })),
+      });
+    } catch (err) {
+      console.error('[admin.accounts.detail] failed:', err);
+      res.status(500).json({ error: 'detail_failed' });
+    }
+  });
+
   // GET /api/admin/customers/export.csv — Phase 12b-2.
   // Same filters as list (search/branch/segment) but no pagination.
   // Streams a CSV the user can open in Excel / Google Sheets.
