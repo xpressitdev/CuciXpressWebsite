@@ -273,6 +273,28 @@ export async function updateExcelRow(index: number, values: (string | number | n
 }
 
 // ---------------------------------------------------------------------------
+// Delete an existing table row by its (0-based, data-body) index. Note that
+// deleting a row shifts every row below it up by one, so any cached indices
+// greater than `index` become stale. Throws on failure.
+// ---------------------------------------------------------------------------
+export async function deleteExcelRow(index: number): Promise<void> {
+  const cfg = loadSharePointConfig();
+  if (!cfg) throw new Error('sharepoint_not_configured');
+  const token = await getAccessToken(cfg);
+  const driveItemPath = await resolveDriveItemPath(cfg);
+  const url = `${driveItemPath}:/workbook/tables/${encodeURIComponent(cfg.tableName)}/rows/itemAt(index=${index})`;
+  const res = await fetch(url, {
+    method: 'DELETE',
+    headers: { Authorization: `Bearer ${token}` },
+  });
+  if (!res.ok) {
+    const text = await res.text();
+    if (res.status === 401) tokenCache = null;
+    throw new Error(`deleterow_failed_${res.status}: ${text.slice(0, 400)}`);
+  }
+}
+
+// ---------------------------------------------------------------------------
 // Test connection — used by /api/admin/integrations/sharepoint/test
 // ---------------------------------------------------------------------------
 export interface ConnectionStatus {

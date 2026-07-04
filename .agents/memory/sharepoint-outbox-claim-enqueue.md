@@ -31,4 +31,11 @@ at claim captures the scanning branch and matches the in-app claim-day revenue b
   and G (Employee Name = "Kadai <BranchShort>") — never touches dates/amounts. Graph
   API 503/504s are transient; the backfill is idempotent so just re-run.
 - An order never claimed at a lane has no branch and stays "-" (correctly excluded from
-  branch attribution under this model).
+  branch attribution under this model). Rows written for such orders under the OLD
+  payment-time rule are leftovers and can be removed.
+- Deleting an Excel row (`deleteExcelRow(index)`) shifts every lower row's index up by
+  one, making stored `excel_row_id` values above it stale. Safe today because the worker
+  is append-only and only one-off backfills read excel_row_id (and they identity-verify
+  B/H/J first). Always identity-check before any index-based delete/update; after a
+  delete, null the affected outbox row's excel_row_id (keep status='sent' so it can't
+  resend). For frequent deletes, prefer locating by identity columns over stored index.
