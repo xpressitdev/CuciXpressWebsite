@@ -1581,7 +1581,7 @@ function OrdersReportTab() {
   const summary: Array<{ label: string; value: string; testId: string }> = totals
     ? [
         { label: "Transactions",       value: String(totals.transactions),              testId: "report-tile-tx" },
-        { label: "Net Sales",          value: formatBND(totals.net_sales_cents),        testId: "report-tile-net" },
+        { label: "Net Sales",          value: formatBND(totals.sales_cents),            testId: "report-tile-net" },
         { label: "Average Sales",      value: formatBND(totals.avg_sales_cents),        testId: "report-tile-avg" },
         { label: "Refund Transactions", value: String(totals.refund_count),             testId: "report-tile-refund-count" },
         { label: "Total Refunds",      value: formatBND(totals.refund_total_cents),     testId: "report-tile-refund-total" },

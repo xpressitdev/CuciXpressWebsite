@@ -45,3 +45,10 @@ Then `net = grossSalesCents - refundTotal`.
   wrong for LIVE refunds if you subtract refunds from it).
 - Excel export (`/reports/orders/export`) writes raw per-order rows with an "Is Refund" flag and
   POSITIVE totals; Power BI aggregates it. Not an aggregation surface — untouched.
+- Admin Order Report tiles (date-range) are a deliberate WATERFALL, owner's definition:
+  Net Sales = GROSS (`sales_cents` = grossSalesCents, BEFORE refunds);
+  Net Revenue = `sales_cents - refund_total_cents`;
+  Net After Fees = `net_after_fees_cents` (= Net Revenue − MDR). Do NOT "fix" Net Sales back to
+  `net_sales_cents` — the owner wants Net Sales to be the pre-refund gross so the three tiles read
+  gross → (minus Total Refunds) → net revenue → (minus fees) → net after fees. The Today dashboard
+  uses different labels (Today's Sales = gross, its "Net Sales" = after refunds) — separate scheme.
