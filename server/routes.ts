@@ -229,6 +229,22 @@ export async function registerRoutes(app: Express): Promise<Server> {
   const realOrders = (prefix: '' | 'o.' = '') =>
     sql.raw(`AND ${prefix}status NOT IN ('voided', 'pending_payment')`);
 
+  // Gross sales = money actually collected from completed sales. Refund
+  // handling differs by data lineage, so this SUM must too:
+  //  - LIVE refund: the ORIGINAL order is flipped to status='refunded' (one
+  //    row). That money WAS collected, so its total stays in gross and is then
+  //    netted out by subtracting refunds → the sale nets to zero. (legacy_source
+  //    IS NULL.)
+  //  - LEGACY imported refund: the KedaiPOS/Power BI sheet records a refund as a
+  //    SEPARATE reversal row sitting ALONGSIDE its original 'done' sale row, and
+  //    both were imported (the DB CHECK forbids negative totals). So the refund
+  //    row must NOT be counted as gross — only its original sale is — otherwise
+  //    subtracting refunds once leaves the original still counted.
+  // With this rule, net = grossSalesCents - refunds is correct for BOTH, matching
+  // Power BI to the cent. Returns a bare aggregate; append ::bigint/::int + alias.
+  const grossSalesCents = (prefix: '' | 'o.' = '') =>
+    sql.raw(`COALESCE(SUM(CASE WHEN ${prefix}status <> 'refunded' OR ${prefix}legacy_source IS NULL THEN ${prefix}total_cents ELSE 0 END), 0)`);
+
   // ===================================================================
   // Public Live Queue snapshot (no auth). Polled ~every 15s by both
   // the /queue page and the home-page widget.
@@ -915,7 +931,8 @@ export async function registerRoutes(app: Express): Promise<Server> {
       const totals = (await db.execute(sql`
         SELECT
           COUNT(*)::int                                                                                AS transactions,
-          COALESCE(SUM(o.total_cents),0)::bigint                                                        AS sales_cents,
+          -- Gross excludes legacy separate-row refunds; see grossSalesCents.
+          ${grossSalesCents('o.')}::bigint AS sales_cents,
           COUNT(*) FILTER (WHERE o.status = 'refunded')::int                                           AS refund_count,
           COALESCE(SUM(CASE WHEN o.status =  'refunded' THEN o.total_cents ELSE 0 END),0)::bigint      AS refund_total_cents,
           COALESCE(SUM(CASE WHEN o.status <> 'refunded' THEN 1 + COALESCE(jsonb_array_length(o.addons),0) ELSE 0 END),0)::int AS items_sold
@@ -958,16 +975,18 @@ export async function registerRoutes(app: Express): Promise<Server> {
       // MDR fees for the filtered range, grouped by (method, provider).
       const feeGroups = (await db.execute(sql`
         SELECT o.payment_method, o.qr_provider,
-               COALESCE(SUM(CASE WHEN o.status <> 'refunded' THEN o.total_cents ELSE 0 END),0)::int AS sales_cents,
-               COALESCE(SUM(CASE WHEN o.status =  'refunded' THEN o.total_cents ELSE 0 END),0)::int AS refund_cents
+               ${grossSalesCents('o.')}::int AS sales_cents
           FROM orders o
          WHERE date(${bizDay('o.')} AT TIME ZONE 'Asia/Brunei') BETWEEN ${from}::date AND ${to}::date
            ${branchFilter} ${pmFilter} ${staffFilter} ${searchFilter} ${realOrders('o.')}
          GROUP BY o.payment_method, o.qr_provider
-      `)).rows as Array<{ payment_method: string; qr_provider: string | null; sales_cents: number; refund_cents: number }>;
+      `)).rows as Array<{ payment_method: string; qr_provider: string | null; sales_cents: number }>;
       const rateMap = await loadMdrRateMap(db);
+      // MDR is charged on gross (the provider keeps its cut even when a sale is
+      // later refunded). grossSalesCents already counts each original charge
+      // exactly once, so pass 0 refund to avoid double-charging the fee.
       const mdrFee = feeGroups.reduce((acc, g) => acc + mdrFeeForGroup(
-        mdrRateFor(rateMap, g.payment_method, g.qr_provider), g.sales_cents, g.refund_cents,
+        mdrRateFor(rateMap, g.payment_method, g.qr_provider), g.sales_cents, 0,
       ), 0);
 
       const txCount = Number(totals.transactions ?? 0);
@@ -1336,7 +1355,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
           COUNT(*)::int                                                                            AS transactions,
           COUNT(*) FILTER (WHERE o.status <> 'refunded')::int                                      AS paid_count,
           COUNT(*) FILTER (WHERE o.status =  'refunded')::int                                      AS refund_count,
-          COALESCE(SUM(o.total_cents),0)::bigint                                                  AS sales_cents,
+          ${grossSalesCents('o.')}::bigint                                                        AS sales_cents,
           COALESCE(SUM(CASE WHEN o.status =  'refunded' THEN o.total_cents ELSE 0 END),0)::bigint  AS refund_cents
           FROM orders o
          WHERE date(${bizDay('o.')} AT TIME ZONE 'Asia/Brunei') BETWEEN ${from}::date AND ${to}::date
@@ -1354,8 +1373,8 @@ export async function registerRoutes(app: Express): Promise<Server> {
         const sales = Number(r.sales_cents ?? 0);
         const refund = Number(r.refund_cents ?? 0);
         const bps = mdrRateFor(rateMap, r.payment_method, r.qr_provider);
-        // sales is now gross (includes refunded orders) — fee base is the full
-        // charged amount, so pass 0 refund to avoid adding it twice.
+        // sales is gross per grossSalesCents (each original charge counted
+        // once); fee base is that gross, so pass 0 refund to avoid double-count.
         const fee = mdrFeeForGroup(bps, sales, 0);
         return {
           payment_method: r.payment_method,
