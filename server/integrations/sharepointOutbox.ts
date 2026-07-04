@@ -70,6 +70,8 @@ interface JoinedRow {
   item_notes: string | null;
   created_at: Date;
   refunded_at: Date | null;
+  claimed_at: Date | null;
+  qr_provider: string | null;
   // From branches
   branch_name: string | null;
   // From staff
@@ -153,13 +155,20 @@ const PAYMENT_METHOD_LABEL: Record<string, string> = {
 
 function buildExcelRow(r: JoinedRow): (string | number | null)[] {
   const isRefund = r.op === 'refund';
-  // Receipt Date/Time: refunds use refunded_at (when the refund happened),
-  // sales use created_at. Mirrors the KedaiPOS export convention of one
-  // row per event timestamp.
+  // Receipt Date/Time: refunds use refunded_at (when the refund happened).
+  // Prepaid-QR sales (subscription/online/voucher) use claimed_at — the day
+  // the wash was actually scanned at a lane — so the SharePoint row matches
+  // the in-app claim-day revenue bucketing (bizDay()). All other sales use
+  // created_at. Mirrors the KedaiPOS export convention of one row per event.
   // Raw db.execute() returns timestamps as ISO strings, not Date objects.
   // Coerce defensively so dateToExcelSerial / timeToExcelFraction always
   // see a real Date.
-  const rawEventAt = isRefund && r.refunded_at ? r.refunded_at : r.created_at;
+  const isPrepaid = r.qr_provider === 'membership'
+    || r.qr_provider === 'pocket_pay'
+    || r.qr_provider === 'loyalty';
+  const rawEventAt = isRefund && r.refunded_at
+    ? r.refunded_at
+    : (!isRefund && isPrepaid && r.claimed_at ? r.claimed_at : r.created_at);
   const eventAt = rawEventAt instanceof Date ? rawEventAt : new Date(rawEventAt as any);
   const branchShort = shortBranch(r.branch_name);
   // Refund lines mirror the original sale. Only the "Order Total" (R) column flips
@@ -232,6 +241,8 @@ async function hydrateJoinedRow(id: string | number): Promise<JoinedRow | undefi
       o.item_notes                    AS item_notes,
       o.created_at                    AS created_at,
       o.refunded_at                   AS refunded_at,
+      o.claimed_at                    AS claimed_at,
+      o.qr_provider                   AS qr_provider,
       b.name                          AS branch_name,
       st.name                         AS staff_name,
       c.name                          AS customer_name,
@@ -470,6 +481,105 @@ export async function backfillSentRefundRows(dryRun = false): Promise<RefundBack
       const msg = String(err?.message ?? err).slice(0, 300);
       result.errors.push({ cx_number: row.cx_number, excel_row_id: row.excel_row_id, error: msg });
       console.error(`[refund-backfill] ERROR ${row.cx_number} @${idx}: ${msg}`);
+    }
+  }
+
+  return result;
+}
+
+export interface PrepaidBranchBackfillResult {
+  total: number;
+  updated: number;
+  alreadyCorrect: number;
+  skippedNoBranch: number;
+  skippedMismatch: number;
+  errors: Array<{ cx_number: string; excel_row_id: string; error: string }>;
+}
+
+// One-time repair for prepaid-QR sale rows (subscription/online/voucher) that
+// were sent to Excel BEFORE the wash was claimed at a lane, freezing column E
+// (Store Name) / G (Employee Name) as "-". The order now has its branch_id, so
+// we read the live Excel row, verify identity, and patch ONLY the branch
+// columns — dates, amounts and everything else are preserved untouched.
+// Self-correcting + idempotent: rows that already show the right branch are
+// skipped; rows whose order still has no branch (never claimed) are left as-is.
+export async function backfillPrepaidBranchRows(dryRun = false): Promise<PrepaidBranchBackfillResult> {
+  const result: PrepaidBranchBackfillResult = {
+    total: 0, updated: 0, alreadyCorrect: 0, skippedNoBranch: 0, skippedMismatch: 0, errors: [],
+  };
+  if (!isSharePointConfigured()) {
+    throw new Error('sharepoint_not_configured');
+  }
+
+  const res = await db.execute(sql`
+    SELECT sob.id, sob.cx_number, sob.order_id, sob.excel_row_id
+      FROM sharepoint_outbox sob
+      JOIN orders o ON o.id = sob.order_id
+     WHERE sob.op = 'sale'
+       AND sob.status = 'sent'
+       AND sob.excel_row_id IS NOT NULL
+       AND sob.excel_row_id NOT IN ('', 'dry-run')
+       AND o.qr_provider IN ('membership','pocket_pay','loyalty')
+     ORDER BY sob.id ASC
+  `);
+  const rows = res.rows as Array<{ id: number; cx_number: string; order_id: string; excel_row_id: string }>;
+  result.total = rows.length;
+
+  for (const row of rows) {
+    const idx = Number(row.excel_row_id);
+    try {
+      if (!Number.isInteger(idx) || idx < 0) {
+        result.errors.push({ cx_number: row.cx_number, excel_row_id: row.excel_row_id, error: 'invalid_excel_row_id' });
+        continue;
+      }
+      const r = await hydrateJoinedRow(row.id);
+      if (!r) {
+        result.errors.push({ cx_number: row.cx_number, excel_row_id: row.excel_row_id, error: 'outbox_row_vanished' });
+        continue;
+      }
+
+      const branchShort = shortBranch(r.branch_name);
+      if (!branchShort) {
+        // Order still has no branch (never claimed at a lane) — nothing to fill.
+        result.skippedNoBranch++;
+        continue;
+      }
+
+      // Verify the live Excel row is the one we think it is before overwriting.
+      const live = await getExcelRowValues(idx);
+      const liveId = String(live[1] ?? '');      // B ID
+      const liveRefund = String(live[7] ?? '');   // H Is Refund
+      const liveCx = String(live[9] ?? '');       // J Order Number
+      if (liveId !== r.order_id || liveRefund.toLowerCase() !== 'no' || liveCx !== row.cx_number) {
+        result.skippedMismatch++;
+        console.warn(`[prepaid-branch-backfill] SKIP ${row.cx_number} @${idx}: identity mismatch (id="${liveId}" refund="${liveRefund}" cx="${liveCx}")`);
+        continue;
+      }
+
+      const liveStore = String(live[4] ?? '');    // E Store Name
+      const wantStore = `${branchShort} Branch`;
+      const wantEmployee = `Kadai ${branchShort}`;
+      if (liveStore === wantStore) {
+        result.alreadyCorrect++;
+        continue;
+      }
+
+      // Patch ONLY the branch columns (E, G); keep date/amount/notes intact.
+      const next = [...live];
+      next[4] = wantStore;     // E Store Name
+      next[6] = wantEmployee;  // G Employee Name
+      if (dryRun) {
+        console.log(`[prepaid-branch-backfill] DRY RUN ${row.cx_number} @${idx}: E "${liveStore}" -> "${wantStore}"`);
+        result.updated++;
+        continue;
+      }
+      await updateExcelRow(idx, next);
+      console.log(`[prepaid-branch-backfill] updated ${row.cx_number} @${idx}: E "${liveStore}" -> "${wantStore}"`);
+      result.updated++;
+    } catch (err: any) {
+      const msg = String(err?.message ?? err).slice(0, 300);
+      result.errors.push({ cx_number: row.cx_number, excel_row_id: row.excel_row_id, error: msg });
+      console.error(`[prepaid-branch-backfill] ERROR ${row.cx_number} @${idx}: ${msg}`);
     }
   }
 
