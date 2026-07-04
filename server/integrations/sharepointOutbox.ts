@@ -8,7 +8,7 @@
 //     SELECT pending rows whose next_attempt_at <= now()  FOR UPDATE SKIP LOCKED
 //     for each row:
 //        join orders + branches + staff + customers + cars
-//        build the 25 Excel columns (matching the user's master file)
+//        build the 26 Excel columns (matching the user's master file)
 //        call sharepoint.appendExcelRow()
 //        on success: status='sent', sent_at=now()
 //        on failure: attempts++, status='failed' if attempts>=8 else 'pending'
@@ -46,6 +46,33 @@ const BACKOFF_SECONDS = [30, 60, 120, 300, 900, 1800, 3600, 7200];
 let workerStarted = false;
 let timer: NodeJS.Timeout | null = null;
 let draining = false;
+
+// ---------------------------------------------------------------------------
+// MDR (merchant transaction fee) rate map — mirrors the admin report's fee
+// logic so the "Transaction Fee" (Z) column we export matches the in-app
+// "Transaction Fees (MDR)" figure. Rates live in payment_fee_rates, keyed by
+// `${payment_method}|${qr_provider ?? ''}` -> basis points; any missing key
+// (cash, bank transfer, unconfigured wallets) = 0%. The map is tiny and rarely
+// changes, so we cache it briefly to avoid a query per drained row.
+// ---------------------------------------------------------------------------
+let mdrRateCache: { map: Map<string, number>; at: number } | null = null;
+const MDR_RATE_TTL_MS = 60_000;
+async function loadMdrRateMap(): Promise<Map<string, number>> {
+  if (mdrRateCache && Date.now() - mdrRateCache.at < MDR_RATE_TTL_MS) {
+    return mdrRateCache.map;
+  }
+  const rows = (await db.execute(sql`
+    SELECT payment_method, qr_provider, mdr_bps FROM payment_fee_rates
+  `)).rows as Array<{ payment_method: string; qr_provider: string | null; mdr_bps: number }>;
+  const map = new Map<string, number>();
+  for (const r of rows) {
+    map.set(`${r.payment_method}|${r.qr_provider ?? ''}`, Number(r.mdr_bps) || 0);
+  }
+  mdrRateCache = { map, at: Date.now() };
+  return map;
+}
+const mdrRateFor = (map: Map<string, number>, method: string, qr: string | null) =>
+  map.get(`${method}|${qr ?? ''}`) ?? 0;
 
 interface JoinedRow {
   outbox_id: string;
@@ -86,7 +113,7 @@ interface JoinedRow {
 }
 
 // ---------------------------------------------------------------------------
-// Map a joined DB row -> the 25 Excel columns (A..Y) in master file order.
+// Map a joined DB row -> the 26 Excel columns (A..Z) in master file order.
 //
 // Excel headers:
 //   A  Source.Name
@@ -114,6 +141,9 @@ interface JoinedRow {
 //   W  Extracted_Brand
 //   X  Extracted_Model
 //   Y  License_Plate
+//   Z  Transaction Fee         (MDR fee on this sale's gross Order Total, BND;
+//                               0 on refund rows — the provider keeps its cut,
+//                               matching the admin report's gross fee base)
 // ---------------------------------------------------------------------------
 const DASH = '-';
 const cents2 = (c: number | null | undefined): number => Math.round((c ?? 0)) / 100;
@@ -153,7 +183,7 @@ const PAYMENT_METHOD_LABEL: Record<string, string> = {
   voucher: 'Voucher',
 };
 
-function buildExcelRow(r: JoinedRow): (string | number | null)[] {
+function buildExcelRow(r: JoinedRow, rateMap: Map<string, number>): (string | number | null)[] {
   const isRefund = r.op === 'refund';
   // Receipt Date/Time: refunds use refunded_at (when the refund happened).
   // Prepaid-QR sales (subscription/online/voucher) use claimed_at — the day
@@ -184,6 +214,14 @@ function buildExcelRow(r: JoinedRow): (string | number | null)[] {
     const v = cents2(c);
     return isRefund && v !== 0 ? -v : v;
   };
+  // Transaction Fee (MDR) on the ORIGINAL sale's GROSS Order Total. Refund rows
+  // emit 0: the payment provider keeps its cut even when a sale is refunded, and
+  // the admin report bases MDR on gross. Because Order Total is NEGATIVE on a
+  // refund, SUM(Order Total) - SUM(Transaction Fee) in Power BI = Net After Fees.
+  const feeBps = mdrRateFor(rateMap, r.payment_method, r.qr_provider);
+  const mdrFeeCents = isRefund
+    ? 0
+    : Math.round((Math.round(r.total_cents ?? 0) * feeBps) / 10000);
   return [
     'cucixpress_pos',                                                  // A Source.Name
     r.order_id,                                                        // B ID (our internal order id)
@@ -210,6 +248,7 @@ function buildExcelRow(r: JoinedRow): (string | number | null)[] {
     dashOr(r.car_brand),                                               // W Extracted_Brand
     dashOr(r.car_model),                                               // X Extracted_Model
     dashOr(r.plate),                                                   // Y License_Plate
+    cents2(mdrFeeCents),                                               // Z Transaction Fee (MDR; 0 on refunds)
   ];
 }
 
@@ -309,6 +348,7 @@ export async function drainOnce(): Promise<{ picked: number; sent: number; faile
 
   let sent = 0;
   let failed = 0;
+  const rateMap = await loadMdrRateMap();
 
   for (const { id, lease } of claimed) {
     // Hydrate the joined row.
@@ -327,7 +367,7 @@ export async function drainOnce(): Promise<{ picked: number; sent: number; faile
     }
 
     try {
-      const values = buildExcelRow(r);
+      const values = buildExcelRow(r, rateMap);
       // SHAREPOINT_DRY_RUN=1 — skip the real Graph call, log what would
       // have been sent. Useful to validate column mapping end-to-end
       // against a real DB before pointing at a real Excel file.
@@ -468,7 +508,7 @@ export async function backfillSentRefundRows(dryRun = false): Promise<RefundBack
         continue;
       }
 
-      const values = buildExcelRow(r); // op='refund' => positive breakdown, negative Order Total
+      const values = buildExcelRow(r, await loadMdrRateMap()); // op='refund' => positive breakdown, negative Order Total
       if (dryRun) {
         console.log(`[refund-backfill] DRY RUN would update ${row.cx_number} @${idx}: M ${liveSubtotal} -> ${values[12]}, R -> ${values[17]}`);
         result.updated++;
