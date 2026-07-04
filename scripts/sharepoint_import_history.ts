@@ -52,24 +52,37 @@ if (startArg && limitArg && LIMIT < START_OFFSET + 1) {
   process.exit(1);
 }
 
-// --- Branch name -> id (matches BRANCHES in client/src/pages/pos.tsx) -------
-const BRANCH_NAME_TO_ID: Record<string, number> = {
-  TUNGKU: 1,
-  SALAR: 2,
-  BENGKURONG: 3,
-  TUTONG: 4,
-  LAMBAK: 5,
-};
-
-function parseBranchId(storeName: string | null | undefined): number | null {
-  if (!storeName) return null;
-  // Excel value is e.g. "Tungku Branch" — strip suffix, uppercase, lookup.
-  const key = String(storeName)
+// --- Branch name -> id -----------------------------------------------------
+// Built dynamically from the branches table at startup so newly-created
+// branches (e.g. the closed Pandan branch) are picked up automatically.
+// A DB name like "Cuci Xpress Tungku" and an Excel store name like
+// "Tungku Branch" both normalise to the key "TUNGKU".
+function normalizeBranchKey(name: string | null | undefined): string {
+  return String(name ?? '')
     .toUpperCase()
     .replace(/\s+BRANCH\s*$/i, '')
     .replace(/^CUCI\s+XPRESS\s+/i, '')
     .trim();
-  return BRANCH_NAME_TO_ID[key] ?? null;
+}
+
+async function buildBranchMap(): Promise<Record<string, number>> {
+  const res = await db.execute(sql`SELECT id, name FROM branches`);
+  const map: Record<string, number> = {};
+  for (const r of res.rows as any[]) {
+    const key = normalizeBranchKey(r.name);
+    if (key) map[key] = Number(r.id);
+  }
+  // Rule 3: the plain "Cuci Xpress" store name in the legacy sheet is the
+  // ORIGINAL name of the Tungku branch — map it there. (normalizeBranchKey
+  // leaves "Cuci Xpress" as "CUCI XPRESS" because there's no trailing word.)
+  if (map['TUNGKU'] != null) map['CUCI XPRESS'] = map['TUNGKU'];
+  return map;
+}
+
+function parseBranchId(storeName: string | null | undefined, map: Record<string, number>): number | null {
+  const key = normalizeBranchKey(storeName);
+  if (!key) return null;
+  return map[key] ?? null;
 }
 
 // --- Payment type Excel label -> orders.payment_method enum -----------------
@@ -231,7 +244,32 @@ async function main() {
   const alreadyImported = new Set<number>(existingRes.rows.map((r: any) => Number(r.n)));
   console.log(`Already imported: ${alreadyImported.size} rows.`);
 
+  // Owner staff id — legacy refunds need a non-null refunded_by_staff_id to
+  // satisfy the orders_refund_fields_consistent CHECK. We attribute all legacy
+  // refunds to the owner account.
+  const ownerRes = await db.execute(sql`SELECT id FROM staff WHERE role = 'owner' ORDER BY id LIMIT 1`);
+  const OWNER_STAFF_ID = (ownerRes.rows[0] as any)?.id as string | undefined;
+  if (!DRY_RUN && !OWNER_STAFF_ID) { console.error('No owner staff found; refunds cannot be attributed.'); process.exit(1); }
+
+  // Rule 2: ensure the (closed) Pandan branch exists so its legacy sales can be
+  // imported under their own branch. is_active=false keeps it off the public
+  // live queue while reports still count its historical orders. Idempotent.
+  if (!DRY_RUN) {
+    await db.execute(sql`
+      INSERT INTO branches (name, location, google_maps_url, google_maps_embed_url, review_url, is_open, status, is_active)
+      SELECT 'Cuci Xpress Pandan', 'Pandan (closed branch)', '-', '-', '-', false, 'closed', false
+      WHERE NOT EXISTS (SELECT 1 FROM branches WHERE name = 'Cuci Xpress Pandan')
+    `);
+  }
+
+  const branchMap = await buildBranchMap();
+  // In dry-run the Pandan row may not exist yet — add a count-only sentinel so
+  // its rows tally as "would import" instead of "badBranch".
+  if (DRY_RUN && branchMap['PANDAN'] == null) branchMap['PANDAN'] = -6;
+  console.log('Branch map:', branchMap);
+
   // Column indices we care about (0-based).
+  const C_SOURCE = colLetterToIndex('A'); // Source.Name — "cucixpress_pos" marks app-mirrored rows
   const C_DATE   = colLetterToIndex('C');
   const C_TIME   = colLetterToIndex('D');
   const C_STORE  = colLetterToIndex('E');
@@ -270,12 +308,15 @@ async function main() {
   const CHUNK = 1000; // rows per Graph call
   let processed = 0;
   let inserted = 0;
-  let skippedNoPlate = 0;
-  let skippedRefund = 0;
+  let insertedSales = 0;
+  let insertedRefunds = 0;
+  let insertedNoPlate = 0;
+  let skippedAppOrigin = 0;
   let skippedExisting = 0;
   let skippedBadDate = 0;
   let skippedBadBranch = 0;
   let dbErrors = 0;
+  const failedChunks: string[] = []; // Graph ranges that exhausted retries
 
   // Cache: normalisedPlate -> car_id, so a car that appears 50x doesn't
   // hit Postgres 50x for the upsert.
@@ -292,7 +333,12 @@ async function main() {
     try {
       res = await fetchWithRetry(url, `chunk ${addr}`);
     } catch (err: any) {
-      console.error(`SKIPPING chunk ${addr} after retries exhausted:`, err.message ?? err);
+      // Record but DON'T silently drop: a missed chunk = missing legacy rows =
+      // reconciliation off by that chunk. We keep going so one bad chunk doesn't
+      // waste the whole run, then FAIL loudly at the end so the operator re-runs
+      // (re-runs are idempotent — already-imported rows are skipped).
+      console.error(`FAILED chunk ${addr} after retries exhausted:`, err.message ?? err);
+      failedChunks.push(addr);
       continue;
     }
     const json = await res.json() as { values: any[][] };
@@ -307,18 +353,17 @@ async function main() {
       }
 
       const row = rows[i];
+
+      // Skip app-native orders already in the DB. The outbox mirrors every
+      // POS/web order into this same sheet with Source.Name="cucixpress_pos"
+      // (these start ~rownum 132824). Re-importing them would double-count.
+      const sourceName = String(row[C_SOURCE] ?? '').trim().toLowerCase();
+      if (sourceName === 'cucixpress_pos') { skippedAppOrigin++; continue; }
+
       const refund = nullIfDash(row[C_REFUND]);
-      if (refund && refund.toLowerCase().startsWith('y')) {
-        skippedRefund++;
-        continue;
-      }
+      const isRefund = !!refund && refund.toLowerCase().startsWith('y');
 
-      const plateRaw = nullIfDash(row[C_PLATE]);
-      if (!plateRaw) { skippedNoPlate++; continue; }
-      const plateNorm = normalizePlate(plateRaw);
-      if (!plateNorm) { skippedNoPlate++; continue; }
-
-      const branchId = parseBranchId(row[C_STORE]);
+      const branchId = parseBranchId(row[C_STORE], branchMap);
       if (!branchId) { skippedBadBranch++; continue; }
 
       const dateSerial = Number(row[C_DATE]);
@@ -326,7 +371,20 @@ async function main() {
       const eventAt = excelToDate(dateSerial, timeFrac);
       if (!eventAt) { skippedBadDate++; continue; }
 
-      const totalCents = parseMoneyCents(row[C_TOTAL]);
+      // Rule 1: no-plate rows are imported too (vehicle_id NULL, plate ''),
+      // just not linked to any car/customer.
+      const plateRaw = nullIfDash(row[C_PLATE]);
+      const plateNorm = plateRaw ? normalizePlate(plateRaw) : '';
+      const hasPlate = plateNorm.length > 0;
+      // Only sales with a real plate get linked to a car row. Refunds are never
+      // linked (they reverse a sale; linking would inflate car visit/spend).
+      const linkCar = hasPlate && !isRefund;
+
+      // CHECK constraints forbid negative totals, so legacy refunds are stored
+      // as status='refunded' with a POSITIVE amount; the report nets them out
+      // (net = sales - SUM(total WHERE status='refunded')). abs() also guards
+      // against the legacy sheet storing refund Order Total as a negative.
+      const totalCents = Math.abs(parseMoneyCents(row[C_TOTAL]));
       const paymentMethod = parsePaymentMethod(row[C_PAY] as any);
       const customerName = nullIfDash(row[C_CUST]);
       const brand = nullIfDash(row[C_BRAND]);
@@ -347,65 +405,73 @@ async function main() {
 
       if (DRY_RUN) {
         if (processed <= 5) {
-          console.log(`#${sourceRowNumber}`, { eventAt: eventAt.toISOString(), branchId, plateNorm, totalCents, paymentMethod, brand, model, customerName, packageName });
+          console.log(`#${sourceRowNumber}`, { eventAt: eventAt.toISOString(), branchId, plate: plateRaw ?? '(none)', totalCents, isRefund, paymentMethod, brand, model, customerName, packageName });
         }
         inserted++;
+        if (isRefund) insertedRefunds++; else insertedSales++;
+        if (!hasPlate) insertedNoPlate++;
         continue;
       }
 
-      // Upsert car (cached). Select-by-normalised-plate first, insert if
-      // missing, then bump last_seen_at + fill in brand/model when known.
-      // We avoid ON CONFLICT here because cars_plate_normalized_unique is
-      // an expression-based UNIQUE INDEX (not a constraint), which trips
-      // up the neon-serverless driver's inference path.
-      let carId = carCache.get(plateNorm);
-      if (!carId) {
+      // Upsert car (cached) — only for plated sales. No-plate rows and refunds
+      // stay unlinked (vehicle_id NULL). Select-by-normalised-plate first,
+      // insert if missing, then bump last_seen_at + fill brand/model when known.
+      // We avoid ON CONFLICT because cars_plate_normalized_unique is an
+      // expression-based UNIQUE INDEX (not a constraint), which trips up the
+      // neon-serverless driver's inference path.
+      let carId: number | null = null;
+      if (linkCar) {
         const eventIso = eventAt.toISOString();
-        const found = await db.execute(sql`
-          SELECT id FROM cars
-           WHERE UPPER(REGEXP_REPLACE(license_plate, '\\s+', '', 'g')) = ${plateNorm}
-           LIMIT 1
-        `);
-        if (found.rows.length > 0) {
-          carId = Number((found.rows[0] as any).id);
+        carId = carCache.get(plateNorm) ?? null;
+        if (!carId) {
+          const found = await db.execute(sql`
+            SELECT id FROM cars
+             WHERE UPPER(REGEXP_REPLACE(license_plate, '\\s+', '', 'g')) = ${plateNorm}
+             LIMIT 1
+          `);
+          if (found.rows.length > 0) {
+            carId = Number((found.rows[0] as any).id);
+            await db.execute(sql`
+              UPDATE cars
+                 SET brand        = COALESCE(brand, ${brand}),
+                     model        = COALESCE(model, ${model}),
+                     last_seen_at = GREATEST(COALESCE(last_seen_at, ${eventIso}::timestamptz), ${eventIso}::timestamptz)
+               WHERE id = ${carId}
+            `);
+          } else {
+            const ins = await db.execute(sql`
+              INSERT INTO cars (license_plate, brand, model, last_seen_at)
+              VALUES (${plateRaw}, ${brand}, ${model}, ${eventIso}::timestamptz)
+              RETURNING id
+            `);
+            carId = Number((ins.rows[0] as any).id);
+          }
+          carCache.set(plateNorm, carId);
+        } else {
           await db.execute(sql`
             UPDATE cars
-               SET brand        = COALESCE(brand, ${brand}),
-                   model        = COALESCE(model, ${model}),
-                   last_seen_at = GREATEST(COALESCE(last_seen_at, ${eventIso}::timestamptz), ${eventIso}::timestamptz)
+               SET last_seen_at = GREATEST(COALESCE(last_seen_at, ${eventIso}::timestamptz), ${eventIso}::timestamptz),
+                   brand        = COALESCE(brand, ${brand}),
+                   model        = COALESCE(model, ${model})
              WHERE id = ${carId}
           `);
-        } else {
-          const ins = await db.execute(sql`
-            INSERT INTO cars (license_plate, brand, model, last_seen_at)
-            VALUES (${plateRaw}, ${brand}, ${model}, ${eventIso}::timestamptz)
-            RETURNING id
-          `);
-          carId = Number((ins.rows[0] as any).id);
         }
-        carCache.set(plateNorm, carId);
-      } else {
-        // Already cached — only bump last_seen_at if this row is later.
-        const eventIso = eventAt.toISOString();
-        await db.execute(sql`
-          UPDATE cars
-             SET last_seen_at = GREATEST(COALESCE(last_seen_at, ${eventIso}::timestamptz), ${eventIso}::timestamptz),
-                 brand        = COALESCE(brand, ${brand}),
-                 model        = COALESCE(model, ${model})
-           WHERE id = ${carId}
-        `);
       }
 
       // Insert the legacy order. Synthetic ticket_code = "L<rownum>".
-      // status='done' is intentional: it's a completed historical wash AND
-      // it sidesteps the sharepoint_outbox trigger (which only fires on
-      // 'paid'|'queued') so we don't push these rows back to SharePoint.
-      // ticket_day = the actual wash date (date column has a UTC default
-      // we override). Used by orders_branch_ticket_day_uniq, so combined
-      // with the L<rownum> ticket_code they're guaranteed unique.
+      //  - Sales:   status='done' — a completed historical wash. This also
+      //    sidesteps the sharepoint_outbox trigger (fires only on 'paid'|'queued')
+      //    so we don't push these rows back to SharePoint.
+      //  - Refunds: status='refunded' with a POSITIVE total + refunded_at +
+      //    refunded_by_staff_id (owner) to satisfy orders_refund_fields_consistent.
+      //    The report subtracts these, matching the sheet's negative Order Total.
+      // ticket_day = the actual wash date; with the unique L<rownum> ticket_code
+      // it's guaranteed unique under orders_branch_ticket_day_uniq.
       const ticketCode = `L${sourceRowNumber}`;
       const eventIsoOrder = eventAt.toISOString();
       const eventDate = eventIsoOrder.slice(0, 10);
+      const plateForOrder = plateRaw ?? ''; // orders.plate is NOT NULL
+      const status = isRefund ? 'refunded' : 'done';
       try {
         await db.execute(sql`
           INSERT INTO orders (
@@ -414,28 +480,39 @@ async function main() {
             payment_method, status,
             customer_name_walkin, order_notes,
             created_at, completed_at,
+            refunded_at, refunded_by_staff_id, refund_reason,
             legacy_source, legacy_source_row_number
           ) VALUES (
-            gen_random_uuid()::text, ${ticketCode}, ${eventDate}::date, ${branchId}, ${carId}, ${plateRaw},
+            gen_random_uuid()::text, ${ticketCode}, ${eventDate}::date, ${branchId}, ${carId}, ${plateForOrder},
             ${packageName}, ${totalCents}, ${totalCents}, ${totalCents},
-            ${paymentMethod}, 'done',
+            ${paymentMethod}, ${status},
             ${customerName}, ${orderNotes},
-            ${eventIsoOrder}::timestamptz, ${eventIsoOrder}::timestamptz,
+            ${eventIsoOrder}::timestamptz, ${isRefund ? null : eventIsoOrder}::timestamptz,
+            ${isRefund ? eventIsoOrder : null}::timestamptz, ${isRefund ? OWNER_STAFF_ID : null}, ${isRefund ? 'Legacy import (KedaiPOS refund)' : null},
             'sharepoint', ${sourceRowNumber}
           )
         `);
         inserted++;
+        if (isRefund) insertedRefunds++; else insertedSales++;
+        if (!hasPlate) insertedNoPlate++;
       } catch (err: any) {
         dbErrors++;
         if (dbErrors <= 5) console.warn(`row #${sourceRowNumber} insert failed: ${err.message ?? err}`);
       }
     }
 
-    console.log(`[${Math.min(offset + CHUNK, toImport)}/${toImport}] processed=${processed} inserted=${inserted} skipped(noPlate=${skippedNoPlate} refund=${skippedRefund} existing=${skippedExisting} badDate=${skippedBadDate} badBranch=${skippedBadBranch}) dbErrors=${dbErrors}`);
+    console.log(`[${Math.min(offset + CHUNK, toImport)}/${toImport}] processed=${processed} inserted=${inserted} (sales=${insertedSales} refunds=${insertedRefunds} noPlate=${insertedNoPlate}) skipped(appOrigin=${skippedAppOrigin} existing=${skippedExisting} badDate=${skippedBadDate} badBranch=${skippedBadBranch}) dbErrors=${dbErrors}`);
   }
 
-  // Refresh cached aggregates on cars.
-  if (!DRY_RUN) {
+  // Completeness guard: a missed Graph chunk or a failed row INSERT means
+  // legacy rows are missing, so the report can't reconcile to the cent. Treat
+  // either as a hard failure so we never report success with holes.
+  const incomplete = failedChunks.length > 0 || dbErrors > 0;
+
+  // Refresh cached aggregates on cars — ONLY when the import is complete.
+  // Refreshing after a partial import would bake half-imported spend/visit
+  // totals into cars; skip it and let the operator re-run to fill the holes.
+  if (!DRY_RUN && !incomplete) {
     console.log('\nRefreshing cached visit count + spend on cars…');
     await db.execute(sql`
       UPDATE cars c
@@ -455,9 +532,16 @@ async function main() {
 
   console.log('\n===== DONE =====');
   console.log(`processed: ${processed}`);
-  console.log(`inserted:  ${inserted}`);
-  console.log(`skipped:   noPlate=${skippedNoPlate} refund=${skippedRefund} existing=${skippedExisting} badDate=${skippedBadDate} badBranch=${skippedBadBranch}`);
+  console.log(`inserted:  ${inserted} (sales=${insertedSales} refunds=${insertedRefunds} noPlate=${insertedNoPlate})`);
+  console.log(`skipped:   appOrigin=${skippedAppOrigin} existing=${skippedExisting} badDate=${skippedBadDate} badBranch=${skippedBadBranch}`);
   console.log(`dbErrors:  ${dbErrors}`);
+  console.log(`failedChunks: ${failedChunks.length}`);
+
+  if (incomplete) {
+    if (failedChunks.length) console.error(`\nFAILED CHUNKS (${failedChunks.length}) — re-run to fill: ${failedChunks.join(', ')}`);
+    console.error('\nImport INCOMPLETE (failed Graph chunks or row insert errors). Cars aggregates were NOT refreshed. Re-run this script (idempotent — already-imported rows are skipped) until it exits 0, then reconcile.');
+    process.exit(1);
+  }
   process.exit(0);
 }
 

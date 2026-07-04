@@ -250,6 +250,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
       const branchesRes = await db.execute(sql`
         SELECT id, name, location, is_open, status, status_note
         FROM branches
+        WHERE COALESCE(is_active, true) = true
         ORDER BY id ASC
       `);
       const branches = branchesRes.rows as Array<{
