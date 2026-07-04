@@ -130,7 +130,7 @@ export default function Stats() {
   const stats = [
     {
       icon: <Calendar className="w-8 h-8" />,
-      value: 120000,
+      value: 140000,
       label: "Cars Cleaned and counting",
       color: "text-cuci-primary",
       bgColor: "bg-gradient-to-br from-cuci-primary/5 to-cuci-primary/10",
@@ -193,7 +193,7 @@ export default function Stats() {
         >
           <div className="text-2xl sm:text-4xl md:text-6xl font-black tracking-tight text-gray-900 leading-[1.05]">
             We've cleaned over{" "}
-            <span className="cuci-rainbow-text">120,000</span>{" "}
+            <span className="cuci-rainbow-text">140,000</span>{" "}
             cars.
             <span className="cuci-rainbow-text block">
               And we're just getting started.

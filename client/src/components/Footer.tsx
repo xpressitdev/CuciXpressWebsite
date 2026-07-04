@@ -91,7 +91,7 @@ export default function Footer() {
                 Cuci <span className="text-cuci-secondary">Xpress</span>
               </span>
             </div>
-            <p className="text-gray-300 mb-6 leading-relaxed">Brunei's drive-thru car wash — five branches, eight-minute washes, zero appointments. We've cleaned 120,000+ cars and counting.</p>
+            <p className="text-gray-300 mb-6 leading-relaxed">Brunei's drive-thru car wash — five branches, eight-minute washes, zero appointments. We've cleaned 140,000+ cars and counting.</p>
             <div className="flex space-x-4">
               {socialLinks.map((link, index) => (
                 <motion.a
