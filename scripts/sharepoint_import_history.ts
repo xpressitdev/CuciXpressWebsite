@@ -43,7 +43,13 @@ const DRY_RUN = args.includes('--dry-run');
 // just to skip them. sourceRowNumber math is unchanged (offset + i + 1), so
 // the row numbers written stay identical — only the starting offset moves.
 const startArg = args.find(a => a.startsWith('--start-row='));
-const START_OFFSET = startArg ? Math.max(0, Number(startArg.split('=')[1]) - 1) : 0;
+let START_OFFSET = startArg ? Math.max(0, Number(startArg.split('=')[1]) - 1) : 0;
+// --resume: auto-compute START_OFFSET as the first un-imported row so that if
+// this process is killed mid-run and relaunched by the workflow supervisor, the
+// next pass resumes near where it stopped instead of re-fetching the whole
+// sheet from row 1 (a full Graph scan is ~30min > the kill window, so without
+// this a killed run can loop forever without ever reaching the finish line).
+const RESUME = args.includes('--resume');
 // --limit is an ABSOLUTE top-of-sheet row cap (toImport = min(totalDataRows, LIMIT)),
 // not "N rows after --start-row". If both are set and the cap falls below the
 // start row, nothing would be scanned — fail fast instead of silently no-op'ing.
@@ -243,6 +249,20 @@ async function main() {
   `);
   const alreadyImported = new Set<number>(existingRes.rows.map((r: any) => Number(r.n)));
   console.log(`Already imported: ${alreadyImported.size} rows.`);
+
+  // --resume: jump the scan start to the first un-imported row. Everything
+  // below that row is guaranteed imported (it's the smallest gap), so skipping
+  // the Graph fetch for that prefix is safe; scattered already-imported rows
+  // ABOVE it are still skipped in-loop via alreadyImported. Explicit --start-row
+  // always wins over --resume.
+  if (RESUME && !startArg && !DRY_RUN && alreadyImported.size > 0) {
+    let maxImported = 0;
+    for (const n of alreadyImported) if (n > maxImported) maxImported = n;
+    let firstMissing = maxImported + 1; // all of 1..max imported => resume past max
+    for (let n = 1; n <= maxImported; n++) { if (!alreadyImported.has(n)) { firstMissing = n; break; } }
+    START_OFFSET = firstMissing - 1;
+    console.log(`--resume: first un-imported row=${firstMissing} (maxImported=${maxImported}) -> START_OFFSET=${START_OFFSET}`);
+  }
 
   // Owner staff id — legacy refunds need a non-null refunded_by_staff_id to
   // satisfy the orders_refund_fields_consistent CHECK. We attribute all legacy

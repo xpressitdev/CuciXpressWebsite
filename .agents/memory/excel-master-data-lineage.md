@@ -56,3 +56,15 @@ first.
   response timed out, so the retry appended again). Expect the live-app portion to tie
   to within a handful of rows / sub-1%, with refund totals matching to the cent — not
   a bug in accounting, a delivery-idempotency artifact.
+
+# Full legacy backfill outcome (owner-approved inclusive rules)
+After importing ALL remaining legacy rows under the 4 approved rules (no-plate rows
+imported untied, Pandan as its own closed branch, "Cuci Xpress"→Tungku, refunds
+netted), the app Order Report **net rose from ~B$674k to ~B$1.309M**, landing ~4%
+(~B$52.6k) ABOVE the Power BI master's $1,256,805.26 — expected, not a bug. **Why over,
+not under:** the inclusive rules deliberately add rows the master's headline figure may
+exclude/dedupe differently (all no-plate rows ≈ B$371k net, closed Pandan branch ≈
+B$215k, refunds netted at full order-total). A cent-exact match to that single master
+number was never achievable given the sheet's own lineage quirks; the goal was to close
+the ~B$580k gap, which it did. Don't chase the residual few-percent by deleting
+approved-rule rows without asking.
