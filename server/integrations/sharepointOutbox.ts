@@ -29,6 +29,8 @@ import {
   timeToExcelFraction,
   isSharePointConfigured,
   loadSharePointConfig,
+  ensureFeeColumn,
+  invalidateFeeColumnCache,
 } from './sharepoint';
 
 const BATCH_SIZE = 20;
@@ -307,6 +309,19 @@ async function hydrateJoinedRow(id: string | number): Promise<JoinedRow | undefi
 export async function drainOnce(): Promise<{ picked: number; sent: number; failed: number }> {
   if (!isSharePointConfigured()) return { picked: 0, sent: 0, failed: 0 };
 
+  // Make sure the live table has the "Transaction Fee" column before we send
+  // 26-value rows (dry-run skips the real append, so it doesn't need it).
+  // If this fails we skip the tick WITHOUT claiming, so rows stay pending and
+  // retry on the next poll rather than burning attempts on doomed appends.
+  if (process.env.SHAREPOINT_DRY_RUN !== '1') {
+    try {
+      await ensureFeeColumn();
+    } catch (err) {
+      console.warn('[sharepoint-outbox] ensureFeeColumn failed — skipping drain this tick:', err);
+      return { picked: 0, sent: 0, failed: 0 };
+    }
+  }
+
   // Atomically CLAIM a batch of pending rows in a single statement.
   //
   // Why a single UPDATE...RETURNING (not SELECT...FOR UPDATE then process):
@@ -400,6 +415,12 @@ export async function drainOnce(): Promise<{ picked: number; sent: number; faile
       sent++;
     } catch (err: any) {
       const msg = String(err?.message ?? err).slice(0, 1000);
+      // If the append failed because the table shape drifted (e.g. the fee
+      // column was manually removed), force a re-verify on the next tick so
+      // the worker self-heals instead of looping on width mismatches.
+      if (/append_failed_400|column|does not match|number of/i.test(msg)) {
+        invalidateFeeColumnCache();
+      }
       // Compute next attempt or terminal failure.
       const attemptsRes = await db.execute(sql`
         SELECT attempts FROM sharepoint_outbox WHERE id = ${id}
@@ -462,6 +483,9 @@ export async function backfillSentRefundRows(dryRun = false): Promise<RefundBack
   if (!isSharePointConfigured()) {
     throw new Error('sharepoint_not_configured');
   }
+  // Row PATCHes below send the full 26-value row, so the "Transaction Fee"
+  // column must exist first (no-op if already present).
+  if (!dryRun) await ensureFeeColumn();
 
   const res = await db.execute(sql`
     SELECT id, cx_number, order_id, excel_row_id

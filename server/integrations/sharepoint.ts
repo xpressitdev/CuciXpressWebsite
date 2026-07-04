@@ -27,6 +27,14 @@ let tokenCache: TokenCache = null;
 
 let cachedDriveItemPath: string | null = null;
 
+// The export's rightmost column. Appends send one value per table column, so
+// this column must exist in the live Excel table before 26-value rows are sent.
+// ensureFeeColumn() adds it on demand; feeColumnEnsured caches success so we
+// don't re-check every batch.
+export const FEE_COLUMN_NAME = 'Transaction Fee';
+let feeColumnEnsured = false;
+let ensureFeeColumnInFlight: Promise<void> | null = null;
+
 // Two drive types are supported:
 //   * 'site' — file lives in a SharePoint Team Site library
 //             (URL host like: cucixpress.sharepoint.com/sites/Foo/...)
@@ -156,6 +164,77 @@ async function resolveDriveItemPath(cfg: SharePointConfig): Promise<string> {
 export function resetSharePointCaches() {
   tokenCache = null;
   cachedDriveItemPath = null;
+  feeColumnEnsured = false;
+}
+
+// ---------------------------------------------------------------------------
+// Ensure the configured Excel table has the "Transaction Fee" column as its
+// last column. Idempotent and process-cached.
+//
+// Appending a row to an Excel Table requires exactly one value per table
+// column, so the table must be 26-wide before the export sends its 26th value.
+// This lets each environment self-heal its OWN configured file: dev adds the
+// column to its dummy sheet, production adds it to the master on boot — no
+// manual Excel step, and it safely covers the dev+prod dual-drainer setup.
+//
+// Historical rows get blank cells for the new column (their fee was never
+// tracked in the sheet). Throws on failure so callers can retry.
+// ---------------------------------------------------------------------------
+export async function ensureFeeColumn(): Promise<void> {
+  if (feeColumnEnsured) return;
+  // Single-flight: concurrent callers (30s tick + manual "drain now" + backfill)
+  // share one in-flight attempt so they can't each POST a duplicate column.
+  if (ensureFeeColumnInFlight) return ensureFeeColumnInFlight;
+  ensureFeeColumnInFlight = doEnsureFeeColumn()
+    .then(() => { feeColumnEnsured = true; })
+    .finally(() => { ensureFeeColumnInFlight = null; });
+  return ensureFeeColumnInFlight;
+}
+
+// Force the next ensureFeeColumn() to re-verify against the live table. Call
+// this if an append/update fails on a column/width mismatch (e.g. the column
+// was manually removed) so the worker self-heals instead of looping forever.
+export function invalidateFeeColumnCache() {
+  feeColumnEnsured = false;
+}
+
+async function doEnsureFeeColumn(): Promise<void> {
+  const cfg = loadSharePointConfig();
+  if (!cfg) throw new Error('sharepoint_not_configured');
+  const token = await getAccessToken(cfg);
+  const driveItemPath = await resolveDriveItemPath(cfg);
+  const base = `${driveItemPath}:/workbook/tables/${encodeURIComponent(cfg.tableName)}/columns`;
+
+  // List existing column names (also used to re-check after a failed add).
+  const listColumnNames = async (): Promise<string[]> => {
+    const res = await fetch(`${base}?$select=name`, { headers: { Authorization: `Bearer ${token}` } });
+    if (!res.ok) {
+      const t = await res.text();
+      if (res.status === 401) tokenCache = null;
+      throw new Error(`columns_list_failed_${res.status}: ${t.slice(0, 300)}`);
+    }
+    const j = (await res.json()) as { value?: Array<{ name?: string }> };
+    return (j.value ?? []).map(c => (c.name ?? '').trim());
+  };
+
+  const names = await listColumnNames();
+  if (names.includes(FEE_COLUMN_NAME)) return;
+
+  // Add as the last column (index = current column count, 0-based).
+  const addRes = await fetch(base, {
+    method: 'POST',
+    headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
+    body: JSON.stringify({ name: FEE_COLUMN_NAME, index: names.length }),
+  });
+  if (!addRes.ok) {
+    if (addRes.status === 401) tokenCache = null;
+    // Another caller/process may have added it between our check and this POST
+    // (or across the dev+prod dual drainers). Re-verify before failing.
+    if ((await listColumnNames()).includes(FEE_COLUMN_NAME)) return;
+    const t = await addRes.text();
+    throw new Error(`column_add_failed_${addRes.status}: ${t.slice(0, 300)}`);
+  }
+  console.log(`[sharepoint] added "${FEE_COLUMN_NAME}" column to table ${cfg.tableName} (${cfg.filePath})`);
 }
 
 // ---------------------------------------------------------------------------
