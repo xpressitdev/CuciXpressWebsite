@@ -38,6 +38,17 @@ branchId=null, so the admin tab makes them pick a branch (required) and sends
 `branch_id`; the server treats owner as privileged. The credit row carries
 branch_id for audit.
 
+**Removal:** DELETE /api/pos/loyalty/stamp/:id (owner/manager/cashier). A credit
+is removable ONLY when nothing has been used toward a redeemed reward
+(`stamps_remaining === stamps_total`) — re-checked atomically in the DELETE WHERE
+so a racing redeem can't slip a partly-used credit out. Cashiers are branch-locked
+(can only remove their own branch's credit); owner/manager remove any. Auto-counted
+real orders are never removable (they're real services). The lookup returns a
+`manual_entries[]` audit list with a server-computed `deletable`+`reason` per row;
+the UI shows Remove only when the server says deletable — never trust a client flag.
+**Why:** deleting a consumed credit would retroactively unwind a free wash the
+customer already claimed, breaking the redemption pool.
+
 **Why:** owner wants a full audit trail (who/when/branch/note/receipt) and the
 migration means past washes are already auto-counted — the tool only tops up the
 gap, so checking the current count before adding is the intended flow.

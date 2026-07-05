@@ -8324,6 +8324,54 @@ export async function registerRoutes(app: Express): Promise<Server> {
       const auto = Number(autoRow?.n ?? 0);
       const manual = Number(manualRow?.n ?? 0);
       const total = auto + manual;
+
+      // Full audit trail of manual credits for this plate (newest first) so
+      // staff can see each credit's date / branch / receipt / note and remove
+      // a mistaken one. `deletable` is decided server-side: a credit can be
+      // removed only if none of it has been used toward a redeemed reward
+      // (stamps_remaining === stamps_total) and — for branch-locked cashiers —
+      // only if it belongs to their own branch. Owners/managers may remove any.
+      const staffUser = req.staff!.user as any;
+      const staffRole = String(staffUser.role);
+      const staffBranchId = (staffUser.branchId ?? null) as number | null;
+      const isPrivileged = staffRole === 'owner' || staffRole === 'manager';
+      const entryRows = (await db.execute(sql`
+        SELECT lms.id, lms.created_at, lms.stamps_total, lms.stamps_remaining,
+               lms.note, lms.receipt_no, lms.branch_id,
+               b.name AS branch_name, s.name AS staff_name
+          FROM loyalty_manual_stamps lms
+          LEFT JOIN branches b ON b.id = lms.branch_id
+          LEFT JOIN staff s ON s.id = lms.staff_id
+         WHERE (${carId}::int IS NOT NULL AND lms.vehicle_id = ${carId})
+            OR (lms.vehicle_id IS NULL AND lms.plate_norm = ${norm})
+         ORDER BY lms.created_at DESC
+      `)).rows as Array<{
+        id: string; created_at: string; stamps_total: number; stamps_remaining: number;
+        note: string | null; receipt_no: string | null; branch_id: number | null;
+        branch_name: string | null; staff_name: string | null;
+      }>;
+      const manual_entries = entryRows.map((e) => {
+        const total = Number(e.stamps_total);
+        const remaining = Number(e.stamps_remaining);
+        let deletable = true;
+        let reason: string | null = null;
+        if (remaining < total) { deletable = false; reason = 'used'; }
+        else if (!isPrivileged && e.branch_id !== staffBranchId) { deletable = false; reason = 'other_branch'; }
+        return {
+          id: e.id,
+          created_at: e.created_at,
+          stamps_total: total,
+          stamps_remaining: remaining,
+          note: e.note,
+          receipt_no: e.receipt_no,
+          branch_id: e.branch_id,
+          branch_name: e.branch_name,
+          staff_name: e.staff_name,
+          deletable,
+          reason,
+        };
+      });
+
       res.json({
         plate: car?.license_plate ?? raw,
         vehicle_id: carId,
@@ -8334,6 +8382,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
         total_stamps: total,
         required: LOYALTY_REQUIRED_COUNT,
         can_redeem: total >= LOYALTY_REQUIRED_COUNT,
+        manual_entries,
       });
     } catch (err) {
       console.error('[pos.loyalty.lookup] failed:', err);
@@ -8440,6 +8489,45 @@ export async function registerRoutes(app: Express): Promise<Server> {
     } catch (err) {
       console.error('[pos.loyalty.stamp] failed:', err);
       res.status(500).json({ error: 'stamp_failed' });
+    }
+  });
+
+  // DELETE /api/pos/loyalty/stamp/:id — remove a mistaken manual credit.
+  // Staff (owner/manager/cashier). Guards:
+  //  * Only credits with NOTHING used toward a redeemed reward can be removed
+  //    (stamps_remaining === stamps_total). The WHERE re-checks this atomically
+  //    so a concurrent redemption can't slip a used credit out from under us.
+  //  * Cashiers are branch-locked: they can only remove credits from their own
+  //    branch. Owners/managers may remove any branch's credit.
+  app.delete('/api/pos/loyalty/stamp/:id', requireStaff, requireStaffRole('owner', 'manager', 'cashier'), async (req, res) => {
+    const id = String(req.params.id ?? '').trim();
+    if (!id) return res.status(400).json({ error: 'id_required' });
+    const staffUser = req.staff!.user as any;
+    const staffRole = String(staffUser.role);
+    const staffBranchId = (staffUser.branchId ?? null) as number | null;
+    const isPrivileged = staffRole === 'owner' || staffRole === 'manager';
+    try {
+      const row = (await db.execute(sql`
+        SELECT id, stamps_total, stamps_remaining, branch_id
+          FROM loyalty_manual_stamps WHERE id = ${id} LIMIT 1
+      `)).rows[0] as { id: string; stamps_total: number; stamps_remaining: number; branch_id: number | null } | undefined;
+      if (!row) return res.status(404).json({ error: 'not_found' });
+      if (Number(row.stamps_remaining) !== Number(row.stamps_total)) {
+        return res.status(409).json({ error: 'already_used' });
+      }
+      if (!isPrivileged && row.branch_id !== staffBranchId) {
+        return res.status(403).json({ error: 'other_branch' });
+      }
+      const deleted = (await db.execute(sql`
+        DELETE FROM loyalty_manual_stamps
+         WHERE id = ${id} AND stamps_remaining = stamps_total
+        RETURNING id
+      `)).rows[0];
+      if (!deleted) return res.status(409).json({ error: 'already_used' });
+      res.json({ ok: true });
+    } catch (err) {
+      console.error('[pos.loyalty.stamp.delete] failed:', err);
+      res.status(500).json({ error: 'delete_failed' });
     }
   });
 

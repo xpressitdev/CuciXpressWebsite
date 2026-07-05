@@ -29,6 +29,20 @@ import { useStaffAuth } from "@/hooks/useStaffAuth";
 // the picker is hidden and the credit goes to their own branch. The
 // customer's loyalty card picks up the stamps automatically by plate.
 // ============================================================
+type ManualEntry = {
+  id: string;
+  created_at: string;
+  stamps_total: number;
+  stamps_remaining: number;
+  note: string | null;
+  receipt_no: string | null;
+  branch_id: number | null;
+  branch_name: string | null;
+  staff_name: string | null;
+  deletable: boolean;
+  reason: string | null;
+};
+
 type LoyaltyLookup = {
   plate: string;
   vehicle_id: number | null;
@@ -39,6 +53,22 @@ type LoyaltyLookup = {
   total_stamps: number;
   required: number;
   can_redeem: boolean;
+  manual_entries: ManualEntry[];
+};
+
+const fmtStampDate = (iso: string) => {
+  try {
+    return new Date(iso).toLocaleString("en-GB", {
+      timeZone: "Asia/Brunei",
+      day: "numeric",
+      month: "short",
+      year: "numeric",
+      hour: "2-digit",
+      minute: "2-digit",
+    });
+  } catch {
+    return iso;
+  }
 };
 
 type BranchRow = { id: number; name: string; location: string };
@@ -93,17 +123,6 @@ export default function LoyaltyStampTab() {
       return (await r.json()) as LoyaltyLookup & { ok: boolean; added: number };
     },
     onSuccess: (data) => {
-      setInfo({
-        plate: info?.plate ?? plate.trim().toUpperCase(),
-        vehicle_id: info?.vehicle_id ?? null,
-        brand: info?.brand ?? null,
-        model: info?.model ?? null,
-        auto_stamps: data.auto_stamps,
-        manual_stamps: data.manual_stamps,
-        total_stamps: data.total_stamps,
-        required: data.required,
-        can_redeem: data.can_redeem,
-      });
       setCount("1");
       setNote("");
       setReceiptNo("");
@@ -113,11 +132,38 @@ export default function LoyaltyStampTab() {
           .trim()
           .toUpperCase()}.`,
       });
+      // Re-run the lookup so the running count AND the credit history (with the
+      // new entry) both refresh from the server.
+      lookup.mutate();
     },
     onError: (err: any) =>
       toast({
         title: "Couldn't add stamps",
         description: err?.message ?? "Please try again.",
+        variant: "destructive",
+      }),
+  });
+
+  const remove = useMutation({
+    mutationFn: async (id: string) => {
+      const r = await apiRequest(
+        "DELETE",
+        `/api/pos/loyalty/stamp/${encodeURIComponent(id)}`,
+      );
+      return (await r.json()) as { ok: boolean };
+    },
+    onSuccess: () => {
+      toast({ title: "Credit removed" });
+      // Refresh counts + history from the server.
+      lookup.mutate();
+    },
+    onError: (err: any) =>
+      toast({
+        title: "Couldn't remove credit",
+        description:
+          err?.message === "already_used"
+            ? "This credit was already used toward a free wash."
+            : err?.message ?? "Please try again.",
         variant: "destructive",
       }),
   });
@@ -260,6 +306,78 @@ export default function LoyaltyStampTab() {
                   : `Add ${count} stamp${count === "1" ? "" : "s"}`}
               </Button>
             </>
+          )}
+
+          {info && info.manual_entries.length > 0 && (
+            <div className="space-y-2 pt-1" data-testid="loyalty-credit-history">
+              <Label className="text-xs">Staff credit history</Label>
+              <p className="text-[11px] text-gray-500">
+                Each credit shows when it was added, the branch, receipt no. and
+                note. You can remove a credit only if none of it has been used
+                toward a free wash yet. Past washes counted by the system aren't
+                shown here — they're real services and can't be removed.
+              </p>
+              {info.manual_entries.map((e) => {
+                const used = e.stamps_total - e.stamps_remaining;
+                return (
+                  <div
+                    key={e.id}
+                    className="rounded-md border border-gray-200 px-3 py-2 text-xs flex items-start justify-between gap-3"
+                    data-testid={`loyalty-credit-${e.id}`}
+                  >
+                    <div className="min-w-0 space-y-0.5">
+                      <div className="font-semibold text-gray-800">
+                        +{e.stamps_total} stamp{e.stamps_total === 1 ? "" : "s"}
+                        {used > 0 && (
+                          <span className="ml-1 font-normal text-amber-600">
+                            · {used} used
+                          </span>
+                        )}
+                      </div>
+                      <div className="text-gray-500">
+                        {fmtStampDate(e.created_at)}
+                        {e.branch_name ? ` · ${e.branch_name}` : ""}
+                      </div>
+                      {e.receipt_no && (
+                        <div className="text-gray-500">
+                          Receipt: {e.receipt_no}
+                        </div>
+                      )}
+                      {e.note && (
+                        <div className="text-gray-500 break-words">
+                          “{e.note}”
+                        </div>
+                      )}
+                      {e.staff_name && (
+                        <div className="text-gray-400">by {e.staff_name}</div>
+                      )}
+                    </div>
+                    <div className="shrink-0 self-center">
+                      {e.deletable ? (
+                        <Button
+                          variant="outline"
+                          size="sm"
+                          className="border-2 border-black text-red-600 hover:text-red-700 h-7 px-2"
+                          disabled={remove.isPending}
+                          onClick={() => remove.mutate(e.id)}
+                          data-testid={`button-loyalty-remove-${e.id}`}
+                        >
+                          Remove
+                        </Button>
+                      ) : (
+                        <span className="text-[10px] text-gray-400 whitespace-nowrap">
+                          {e.reason === "used"
+                            ? "used"
+                            : e.reason === "other_branch"
+                              ? "other branch"
+                              : ""}
+                        </span>
+                      )}
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
           )}
         </CardContent>
       </Card>
