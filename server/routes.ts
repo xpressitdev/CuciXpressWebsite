@@ -8531,6 +8531,204 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
+  // POST /api/pos/loyalty/redeem  Body: { plate, branch_id? }
+  // Staff (owner/manager/cashier) claim a plate's ready free wash AT THE LANE.
+  // Unlike the customer self-redeem (which creates a branchless voucher for the
+  // customer to scan later), this consumes 4 stamps AND queues the B$0 free
+  // wash immediately at the resolved branch with a T-NNN ticket — the car is
+  // right there. Cashiers are branch-pinned; owner/manager pass branch_id.
+  // The plate need NOT belong to a registered account (walk-in cars welcome),
+  // so the redemption's customer_user_id may be null.
+  const posRedeemSchema = z.object({ plate: z.string().trim().min(1).max(20) });
+  app.post('/api/pos/loyalty/redeem', requireStaff, requireStaffRole('owner', 'manager', 'cashier'), async (req, res) => {
+    const parsed = posRedeemSchema.safeParse(req.body);
+    if (!parsed.success) return res.status(400).json({ error: 'invalid_request' });
+    const staffUser = req.staff!.user as any;
+    const staffRole = String(staffUser.role);
+    const staffBranchId = (staffUser.branchId ?? null) as number | null;
+    const isPrivileged = staffRole === 'owner' || staffRole === 'manager';
+
+    const bodyBranchId = Number(req.body?.branch_id);
+    const branchId = isPrivileged && Number.isFinite(bodyBranchId) && bodyBranchId > 0
+      ? bodyBranchId
+      : staffBranchId;
+    if (branchId == null) return res.status(400).json({ error: 'no_branch' });
+
+    const { plate } = parsed.data;
+    const norm = LOYALTY_PLATE_NORM(plate);
+
+    // Allocate the next T-NNN for a branch + today (UTC) — same algorithm as
+    // /api/verify-qr and /api/pos/orders so prepaid + walk-in tickets share one
+    // stream.
+    const allocateTicket = async (tx: any, brId: number) => {
+      const seqRow = (await tx.execute(sql`
+        SELECT COALESCE(
+          MAX( NULLIF(regexp_replace(ticket_code, '\\D', '', 'g'), '')::int ),
+          0
+        ) + 1 AS next_seq
+          FROM orders
+         WHERE branch_id = ${brId}
+           AND ticket_day = (now() AT TIME ZONE 'UTC')::date
+      `)).rows as Array<{ next_seq: number }>;
+      const seq = seqRow[0]?.next_seq ?? 1;
+      return `T-${String(seq).padStart(3, '0')}`;
+    };
+
+    try {
+      const branchRow = (await db.execute(sql`
+        SELECT name FROM branches WHERE id = ${branchId} LIMIT 1
+      `)).rows[0] as { name: string } | undefined;
+      if (!branchRow) return res.status(400).json({ error: 'invalid_branch' });
+
+      const out = await db.transaction(async (tx) => {
+        // 1. Resolve + lock the car row (if the plate is known) so concurrent
+        //    claims for the same plate serialize. Walk-in plates may have no
+        //    car row — then attribution falls back to plate_norm.
+        const car = (await tx.execute(sql`
+          SELECT id, license_plate, user_id FROM cars
+           WHERE REGEXP_REPLACE(UPPER(license_plate), '\s+', '', 'g') = ${norm}
+           LIMIT 1
+           FOR UPDATE
+        `)).rows[0] as { id: number; license_plate: string; user_id: number | null } | undefined;
+        const vehicleId = car?.id ?? null;
+        const carPlate = car?.license_plate ?? plate.toUpperCase();
+        const ownerUserId = car?.user_id ?? null;
+
+        // 2. If a free-wash voucher is already pending for this car/plate (e.g.
+        //    the customer redeemed in the app but hasn't scanned yet), just
+        //    queue THAT voucher — don't consume more stamps.
+        const pending = (await tx.execute(sql`
+          SELECT id, payment_ref FROM orders
+           WHERE qr_provider = 'loyalty'
+             AND status      = 'paid'
+             AND ticket_code IS NULL
+             AND (
+                   (${vehicleId}::int IS NOT NULL AND vehicle_id = ${vehicleId})
+                   OR (vehicle_id IS NULL
+                       AND REGEXP_REPLACE(UPPER(plate), '\s+', '', 'g') = ${norm})
+                 )
+           ORDER BY created_at ASC
+           LIMIT 1
+           FOR UPDATE
+        `)).rows[0] as { id: string; payment_ref: string | null } | undefined;
+
+        if (pending) {
+          const ticketCode = await allocateTicket(tx, branchId);
+          await tx.execute(sql`
+            UPDATE orders
+               SET branch_id  = ${branchId},
+                   ticket_code = ${ticketCode},
+                   status      = 'queued',
+                   claimed_at  = COALESCE(claimed_at, now()),
+                   ticket_day  = (now() AT TIME ZONE 'UTC')::date
+             WHERE id = ${pending.id}
+          `);
+          if (pending.payment_ref) {
+            await tx.execute(sql`
+              UPDATE loyalty_redemptions SET branch_id = ${branchId}
+               WHERE voucher_order_id = ${pending.id}
+            `);
+          }
+          return { http: 200, body: { ok: true, ticket_code: ticketCode, plate: carPlate, package_name: LOYALTY_VOUCHER_NAME, branch_id: branchId, branch_name: branchRow.name, reused_pending: true } };
+        }
+
+        // 3. Recount eligible real orders (oldest-first) + manual stamps, all
+        //    locked. Same attribution / filters as the customer redeem.
+        const eligibleRows = (await tx.execute(sql`
+          SELECT id FROM orders
+           WHERE (
+                   (${vehicleId}::int IS NOT NULL AND vehicle_id = ${vehicleId})
+                   OR (vehicle_id IS NULL
+                       AND REGEXP_REPLACE(UPPER(plate), '\s+', '', 'g') = ${norm})
+                 )
+             AND package_id           = ${LOYALTY_PKG_ID}
+             AND loyalty_consumed_in IS NULL
+             AND status               IN ('paid','queued','washing','done')
+             AND NOT (payment_method  = 'voucher' AND qr_provider = 'loyalty')
+             AND id NOT IN (SELECT order_id FROM membership_redemptions)
+             AND created_at           >= ${LOYALTY_COLLECTION_START}
+           ORDER BY created_at ASC
+           LIMIT ${LOYALTY_REQUIRED_COUNT}
+           FOR UPDATE
+        `)).rows as Array<{ id: string }>;
+
+        const manualRows = (await tx.execute(sql`
+          SELECT id, stamps_remaining FROM loyalty_manual_stamps
+           WHERE stamps_remaining > 0
+             AND (
+                   (${vehicleId}::int IS NOT NULL AND vehicle_id = ${vehicleId})
+                   OR (vehicle_id IS NULL AND plate_norm = ${norm})
+                 )
+           ORDER BY created_at ASC
+           FOR UPDATE
+        `)).rows as Array<{ id: string; stamps_remaining: number }>;
+        const manualAvailable = manualRows.reduce((s, r) => s + Number(r.stamps_remaining), 0);
+
+        const totalAvailable = eligibleRows.length + manualAvailable;
+        if (totalAvailable < LOYALTY_REQUIRED_COUNT) {
+          return { http: 400, body: { error: 'not_enough_stamps', have: totalAvailable, need: LOYALTY_REQUIRED_COUNT } };
+        }
+
+        // 4. Consume real orders first, then top up from manual credits.
+        const ordersToConsume = eligibleRows.slice(0, LOYALTY_REQUIRED_COUNT);
+        let needFromManual = LOYALTY_REQUIRED_COUNT - ordersToConsume.length;
+
+        const redemptionId = `loy_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 8)}`;
+        const voucherId    = `ord_loy_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 8)}`;
+        const ticketCode   = await allocateTicket(tx, branchId);
+
+        // Voucher order — created already queued at the branch with its ticket
+        // (staff-at-lane path), unlike the customer flow's branchless voucher.
+        await tx.execute(sql`
+          INSERT INTO orders (
+            id, branch_id, customer_id, vehicle_id, plate,
+            package_id, package_name, package_price_cents,
+            addons, subtotal_cents, total_cents,
+            payment_method, payment_ref, qr_provider,
+            ticket_code, status, claimed_at, ticket_day, customer_name_walkin
+          ) VALUES (
+            ${voucherId}, ${branchId}, ${ownerUserId}, ${vehicleId}, ${carPlate},
+            ${LOYALTY_PKG_ID}, ${LOYALTY_VOUCHER_NAME}, 0,
+            '[]'::jsonb, 0, 0,
+            'voucher', ${redemptionId}, 'loyalty',
+            ${ticketCode}, 'queued', now(), (now() AT TIME ZONE 'UTC')::date, NULL
+          )
+        `);
+
+        await tx.execute(sql`
+          INSERT INTO loyalty_redemptions
+            (id, customer_user_id, voucher_order_id, package_id, branch_id)
+          VALUES
+            (${redemptionId}, ${ownerUserId}, ${voucherId}, ${LOYALTY_PKG_ID}, ${branchId})
+        `);
+
+        for (const row of ordersToConsume) {
+          await tx.execute(sql`
+            UPDATE orders SET loyalty_consumed_in = ${redemptionId}
+             WHERE id = ${row.id} AND loyalty_consumed_in IS NULL
+          `);
+        }
+        for (const row of manualRows) {
+          if (needFromManual <= 0) break;
+          const take = Math.min(needFromManual, Number(row.stamps_remaining));
+          await tx.execute(sql`
+            UPDATE loyalty_manual_stamps
+               SET stamps_remaining = stamps_remaining - ${take}
+             WHERE id = ${row.id}
+          `);
+          needFromManual -= take;
+        }
+
+        return { http: 201, body: { ok: true, ticket_code: ticketCode, plate: carPlate, package_name: LOYALTY_VOUCHER_NAME, branch_id: branchId, branch_name: branchRow.name, reused_pending: false } };
+      });
+
+      return res.status(out.http).json(out.body);
+    } catch (err) {
+      console.error('[pos.loyalty.redeem] failed:', err);
+      return res.status(500).json({ error: 'redeem_failed' });
+    }
+  });
+
   // ==========================================================================
   // PATCH /api/pos/queue/reorder — Lane control manual ordering.
   //

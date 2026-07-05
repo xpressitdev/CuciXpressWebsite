@@ -24,6 +24,19 @@ depending on where you look.
 oldest-first, all under `FOR UPDATE` (car row + orders + manual rows) so concurrent
 redeems for the same car serialize and can't over-consume.
 
+**Two redeem paths, one eligibility pool (keep in lockstep):**
+`/api/customer/loyalty/redeem` (Lucia, car-owned only) creates a BRANCHLESS voucher
+the customer scans later. `/api/pos/loyalty/redeem` (staff owner/manager/cashier)
+consumes the same 4 stamps but QUEUES the free wash immediately — voucher order is
+inserted already `status='queued'` with `branch_id` + `ticket_code` (allocated with
+the verify-qr `MAX(digits)+1`, `T-NNN`, UTC `ticket_day` algorithm) + `claimed_at`.
+Both use the identical eligibility filters/attribution; if you change one, change both.
+Staff path also short-circuits: if a pending loyalty voucher (paid, ticket_code NULL)
+already exists for the car/plate it queues THAT one instead of consuming new stamps.
+**Why:** staff claim is for a car physically at the lane, so it skips the scan step.
+`loyalty_redemptions.customer_user_id` was made NULLABLE (2026-07-05_01) because staff
+can claim for a walk-in plate with no user account — customer path always has one.
+
 **Access: owner/manager/cashier.** Both /api/pos/loyalty/lookup and /stamp are
 `requireStaffRole('owner','manager','cashier')` (lane excluded). The shared
 LoyaltyStampTab is reused in both the admin Loyalty tab and a POS header dialog;

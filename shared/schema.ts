@@ -790,7 +790,10 @@ export type SubscriptionInvoice = typeof subscriptionInvoices.$inferSelect;
 // payment_method='voucher', qr_provider='loyalty', total_cents=0.
 export const loyaltyRedemptions = pgTable("loyalty_redemptions", {
   id: text("id").primaryKey(),
-  customer_user_id: integer("customer_user_id").references(() => users.id).notNull(),
+  // Nullable since 2026-07-05_01: staff can claim a free wash for a walk-in
+  // plate that has no registered user account (customer self-redeem always
+  // has one; staff POS/admin claims may not).
+  customer_user_id: integer("customer_user_id").references(() => users.id),
   voucher_order_id: text("voucher_order_id").references(() => orders.id).notNull(),
   package_id: text("package_id").notNull(),
   // Nullable since 2026-05-06_01: free-wash voucher's branch is set

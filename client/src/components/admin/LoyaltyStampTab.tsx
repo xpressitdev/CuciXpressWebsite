@@ -168,9 +168,48 @@ export default function LoyaltyStampTab() {
       }),
   });
 
+  const redeem = useMutation({
+    mutationFn: async () => {
+      const r = await apiRequest("POST", "/api/pos/loyalty/redeem", {
+        plate: plate.trim(),
+        // Cashiers are branch-pinned server-side; only owners/managers choose.
+        ...(canPickBranch ? { branch_id: Number(branchId) } : {}),
+      });
+      return (await r.json()) as {
+        ok: boolean;
+        ticket_code: string;
+        plate: string;
+        package_name: string;
+        branch_name: string;
+      };
+    },
+    onSuccess: (data) => {
+      toast({
+        title: `Free wash queued — ${data.ticket_code}`,
+        description: `${data.package_name} for ${data.plate} at ${data.branch_name}. Send the car to the lane.`,
+      });
+      // Re-run the lookup so the count drops by the redeemed stamps.
+      lookup.mutate();
+    },
+    onError: (err: any) =>
+      toast({
+        title: "Couldn't claim free wash",
+        description:
+          err?.message === "not_enough_stamps"
+            ? "This plate doesn't have enough stamps yet."
+            : err?.message === "no_branch"
+              ? "Pick a branch first."
+              : err?.message ?? "Please try again.",
+        variant: "destructive",
+      }),
+  });
+
   const canCheck = plate.trim().length >= 1 && !lookup.isPending;
   const canAdd =
     !!info && (!canPickBranch || branchId !== "") && !add.isPending;
+  // Owners/managers must pick a branch before queuing (the picker sits below).
+  const canRedeem =
+    !!info && info.can_redeem && (!canPickBranch || branchId !== "") && !redeem.isPending;
 
   return (
     <div className="max-w-xl">
@@ -236,6 +275,25 @@ export default function LoyaltyStampTab() {
                 staff
                 {info.can_redeem ? " · ready for a free wash" : ""}
               </p>
+              {info.can_redeem && (
+                <>
+                  <Button
+                    className="w-full mt-2 bg-emerald-600 hover:bg-emerald-700 text-white border-2 border-black"
+                    disabled={!canRedeem}
+                    onClick={() => redeem.mutate()}
+                    data-testid="button-loyalty-redeem"
+                  >
+                    {redeem.isPending
+                      ? "Queuing…"
+                      : "Claim free wash — queue it now"}
+                  </Button>
+                  {canPickBranch && branchId === "" && (
+                    <p className="text-[11px] text-amber-600 mt-1">
+                      Pick a branch below first.
+                    </p>
+                  )}
+                </>
+              )}
             </div>
           )}
 
