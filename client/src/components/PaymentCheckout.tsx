@@ -327,20 +327,20 @@ export default function PaymentCheckout({ selectedService, onBack, initialPlate 
   };
 
   return (
-    <div className="min-h-screen bg-gradient-to-br from-purple-50 to-orange-50 py-8">
+    <div className="min-h-screen bg-gradient-to-br from-purple-50 to-orange-50 py-5 sm:py-8 checkout-grid-wrap">
       <div className="max-w-4xl mx-auto px-4 sm:px-6 lg:px-8">
         {/* Header */}
-        <div className="flex items-center mb-8">
+        <div className="flex items-center mb-5 sm:mb-8">
           {onBack && (
-            <Button variant="ghost" onClick={onBack} className="mr-4">
-              <ArrowLeft className="w-4 h-4 mr-2" />
-              Back
+            <Button variant="ghost" onClick={onBack} className="mr-2 sm:mr-4 px-2 sm:px-4">
+              <ArrowLeft className="w-4 h-4 sm:mr-2" />
+              <span className="hidden sm:inline">Back</span>
             </Button>
           )}
-          <h1 className="text-3xl font-bold text-gray-900">Secure Checkout</h1>
+          <h1 className="text-2xl sm:text-3xl font-bold text-gray-900">Secure Checkout</h1>
         </div>
 
-        <div className="grid lg:grid-cols-2 gap-8">
+        <div className="checkout-grid">
           {/* Order Summary */}
           <motion.div
             initial={{ opacity: 0, x: -20 }}
@@ -486,14 +486,14 @@ export default function PaymentCheckout({ selectedService, onBack, initialPlate 
 
                 {isAuthenticated && (
                   <div className="space-y-4">
-                    <div className="flex items-center justify-between">
-                      <h3 className="font-semibold">Welcome back!</h3>
-                      <div className="flex items-center gap-2">
-                        <CheckCircle className="w-4 h-4 text-green-500" />
-                        <span className="text-sm text-green-600">{user?.email || user?.username}</span>
+                    <div className="flex flex-wrap items-center justify-between gap-x-3 gap-y-1">
+                      <h3 className="font-semibold whitespace-nowrap">Welcome back!</h3>
+                      <div className="flex items-center gap-2 min-w-0 max-w-full">
+                        <CheckCircle className="w-4 h-4 text-green-500 shrink-0" />
+                        <span className="text-sm text-green-600 truncate min-w-0">{user?.email || user?.username}</span>
                         <button 
                           onClick={handleLogout}
-                          className="text-xs text-gray-500 hover:text-gray-700 underline ml-2"
+                          className="text-xs text-gray-500 hover:text-gray-700 underline shrink-0"
                           data-testid="button-logout"
                         >
                           Logout
@@ -562,22 +562,22 @@ export default function PaymentCheckout({ selectedService, onBack, initialPlate 
                           </div>
                         </div>
                       ) : (
-                        <div className="flex items-center justify-between px-3 py-2.5">
-                          <span className="text-xs text-gray-500">Car plate</span>
-                          <span className="font-mono font-bold text-gray-900" data-testid="text-locked-plate">
+                        <div className="flex items-center justify-between gap-3 px-3 py-2.5">
+                          <span className="text-xs text-gray-500 shrink-0">Car plate</span>
+                          <span className="font-mono font-bold text-gray-900 text-right" data-testid="text-locked-plate">
                             {formData.carPlate || <span className="text-amber-600 text-xs font-sans">Not set — add in dashboard</span>}
                           </span>
                         </div>
                       )}
-                      <div className="flex items-center justify-between px-3 py-2.5">
-                        <span className="text-xs text-gray-500">Phone</span>
-                        <span className="text-gray-900" data-testid="text-locked-phone">
+                      <div className="flex items-center justify-between gap-3 px-3 py-2.5">
+                        <span className="text-xs text-gray-500 shrink-0">Phone</span>
+                        <span className="text-gray-900 text-right" data-testid="text-locked-phone">
                           {formData.phone || <span className="text-amber-600 text-xs">Not set</span>}
                         </span>
                       </div>
-                      <div className="flex items-center justify-between px-3 py-2.5">
-                        <span className="text-xs text-gray-500">Email</span>
-                        <span className="text-gray-900 text-sm" data-testid="text-locked-email">
+                      <div className="flex items-center justify-between gap-3 px-3 py-2.5">
+                        <span className="text-xs text-gray-500 shrink-0">Email</span>
+                        <span className="text-gray-900 text-sm text-right break-all min-w-0" data-testid="text-locked-email">
                           {formData.email || <span className="text-amber-600 text-xs">Not set — add in your dashboard</span>}
                         </span>
                       </div>
