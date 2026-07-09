@@ -400,7 +400,7 @@ export function VehiclesTab({ cars, memberships }: Props) {
             </button>
           ) : (
             <Link
-              href="/checkout"
+              href={`/checkout?plate=${encodeURIComponent(overdue.license_plate)}`}
               className="inline-flex items-center justify-center gap-1.5 px-4 py-2.5 bg-gradient-to-r from-purple-600 to-orange-500 text-white rounded-xl font-black border-2 border-black shadow hover:translate-y-[-1px] transition-transform whitespace-nowrap"
               data-testid="button-nudge-book-wash"
             >
@@ -565,7 +565,7 @@ export function VehiclesTab({ cars, memberships }: Props) {
                 ) : (
                   due && (
                     <Link
-                      href="/checkout"
+                      href={`/checkout?plate=${encodeURIComponent(c.license_plate)}`}
                       className="flex items-center justify-center gap-1.5 py-2.5 bg-gradient-to-r from-purple-600 to-orange-500 text-white text-sm font-black border-t-2 border-black hover:translate-y-[-1px] transition-transform"
                       data-testid={`button-card-book-${c.id}`}
                     >

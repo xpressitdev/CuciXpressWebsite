@@ -12,6 +12,13 @@ export default function Checkout() {
   const [selectedService, setSelectedService] = useState<any>(null);
   const [, setLocation] = useLocation();
 
+  // Which car to pay for — set when the customer taps "Pay & Queue Now" on a
+  // specific vehicle card in their garage (/checkout?plate=BAS24). Parsed
+  // synchronously so PaymentCheckout gets it on first render.
+  const [plateParam] = useState(
+    () => new URLSearchParams(window.location.search).get("plate") ?? "",
+  );
+
   // Same query key as AppShell + dashboard → served from cache when the
   // user came from /dashboard, so no flicker.
   const { data: who, isLoading: whoLoading } = useQuery<Whoami>({
@@ -57,7 +64,7 @@ export default function Checkout() {
   if (who?.authenticated) {
     return (
       <AppShell activeTab={null}>
-        <PaymentCheckout selectedService={selectedService} onBack={handleBack} />
+        <PaymentCheckout selectedService={selectedService} onBack={handleBack} initialPlate={plateParam} />
       </AppShell>
     );
   }
@@ -66,7 +73,7 @@ export default function Checkout() {
     <div className="min-h-screen bg-white">
       <Navigation />
       <main className="pt-16">
-        <PaymentCheckout selectedService={selectedService} onBack={handleBack} />
+        <PaymentCheckout selectedService={selectedService} onBack={handleBack} initialPlate={plateParam} />
       </main>
       <Footer />
     </div>

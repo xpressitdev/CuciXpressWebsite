@@ -1,5 +1,6 @@
 
 import { useState, useEffect } from "react";
+import { useQuery } from "@tanstack/react-query";
 import { motion, AnimatePresence } from "framer-motion";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -30,7 +31,22 @@ interface PaymentCheckoutProps {
     features: string[];
   };
   onBack?: () => void;
+  /** Pre-selected car plate (from /checkout?plate=…) — set when the customer
+   *  taps "Pay & Queue Now" on a specific vehicle in their garage. */
+  initialPlate?: string;
 }
+
+// Minimal shape of GET /api/customer/cars rows used by the plate picker.
+interface GarageCar {
+  id: number;
+  license_plate: string;
+  brand?: string | null;
+  model?: string | null;
+}
+
+// Same normalisation as the server: uppercase, strip spaces/dashes — so
+// "BAS 24" from the profile still matches the "BAS24" garage row.
+const normPlate = (p: string) => p.toUpperCase().replace(/[^A-Z0-9]/g, "");
 
 // Single source of truth for the wash packages offered at checkout.
 // Mirrors the cards on the landing page (ServicePricing.tsx) so prices
@@ -68,7 +84,7 @@ const PACKAGES = [
 
 type PackageId = (typeof PACKAGES)[number]["id"];
 
-export default function PaymentCheckout({ selectedService, onBack }: PaymentCheckoutProps) {
+export default function PaymentCheckout({ selectedService, onBack, initialPlate }: PaymentCheckoutProps) {
   const { toast } = useToast();
   const { user, isAuthenticated, logout, isLoading, checkAuthStatus } = useAuth();
 
@@ -95,23 +111,46 @@ export default function PaymentCheckout({ selectedService, onBack }: PaymentChec
   // never trigger this, so their name field stays optional.
   const [nameRequired, setNameRequired] = useState(false);
   const [formData, setFormData] = useState({
-    carPlate: "",
+    // Seed with the plate the customer picked in their garage (if any) so
+    // "Pay & Queue Now" on a specific car always pays for THAT car.
+    carPlate: initialPlate?.trim().toUpperCase() ?? "",
     phone: "",
     email: ""
   });
 
-  // Auto-fill customer data if user is logged in
+  // Signed-in customers: load their garage so they can pick which car this
+  // wash is for (multi-car households). Guests type the plate manually.
+  const { data: garage } = useQuery<{ cars: GarageCar[] }>({
+    queryKey: ["/api/customer/cars"],
+    enabled: isAuthenticated,
+  });
+  const myCars = garage?.cars ?? [];
+
+  // Auto-fill customer data if user is logged in. The plate keeps whatever
+  // is already chosen (URL param or a picker tap) — the profile default only
+  // fills in when nothing was pre-selected.
   useEffect(() => {
     if (user) {
       const profile = user.profile_data && typeof user.profile_data === 'object' ? user.profile_data as any : {};
       setFormData(prev => ({
         ...prev,
-        carPlate: profile.carPlate || prev.carPlate,
+        carPlate: prev.carPlate || profile.carPlate || "",
         phone: profile.phone || prev.phone,
         email: user.email || prev.email
       }));
     }
   }, [user]);
+
+  // If nothing pre-selected a plate (no URL param, no profile default),
+  // fall back to the first car in the garage so the picker always has a
+  // sensible selection.
+  useEffect(() => {
+    if (isAuthenticated && myCars.length > 0) {
+      setFormData(prev =>
+        prev.carPlate ? prev : { ...prev, carPlate: myCars[0].license_plate },
+      );
+    }
+  }, [isAuthenticated, myCars]);
 
   const handleInputChange = (field: string, value: string) => {
     setFormData(prev => ({ ...prev, [field]: value }));
@@ -491,12 +530,47 @@ export default function PaymentCheckout({ selectedService, onBack }: PaymentChec
                     // Logged-in view: locked read-only rows so the user can't
                     // accidentally overwrite their saved profile from this page.
                     <div className="rounded-lg border border-gray-200 bg-gray-50 divide-y divide-gray-200">
-                      <div className="flex items-center justify-between px-3 py-2.5">
-                        <span className="text-xs text-gray-500">Car plate</span>
-                        <span className="font-mono font-bold text-gray-900" data-testid="text-locked-plate">
-                          {formData.carPlate || <span className="text-amber-600 text-xs font-sans">Not set — add in dashboard</span>}
-                        </span>
-                      </div>
+                      {myCars.length > 1 ? (
+                        // Multi-car household: let the customer pick which of
+                        // their cars this wash is for.
+                        <div className="px-3 py-2.5">
+                          <p className="text-xs text-gray-500 mb-2">Which car is this wash for?</p>
+                          <div className="flex flex-wrap gap-2">
+                            {myCars.map((c) => {
+                              const selected = normPlate(c.license_plate) === normPlate(formData.carPlate);
+                              return (
+                                <button
+                                  key={c.id}
+                                  type="button"
+                                  onClick={() => handleInputChange('carPlate', c.license_plate)}
+                                  className={
+                                    "px-3 py-1.5 rounded-lg border text-sm font-mono font-bold transition " +
+                                    (selected
+                                      ? "bg-gray-900 text-white border-gray-900"
+                                      : "bg-white text-gray-700 border-gray-300 hover:border-gray-500")
+                                  }
+                                  data-testid={`button-pick-plate-${c.id}`}
+                                  aria-pressed={selected}
+                                >
+                                  {c.license_plate}
+                                  {(c.brand || c.model) && (
+                                    <span className={"ml-1.5 font-sans font-normal text-xs " + (selected ? "text-gray-300" : "text-gray-400")}>
+                                      {[c.brand, c.model].filter(Boolean).join(" ")}
+                                    </span>
+                                  )}
+                                </button>
+                              );
+                            })}
+                          </div>
+                        </div>
+                      ) : (
+                        <div className="flex items-center justify-between px-3 py-2.5">
+                          <span className="text-xs text-gray-500">Car plate</span>
+                          <span className="font-mono font-bold text-gray-900" data-testid="text-locked-plate">
+                            {formData.carPlate || <span className="text-amber-600 text-xs font-sans">Not set — add in dashboard</span>}
+                          </span>
+                        </div>
+                      )}
                       <div className="flex items-center justify-between px-3 py-2.5">
                         <span className="text-xs text-gray-500">Phone</span>
                         <span className="text-gray-900" data-testid="text-locked-phone">
