@@ -1,6 +1,6 @@
 
 import { useState, useEffect } from "react";
-import { useQuery } from "@tanstack/react-query";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { motion, AnimatePresence } from "framer-motion";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -8,7 +8,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Badge } from "@/components/ui/badge";
-import { CreditCard, Lock, ArrowLeft, History, CheckCircle, Phone, KeyRound, Loader2 } from "lucide-react";
+import { CreditCard, Lock, ArrowLeft, History, CheckCircle, Phone, Mail, KeyRound, Loader2 } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
 import { useAuth, type User as AuthUser } from "@/hooks/useAuth";
 
@@ -86,6 +86,7 @@ type PackageId = (typeof PACKAGES)[number]["id"];
 
 export default function PaymentCheckout({ selectedService, onBack, initialPlate }: PaymentCheckoutProps) {
   const { toast } = useToast();
+  const queryClient = useQueryClient();
   const { user, isAuthenticated, logout, isLoading, checkAuthStatus } = useAuth();
 
   const [isProcessing, setIsProcessing] = useState(false);
@@ -98,18 +99,14 @@ export default function PaymentCheckout({ selectedService, onBack, initialPlate 
     PACKAGES.find((p) => p.name === selectedService?.name)?.id ?? "full";
   const [packageId, setPackageId] = useState<PackageId>(initialPackageId);
   const pkg = PACKAGES.find((p) => p.id === packageId)!;
-  // Phone+OTP sign-in state (replaces the old username/password/Google
-  // tri-modal). Identical flow to /login, just inline in the checkout
-  // modal so the customer never has to leave this page.
-  const [otpStep, setOtpStep] = useState<'phone' | 'code'>('phone');
-  const [otpPhone, setOtpPhone] = useState('');
-  const [otpName, setOtpName] = useState('');
+  // Email-OTP sign-in state — same flow as /login's Sign In tab: the
+  // customer enters their phone OR email, the server emails a 6-digit
+  // code to the account's registered email address. Inline in the
+  // checkout modal so the customer never has to leave this page.
+  const [otpStep, setOtpStep] = useState<'identifier' | 'code'>('identifier');
+  const [otpId, setOtpId] = useState('');
   const [otpCode, setOtpCode] = useState('');
   const [otpBusy, setOtpBusy] = useState(false);
-  // Set true when the server tells us this is a brand-new customer who must
-  // supply a name before their account can be created. Returning customers
-  // never trigger this, so their name field stays optional.
-  const [nameRequired, setNameRequired] = useState(false);
   const [formData, setFormData] = useState({
     // Seed with the plate the customer picked in their garage (if any) so
     // "Pay & Queue Now" on a specific car always pays for THAT car.
@@ -156,19 +153,21 @@ export default function PaymentCheckout({ selectedService, onBack, initialPlate 
     setFormData(prev => ({ ...prev, [field]: value }));
   };
 
-  // Phone+OTP — matches /login.tsx behaviour exactly. Mints the same
+  // Email-OTP — same endpoints as /login.tsx's Sign In tab. Mints the same
   // Lucia cx_session cookie, so after a successful verify the rest of
   // the checkout works identically to a customer who arrived from
-  // /dashboard already logged in.
+  // /dashboard already logged in. The server accepts a phone OR email
+  // identifier and always emails the code to the account's registered
+  // email address (there is no WhatsApp/SMS delivery).
   const sendOtp = async () => {
-    if (!otpPhone.trim()) return;
+    if (!otpId.trim()) return;
     setOtpBusy(true);
     try {
-      const res = await fetch('/api/auth/customer/login/start', {
+      const res = await fetch('/api/auth/customer/signin/start', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         credentials: 'include',
-        body: JSON.stringify({ phone: otpPhone }),
+        body: JSON.stringify({ identifier: otpId.trim() }),
       });
       const data = await res.json();
       if (!res.ok || !data.ok) {
@@ -179,7 +178,12 @@ export default function PaymentCheckout({ selectedService, onBack, initialPlate 
         });
         return;
       }
-      toast({ title: 'Code sent', description: 'Check your messages for a 6-digit code.' });
+      // Server always answers 200 whether or not an account exists (no
+      // account enumeration), so show a generic message.
+      toast({
+        title: 'Code sent',
+        description: "If an account exists for those details, we've emailed a 6-digit code.",
+      });
       setOtpStep('code');
     } finally {
       setOtpBusy(false);
@@ -193,31 +197,14 @@ export default function PaymentCheckout({ selectedService, onBack, initialPlate 
     }
     setOtpBusy(true);
     try {
-      const res = await fetch('/api/auth/customer/login/verify', {
+      const res = await fetch('/api/auth/customer/signin/verify', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         credentials: 'include',
-        body: JSON.stringify({
-          phone: otpPhone,
-          code: otpCode,
-          name: otpName.trim() || undefined,
-        }),
+        body: JSON.stringify({ identifier: otpId.trim(), code: otpCode }),
       });
       const data = await res.json();
       if (!res.ok || !data.ok) {
-        if (data.reason === 'name_required') {
-          // Brand-new customer left the name blank. The code they just used is
-          // now spent, so send them back to enter a name and request a fresh
-          // code — but only new customers ever see this.
-          setNameRequired(true);
-          setOtpStep('phone');
-          setOtpCode('');
-          toast({
-            title: 'One more thing',
-            description: 'Please enter your name, then request a new code to finish signing up.',
-          });
-          return;
-        }
         toast({
           title: 'Could not sign in',
           description: OTP_REASON_TEXT[data.reason] ?? 'Please try again.',
@@ -225,17 +212,31 @@ export default function PaymentCheckout({ selectedService, onBack, initialPlate 
         });
         return;
       }
-      // Refresh the auth hook so isAuthenticated flips to true and the
-      // form auto-fills from the (now-known) profile.
+      // Refresh BOTH auth sources so every part of the app agrees:
+      // the local useAuth hook (this form) and the shared whoami query
+      // (page chrome, dashboard, navbar).
       await checkAuthStatus();
+      await queryClient.invalidateQueries({ queryKey: ['/api/auth/whoami'] });
+      await queryClient.refetchQueries({ queryKey: ['/api/auth/whoami'] });
       setShowAuth(false);
-      setOtpStep('phone');
+      setOtpStep('identifier');
       setOtpCode('');
-      setNameRequired(false);
-      toast({ title: 'Welcome!', description: "You're signed in." });
+      toast({ title: 'Welcome back!', description: "You're signed in." });
     } finally {
       setOtpBusy(false);
     }
+  };
+
+  // Logout must sign the customer out EVERYWHERE, not just on this form.
+  // The dashboard/AppShell/navbar all read the shared '/api/auth/whoami'
+  // query, so after the server kills the session we refresh that cache
+  // too — otherwise the dashboard keeps showing a logged-in state.
+  const handleLogout = async () => {
+    await logout();
+    queryClient.removeQueries({ queryKey: ['/api/customer/cars'] });
+    await queryClient.invalidateQueries({ queryKey: ['/api/auth/whoami'] });
+    await queryClient.refetchQueries({ queryKey: ['/api/auth/whoami'] });
+    toast({ title: 'Signed out', description: 'You have been logged out.' });
   };
 
 
@@ -460,25 +461,22 @@ export default function PaymentCheckout({ selectedService, onBack, initialPlate 
                         <div>
                           <h4 className="font-medium text-amber-900 mb-1">Sign in for faster checkout</h4>
                           <p className="text-sm text-amber-700 mb-3">
-                            Enter your phone number and we'll auto-fill your car &amp; details. Your washes are saved in your dashboard.
+                            Enter your phone or email and we'll email you a one-time code. Your car &amp; details auto-fill, and your washes are saved in your dashboard.
                           </p>
                           <Button
                             variant="outline"
                             size="sm"
                             onClick={() => {
-                              // Start each sign-in attempt fresh so a prior
-                              // "name required" prompt never sticks for the
-                              // next (possibly returning) customer.
-                              setNameRequired(false);
-                              setOtpStep('phone');
+                              // Start each sign-in attempt fresh.
+                              setOtpStep('identifier');
                               setOtpCode('');
                               setShowAuth(true);
                             }}
                             className="bg-white hover:bg-amber-50"
                             data-testid="button-open-signin"
                           >
-                            <Phone className="w-4 h-4 mr-2" />
-                            Sign in with phone
+                            <Mail className="w-4 h-4 mr-2" />
+                            Sign in
                           </Button>
                         </div>
                       </div>
@@ -494,7 +492,7 @@ export default function PaymentCheckout({ selectedService, onBack, initialPlate 
                         <CheckCircle className="w-4 h-4 text-green-500" />
                         <span className="text-sm text-green-600">{user?.email || user?.username}</span>
                         <button 
-                          onClick={logout}
+                          onClick={handleLogout}
                           className="text-xs text-gray-500 hover:text-gray-700 underline ml-2"
                           data-testid="button-logout"
                         >
@@ -695,48 +693,25 @@ export default function PaymentCheckout({ selectedService, onBack, initialPlate 
               <Card>
                 <CardHeader>
                   <CardTitle className="flex items-center gap-2">
-                    <Phone className="w-5 h-5" />
-                    {otpStep === 'phone' ? 'Sign in with phone' : 'Enter your code'}
+                    <Mail className="w-5 h-5" />
+                    {otpStep === 'identifier' ? 'Sign in' : 'Enter your code'}
                   </CardTitle>
                 </CardHeader>
                 <CardContent className="space-y-4">
-                  {otpStep === 'phone' ? (
+                  {otpStep === 'identifier' ? (
                     <>
                       <div className="space-y-1">
-                        <Label htmlFor="otp-phone" className="flex items-center gap-1">
-                          <Phone className="w-3 h-3" /> Phone number
+                        <Label htmlFor="otp-identifier" className="flex items-center gap-1">
+                          <Phone className="w-3 h-3" /> Phone or Email
                         </Label>
                         <Input
-                          id="otp-phone"
-                          value={otpPhone}
-                          onChange={(e) => setOtpPhone(e.target.value)}
-                          placeholder="+673 7XX XXXX"
-                          inputMode="tel"
+                          id="otp-identifier"
+                          value={otpId}
+                          onChange={(e) => setOtpId(e.target.value)}
+                          placeholder="+673 7XX XXXX  or  you@example.com"
                           autoFocus
-                          data-testid="input-checkout-phone"
+                          data-testid="input-checkout-identifier"
                         />
-                      </div>
-                      <div className="space-y-1">
-                        <Label htmlFor="otp-name">
-                          Name{' '}
-                          {nameRequired ? (
-                            <span className="text-red-500 font-normal text-xs">(required)</span>
-                          ) : (
-                            <span className="text-gray-400 font-normal text-xs">(optional, first time only)</span>
-                          )}
-                        </Label>
-                        <Input
-                          id="otp-name"
-                          value={otpName}
-                          onChange={(e) => setOtpName(e.target.value)}
-                          placeholder="Your name"
-                          data-testid="input-checkout-name"
-                        />
-                        {nameRequired && (
-                          <p className="text-[11px] text-red-500">
-                            We need your name to create your account.
-                          </p>
-                        )}
                       </div>
                       <div className="flex gap-2 pt-1">
                         <Button type="button" variant="outline" onClick={() => setShowAuth(false)} className="flex-1">
@@ -745,15 +720,19 @@ export default function PaymentCheckout({ selectedService, onBack, initialPlate 
                         <Button
                           type="button"
                           onClick={sendOtp}
-                          disabled={otpBusy || !otpPhone.trim() || (nameRequired && !otpName.trim())}
+                          disabled={otpBusy || !otpId.trim()}
                           className="flex-1 bg-cuci-primary hover:bg-cuci-primary/90 text-white"
                           data-testid="button-checkout-send-code"
                         >
-                          {otpBusy ? <Loader2 className="w-4 h-4 animate-spin" /> : 'Send 6-digit code →'}
+                          {otpBusy ? <Loader2 className="w-4 h-4 animate-spin" /> : 'Email me a 6-digit code →'}
                         </Button>
                       </div>
                       <p className="text-[11px] text-gray-400 text-center">
-                        We'll send a one-time code to your WhatsApp. No password to remember.
+                        We'll email a one-time code to your registered email address. No password to remember.
+                      </p>
+                      <p className="text-xs text-gray-500 text-center">
+                        New here? No account needed — just fill in your details below and pay as a guest, or{' '}
+                        <a href="/login" className="font-bold text-cuci-primary hover:underline">register</a>.
                       </p>
                     </>
                   ) : (
@@ -761,7 +740,7 @@ export default function PaymentCheckout({ selectedService, onBack, initialPlate 
                       <div className="rounded-lg bg-cuci-primary/5 border border-cuci-primary/20 p-3 text-center">
                         <p className="text-sm text-gray-700">
                           Code sent to{' '}
-                          <span className="font-bold text-cuci-primary">{otpPhone}</span>
+                          <span className="font-bold text-cuci-primary">your email</span>
                         </p>
                       </div>
                       <div className="space-y-1">
@@ -783,7 +762,7 @@ export default function PaymentCheckout({ selectedService, onBack, initialPlate 
                         <Button
                           type="button"
                           variant="outline"
-                          onClick={() => { setOtpStep('phone'); setOtpCode(''); }}
+                          onClick={() => { setOtpStep('identifier'); setOtpCode(''); }}
                           className="flex-1"
                         >
                           ← Back
@@ -804,7 +783,7 @@ export default function PaymentCheckout({ selectedService, onBack, initialPlate 
                           type="button"
                           onClick={async () => {
                             try {
-                              const r = await fetch(`/api/dev/last-otp?phone=${encodeURIComponent(otpPhone.trim().replace(/\s+/g, ''))}`);
+                              const r = await fetch(`/api/dev/last-otp?phone=${encodeURIComponent(otpId.trim().replace(/\s+/g, ''))}`);
                               const d = await r.json();
                               if (d.ok && /^\d{6}$/.test(d.code)) {
                                 setOtpCode(d.code);
