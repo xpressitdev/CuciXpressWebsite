@@ -45,3 +45,4 @@
 - [OTP purpose DB constraint drift](otp-purpose-constraint.md) — "Could not send code" = new ALLOWED_PURPOSES value missing from otp_codes_purpose_check CHECK; add via idempotent migration to both DBs.
 - [Claim-date revenue](claim-date-revenue.md) — web Pocket Pay orders bucket by claimed_at (scan day) not created_at; every revenue query must use bizDay(); unclaimed = NULL = excluded.
 - [Subscription test sandbox](subscription-test-sandbox.md) — owner-only CyberSource test subs stay invisible via membership_id/user_id/customer_id NULL; gate sandbox routes on isCyberSourceTestMode().
+- [Google reviews billing](google-reviews-billing.md) — rating badge silently shows fake 4.8/150 when Places API fails (usually billing on wrong GCP project); keep cache + placeId allowlist.
