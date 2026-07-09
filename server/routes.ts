@@ -154,6 +154,45 @@ async function searchGooglePlaceId(searchQuery: string, apiKey: string): Promise
   }
 }
 
+// In-memory cache for Google Places responses. Ratings/reviews change
+// slowly, so we serve cached data for 12h (successes) / 10min (failures)
+// instead of hitting Google's paid API on every landing-page view.
+const googleApiCache = new Map<string, { status: number; body: any; expires: number }>();
+const GOOGLE_CACHE_OK_MS = 12 * 60 * 60 * 1000;
+const GOOGLE_CACHE_FAIL_MS = 10 * 60 * 1000;
+function googleCacheGet(key: string) {
+  const hit = googleApiCache.get(key);
+  if (hit && hit.expires > Date.now()) return hit;
+  if (hit) googleApiCache.delete(key);
+  return null;
+}
+function googleCacheSet(key: string, status: number, body: any, ok: boolean) {
+  // Hard cap as defence-in-depth: keys are allowlisted so this should
+  // never trigger, but guarantee the map can't grow unbounded.
+  if (googleApiCache.size >= 50 && !googleApiCache.has(key)) {
+    const now = Date.now();
+    for (const [k, v] of googleApiCache) {
+      if (v.expires <= now) googleApiCache.delete(k);
+    }
+    if (googleApiCache.size >= 50) return;
+  }
+  googleApiCache.set(key, {
+    status,
+    body,
+    expires: Date.now() + (ok ? GOOGLE_CACHE_OK_MS : GOOGLE_CACHE_FAIL_MS),
+  });
+}
+
+// Only these branch slugs may be requested by the public reviews
+// endpoint (plus the default place). Anything else is rejected so
+// attackers can't burn paid Google API quota with arbitrary place IDs.
+const REVIEW_BRANCH_SLUGS = new Set([
+  "salar-branch",
+  "bengkurong-branch",
+  "tutong-branch",
+  "lambak-branch",
+]);
+
 // Helper function to process Google Reviews data
 function processGoogleReviews(data: any) {
   const reviews = data.result.reviews || [];
@@ -3958,6 +3997,19 @@ export async function registerRoutes(app: Express): Promise<Server> {
         });
       }
 
+      // Allowlist: only the default place or known branch slugs. Prevents
+      // arbitrary place IDs from triggering paid Google API calls or
+      // spamming the cache with unbounded keys.
+      if (requestedPlaceId && requestedPlaceId !== defaultPlaceId && !REVIEW_BRANCH_SLUGS.has(requestedPlaceId)) {
+        return res.status(400).json({ error: "Unknown location" });
+      }
+
+      const reviewsCacheKey = `reviews:${placeId}`;
+      const cachedReviews = googleCacheGet(reviewsCacheKey);
+      if (cachedReviews) {
+        return res.status(cachedReviews.status).json(cachedReviews.body);
+      }
+
       // For branches without configured Place IDs, search for them dynamically
       if (placeId !== defaultPlaceId && !placeId.startsWith('ChIJ')) {
         // Get search query for the branch
@@ -4022,11 +4074,13 @@ export async function registerRoutes(app: Express): Promise<Server> {
                     // Filter for positive reviews (4-5 stars)
                     const positiveReviews = allReviews.filter((review: any) => review.rating >= 4);
 
-                    return res.json({
+                    const branchBody = {
                       reviews: positiveReviews,
                       averageRating: reviewsData.result.rating || 0,
                       totalReviews: reviewsData.result.user_ratings_total || 0
-                    });
+                    };
+                    googleCacheSet(reviewsCacheKey, 200, branchBody, true);
+                    return res.json(branchBody);
                   }
                 }
               }
@@ -4037,12 +4091,14 @@ export async function registerRoutes(app: Express): Promise<Server> {
         }
         
         // If search or review fetch fails, return empty with loading message
-        return res.json({ 
+        const emptyBody = { 
           reviews: [], 
           averageRating: 0, 
           totalReviews: 0,
           message: "Loading authentic Google reviews for this location..."
-        });
+        };
+        googleCacheSet(reviewsCacheKey, 200, emptyBody, false);
+        return res.json(emptyBody);
       }
 
       const response = await fetch(
@@ -4106,18 +4162,23 @@ export async function registerRoutes(app: Express): Promise<Server> {
       // Filter to show only 4-5 star reviews for representative customer experience
       const positiveReviews = allReviews.filter((review: ReviewData) => review.rating >= 4);
 
-      res.json({
+      const mainBody = {
         reviews: positiveReviews.slice(0, 6), // Show latest 6 positive reviews
         averageRating: data.result.rating,
         totalReviews: data.result.user_ratings_total
-      });
+      };
+      googleCacheSet(`reviews:${placeId}`, 200, mainBody, true);
+      res.json(mainBody);
 
     } catch (error) {
       console.error("Error fetching Google reviews:", error);
-      res.status(500).json({ 
+      const errBody = { 
         error: "Failed to fetch reviews",
         details: error instanceof Error ? error.message : "Unknown error"
-      });
+      };
+      const failKey = `reviews:${(req.query.placeId as string) || process.env.GOOGLE_BUSINESS_PLACE_ID}`;
+      googleCacheSet(failKey, 500, errBody, false);
+      res.status(500).json(errBody);
     }
   });
 
@@ -4133,6 +4194,11 @@ export async function registerRoutes(app: Express): Promise<Server> {
           totalReviews: 150,
           message: "Using estimated rating - configure Google API for real data"
         });
+      }
+
+      const ratingCached = googleCacheGet("average-rating");
+      if (ratingCached) {
+        return res.status(ratingCached.status).json(ratingCached.body);
       }
 
       const branches = [
@@ -4196,18 +4262,22 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
       if (validBranches > 0) {
         const averageRating = totalRating / validBranches;
-        return res.json({
+        const ratingBody = {
           averageRating: parseFloat((averageRating).toFixed(1)),
           totalReviews: totalReviewCount,
           validBranches,
           message: "Authentic Google ratings across all branches"
-        });
+        };
+        googleCacheSet("average-rating", 200, ratingBody, true);
+        return res.json(ratingBody);
       } else {
-        return res.json({
+        const fallbackBody = {
           averageRating: 4.8,
           totalReviews: 150,
           message: "Unable to fetch authentic ratings - using estimated data"
-        });
+        };
+        googleCacheSet("average-rating", 200, fallbackBody, false);
+        return res.json(fallbackBody);
       }
 
     } catch (error) {
