@@ -171,9 +171,9 @@ function googleCacheSet(key: string, status: number, body: any, ok: boolean) {
   // never trigger, but guarantee the map can't grow unbounded.
   if (googleApiCache.size >= 50 && !googleApiCache.has(key)) {
     const now = Date.now();
-    for (const [k, v] of googleApiCache) {
+    googleApiCache.forEach((v, k) => {
       if (v.expires <= now) googleApiCache.delete(k);
-    }
+    });
     if (googleApiCache.size >= 50) return;
   }
   googleApiCache.set(key, {
@@ -2292,6 +2292,126 @@ export async function registerRoutes(app: Express): Promise<Server> {
     } catch (err) {
       console.error('[admin.customers.export] failed:', err);
       res.status(500).json({ error: 'export_failed' });
+    }
+  });
+
+  // ============================================================
+  // Plate ownership tools (owner-only)
+  //
+  // Some plates were bulk-claimed by branch shell accounts, blocking the
+  // real customer from adding their own car ("this plate is mine").
+  // These endpoints let the owner look up who currently holds a plate
+  // and transfer the car (with all its wash history — orders follow
+  // vehicle_id) to the right customer, or detach it back to unclaimed.
+  // ============================================================
+
+  // GET /api/admin/plate-ownership?plate=KG2151
+  app.get('/api/admin/plate-ownership', requireStaff, requireStaffRole('owner'), async (req, res) => {
+    const raw = String(req.query.plate ?? '').trim();
+    if (!raw || raw.length > 20) return res.status(400).json({ error: 'invalid_plate' });
+    const normalized = raw.toUpperCase().replace(/\s+/g, '');
+    try {
+      const car = (await db.execute(sql`
+        SELECT car.id, car.license_plate, car.brand, car.model, car.color,
+               car.user_id, car.customer_id, car.vip_tier,
+               u.email        AS holder_email,
+               TRIM(COALESCE(u.first_name,'') || ' ' || COALESCE(u.last_name,'')) AS holder_user_name,
+               u.phone_number AS holder_user_phone,
+               c.name         AS holder_customer_name,
+               c.phone        AS holder_customer_phone,
+               (SELECT COUNT(*)::int FROM orders o WHERE o.vehicle_id = car.id AND o.status <> 'refunded') AS wash_count,
+               (SELECT MAX(o.created_at) FROM orders o WHERE o.vehicle_id = car.id AND o.status <> 'refunded') AS last_visit_at
+          FROM cars car
+          LEFT JOIN users u     ON u.id = car.user_id
+          LEFT JOIN customers c ON c.id = car.customer_id
+         WHERE UPPER(REGEXP_REPLACE(car.license_plate, '\\s+', '', 'g')) = ${normalized}
+         LIMIT 1
+      `)).rows[0] as any;
+
+      if (!car) return res.json({ found: false, plate: normalized });
+
+      res.json({
+        found: true,
+        car: {
+          id: Number(car.id),
+          license_plate: car.license_plate,
+          brand: car.brand ?? null,
+          model: car.model ?? null,
+          color: car.color ?? null,
+          vip_tier: car.vip_tier ?? null,
+          wash_count: Number(car.wash_count ?? 0),
+          last_visit_at: car.last_visit_at ?? null,
+        },
+        holder: (car.user_id || car.customer_id) ? {
+          user_id: car.user_id != null ? Number(car.user_id) : null,
+          customer_id: car.customer_id != null ? Number(car.customer_id) : null,
+          name: car.holder_customer_name || car.holder_user_name || null,
+          email: car.holder_email ?? null,
+          phone: car.holder_customer_phone || car.holder_user_phone || null,
+        } : null,
+      });
+    } catch (err) {
+      console.error('[admin.plateOwnership] failed:', err);
+      res.status(500).json({ error: 'lookup_failed' });
+    }
+  });
+
+  // POST /api/admin/plate-transfer
+  // Body: { car_id: number, target_customer_id: number | null }
+  // target_customer_id = null → detach the car back to "unclaimed"
+  // (both user_id and customer_id NULL) so the rightful customer can
+  // claim it themselves by adding the plate in their dashboard.
+  app.post('/api/admin/plate-transfer', requireStaff, requireStaffRole('owner'), async (req, res) => {
+    const bodySchema = z.object({
+      car_id: z.number().int().positive(),
+      target_customer_id: z.number().int().positive().nullable(),
+    });
+    const parsed = bodySchema.safeParse(req.body);
+    if (!parsed.success) return res.status(400).json({ error: 'invalid_body' });
+    const { car_id, target_customer_id } = parsed.data;
+
+    try {
+      const car = (await db.execute(sql`
+        SELECT id, license_plate, user_id, customer_id FROM cars WHERE id = ${car_id} LIMIT 1
+      `)).rows[0] as any;
+      if (!car) return res.status(404).json({ error: 'car_not_found' });
+
+      let newUserId: number | null = null;
+      let targetName: string | null = null;
+      if (target_customer_id !== null) {
+        const target = (await db.execute(sql`
+          SELECT c.id, c.name, c.user_id, u.email
+            FROM customers c LEFT JOIN users u ON u.id = c.user_id
+           WHERE c.id = ${target_customer_id} LIMIT 1
+        `)).rows[0] as any;
+        if (!target) return res.status(404).json({ error: 'customer_not_found' });
+        newUserId = target.user_id != null ? Number(target.user_id) : null;
+        targetName = target.name ?? null;
+      }
+
+      await db.execute(sql`
+        UPDATE cars SET user_id = ${newUserId}, customer_id = ${target_customer_id}
+         WHERE id = ${car_id}
+      `);
+
+      console.log(
+        `[admin.plateTransfer] staff=${(req as any).staff?.user?.email ?? 'unknown'} ` +
+        `car=${car_id} plate=${car.license_plate} ` +
+        `from(user=${car.user_id ?? '-'},cust=${car.customer_id ?? '-'}) ` +
+        `to(user=${newUserId ?? '-'},cust=${target_customer_id ?? '-'})`
+      );
+
+      res.json({
+        ok: true,
+        car_id,
+        license_plate: car.license_plate,
+        transferred_to: target_customer_id === null
+          ? null
+          : { customer_id: target_customer_id, name: targetName, user_id: newUserId },
+      });
+    } catch (err) {
+      console.error('[admin.plateTransfer] failed:', err);
+      res.status(500).json({ error: 'transfer_failed' });
     }
   });
 
