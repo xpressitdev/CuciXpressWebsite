@@ -24,8 +24,6 @@ import {
 import { apiRequest } from "@/lib/queryClient";
 import { useToast } from "@/hooks/use-toast";
 import { SendReceiptButton } from "@/components/admin/SendReceiptButton";
-import PlateTransferPanel from "@/components/admin/PlateTransferPanel";
-import { useStaffAuth } from "@/hooks/useStaffAuth";
 
 const formatBND = (cents: number) =>
   `B$${(cents / 100).toLocaleString("en-US", {
@@ -169,8 +167,6 @@ interface CustomerDetailResp {
 export default function CustomersTab() {
   const queryClient = useQueryClient();
   const { toast } = useToast();
-  const { staff } = useStaffAuth();
-  const isOwner = staff?.role === "owner";
   const [search, setSearch] = useState("");
   // Debounced copy of `search` — this is what actually drives the query so we
   // don't fire a network request on every keystroke. Typing feels instant
@@ -288,7 +284,6 @@ export default function CustomersTab() {
   return (
     <div className="space-y-6">
       {stats && <CustomerStatsHeader stats={stats} onSegment={(s) => { setSegment(s); setPage(1); }} /> }
-      {isOwner && <PlateTransferPanel />}
       <div className="grid lg:grid-cols-3 gap-6">
       {/* Left: list */}
       <div className="lg:col-span-2 space-y-4">

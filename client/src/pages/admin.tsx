@@ -75,6 +75,7 @@ import { normalizeWaPhone } from "@/lib/receipt";
 import { useStaffAuth } from "@/hooks/useStaffAuth";
 import type { CollaborationSubmission, SubscriptionSignup } from "@shared/schema";
 import CustomersTab, { LiabilitiesPanel } from "@/components/admin/CustomersTab";
+import PlateTransferPanel from "@/components/admin/PlateTransferPanel";
 import { PendingPaymentsPanel } from "@/components/admin/PendingPaymentsPanel";
 import BranchesTab from "@/components/admin/BranchesTab";
 import DiscountsTab from "@/components/admin/DiscountsTab";
@@ -368,6 +369,12 @@ export default function Admin() {
                 </TabsTrigger>
               )}
               {isOwner && (
+                <TabsTrigger value="plate-transfer" className="flex items-center gap-2" data-testid="tab-plate-transfer">
+                  <Car className="w-4 h-4" />
+                  Plate Transfer
+                </TabsTrigger>
+              )}
+              {isOwner && (
                 <TabsTrigger value="branches" className="flex items-center gap-2" data-testid="tab-branches">
                   <MapPinned className="w-4 h-4" />
                   Branches
@@ -465,6 +472,12 @@ export default function Admin() {
             {isManagerOrOwner && (
               <TabsContent value="customers" className="mt-6">
                 <CustomersTab />
+              </TabsContent>
+            )}
+
+            {isOwner && (
+              <TabsContent value="plate-transfer" className="mt-6">
+                <PlateTransferPanel />
               </TabsContent>
             )}
 
