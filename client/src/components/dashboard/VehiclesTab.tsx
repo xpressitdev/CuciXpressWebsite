@@ -142,6 +142,12 @@ export function VehiclesTab({ cars, memberships }: Props) {
   const [photoBusy, setPhotoBusy] = useState(false);
   const [confirmingCar, setConfirmingCar] = useState<CarRow | null>(null);
   const [disputePlate, setDisputePlate] = useState<string | null>(null);
+  // Counter-sold Unlimited pass claim: the server asks for the phone
+  // number given at the till (409 phone_match_required) before handing
+  // over a walk-in-held plate.
+  const [needClaimPhone, setNeedClaimPhone] = useState(false);
+  const [claimPhone, setClaimPhone] = useState("");
+  const [claimPhoneError, setClaimPhoneError] = useState(false);
   const [qrVoucher, setQrVoucher] = useState<MembershipVoucher | null>(null);
   const fileRef = useRef<HTMLInputElement>(null);
 
@@ -187,6 +193,9 @@ export function VehiclesTab({ cars, memberships }: Props) {
   const reset = () => {
     setForm(blank);
     setEditingId(null);
+    setNeedClaimPhone(false);
+    setClaimPhone("");
+    setClaimPhoneError(false);
   };
 
   const startAdd = () => {
@@ -237,6 +246,7 @@ export function VehiclesTab({ cars, memberships }: Props) {
         color: form.color.trim() || null,
       };
       if (form.photo_touched) body.photo_url = form.photo_url;
+      if (!editingId && claimPhone.trim()) body.phone = claimPhone.trim();
       const r = editingId
         ? await apiRequest("PATCH", `/api/customer/cars/${editingId}`, body)
         : await apiRequest("POST", "/api/customer/cars", body);
@@ -248,6 +258,7 @@ export function VehiclesTab({ cars, memberships }: Props) {
     },
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ["/api/customer/cars"] });
+      qc.invalidateQueries({ queryKey: ["/api/customer/memberships"] });
       toast({ title: editingId ? "Vehicle updated" : "Vehicle added" });
       setOpen(false);
       reset();
@@ -267,6 +278,27 @@ export function VehiclesTab({ cars, memberships }: Props) {
         } catch {
           /* fall through with raw text */
         }
+      }
+      if (reason === "phone_match_required") {
+        // Plate was sold an Unlimited pass at the counter — verify with
+        // the phone number the buyer gave the cashier.
+        setNeedClaimPhone(true);
+        setClaimPhoneError(false);
+        return;
+      }
+      if (reason === "phone_mismatch") {
+        setNeedClaimPhone(true);
+        setClaimPhoneError(true);
+        return;
+      }
+      if (reason === "too_many_attempts") {
+        toast({
+          title: "Too many tries",
+          description:
+            "Please wait 15 minutes before trying again, or contact us on WhatsApp.",
+          variant: "destructive",
+        });
+        return;
       }
       if (reason === "plate_claimed") {
         setDisputePlate(claimedPlate ?? form.license_plate.trim().toUpperCase());
@@ -712,6 +744,34 @@ export function VehiclesTab({ cars, memberships }: Props) {
                 data-testid="input-vehicle-color"
               />
             </div>
+            {needClaimPhone && (
+              <div className="rounded-lg border border-amber-200 bg-amber-50 p-3">
+                <Label htmlFor="vh-claim-phone" className="text-amber-900">
+                  Verify it's your car
+                </Label>
+                <p className="text-[11px] text-amber-800 mt-0.5 mb-2">
+                  This plate has a pass bought at our counter. Enter the phone
+                  number you gave the cashier to link it to your account.
+                </p>
+                <Input
+                  id="vh-claim-phone"
+                  type="tel"
+                  placeholder="e.g. 8123456"
+                  value={claimPhone}
+                  onChange={(e) => {
+                    setClaimPhone(e.target.value);
+                    setClaimPhoneError(false);
+                  }}
+                  data-testid="input-claim-phone"
+                />
+                {claimPhoneError && (
+                  <p className="text-[11px] text-red-600 mt-1">
+                    That phone number doesn't match our records. Check it, or
+                    contact us on WhatsApp for help.
+                  </p>
+                )}
+              </div>
+            )}
           </div>
 
           <DialogFooter>

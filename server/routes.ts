@@ -22,6 +22,7 @@ import { lucia } from "./auth/lucia";
 import { staffLucia } from "./auth/staffLucia";
 import { requireLuciaUser, requireStaff, requireStaffRole, requireStaffOrPlateOwner } from "./auth/middleware";
 import { registerSubscriptionRoutes, activatePocketPaySubscription } from "./subscriptions";
+import { getSubscriptionPlan } from "@shared/subscriptionPlans";
 import { sendOtp, verifyOtp, OTP_CONSTANTS } from "./auth/otp";
 import { loginStaff, createStaff, hashStaffPassword, STAFF_ROLES, MIN_PASSWORD_LENGTH } from "./auth/staff";
 import {
@@ -7036,7 +7037,16 @@ export async function registerRoutes(app: Express): Promise<Server> {
       .regex(/^data:image\/(jpeg|png|webp);base64,/, 'must be a data: image URL')
       .optional()
       .nullable(),
+    // Counter-sold Unlimited pass claim: when the plate is held by a
+    // WALK-IN customer created at the POS (no user account), the customer
+    // proves it's theirs by entering the phone number given at the till.
+    phone: z.string().trim().max(30).optional().nullable(),
   });
+  // Wrong-phone guess limiter for walk-in plate claims (per user+plate,
+  // in-memory — resets on restart, which is fine for this abuse control).
+  const claimPhoneAttempts = new Map<string, { count: number; firstAt: number }>();
+  const CLAIM_ATTEMPT_MAX = 5;
+  const CLAIM_ATTEMPT_WINDOW_MS = 15 * 60 * 1000;
   app.post('/api/customer/cars', requireLuciaUser, async (req, res) => {
     const parsed = customerCarSchema.safeParse(req.body);
     if (!parsed.success) {
@@ -7063,14 +7073,116 @@ export async function registerRoutes(app: Express): Promise<Server> {
       // Cross-user claim guard: refuse if any *other* customer has already
       // linked this plate. Customer can dispute via WhatsApp (handled in
       // the UI) if it's genuinely theirs.
+      //
+      // EXCEPTION — counter-sold Unlimited pass (2026-07-18): the POS
+      // creates a WALK-IN customer row (user_id NULL) linked to the car
+      // when a pass is sold at the till. That buyer must be able to claim
+      // their own plate when they register online. Proof of ownership is
+      // the phone number given at the counter: if the request includes a
+      // phone that matches the walk-in customer's phone, we adopt that
+      // walk-in identity instead of refusing.
       const claimed = (await db.execute(sql`
-        SELECT id FROM cars
-        WHERE UPPER(REGEXP_REPLACE(license_plate, '\\s+', '', 'g')) = ${plateNorm}
-          AND (user_id IS NOT NULL OR customer_id IS NOT NULL)
+        SELECT c.id, c.user_id, c.customer_id,
+               cu.user_id AS cust_user_id, cu.phone AS cust_phone
+          FROM cars c
+          LEFT JOIN customers cu ON cu.id = c.customer_id
+        WHERE UPPER(REGEXP_REPLACE(c.license_plate, '\\s+', '', 'g')) = ${plateNorm}
+          AND (c.user_id IS NOT NULL OR c.customer_id IS NOT NULL)
         LIMIT 1
-      `)).rows[0];
+      `)).rows[0] as {
+        id: number; user_id: number | null; customer_id: number | null;
+        cust_user_id: number | null; cust_phone: string | null;
+      } | undefined;
       if (claimed) {
-        return res.status(409).json({ ok: false, reason: 'plate_claimed', plate });
+        const isWalkinHeld =
+          claimed.user_id == null &&
+          claimed.customer_id != null &&
+          claimed.cust_user_id == null;
+        if (!isWalkinHeld) {
+          return res.status(409).json({ ok: false, reason: 'plate_claimed', plate });
+        }
+        const phoneNorm = (parsed.data.phone ?? '').replace(/\D+/g, '');
+        const heldPhoneNorm = (claimed.cust_phone ?? '').replace(/\D+/g, '');
+        if (!phoneNorm) {
+          // Tell the UI to prompt for the phone number and retry.
+          return res.status(409).json({ ok: false, reason: 'phone_match_required', plate });
+        }
+        // Brute-force guard: the phone is the proof of ownership, so cap
+        // wrong guesses per user+plate (5 per 15 minutes) or an attacker
+        // could enumerate phone numbers to take over a member plate.
+        const attemptKey = `${userId}:${plateNorm}`;
+        const attempt = claimPhoneAttempts.get(attemptKey);
+        const nowMs = Date.now();
+        if (attempt && nowMs - attempt.firstAt > CLAIM_ATTEMPT_WINDOW_MS) {
+          claimPhoneAttempts.delete(attemptKey);
+        }
+        const current = claimPhoneAttempts.get(attemptKey);
+        if (current && current.count >= CLAIM_ATTEMPT_MAX) {
+          return res.status(429).json({ ok: false, reason: 'too_many_attempts', plate });
+        }
+        if (!heldPhoneNorm || phoneNorm !== heldPhoneNorm) {
+          if (current) current.count += 1;
+          else claimPhoneAttempts.set(attemptKey, { count: 1, firstAt: nowMs });
+          console.warn(
+            `[customer/cars POST] phone mismatch on walk-in claim: user=${userId} plate=${plate} attempts=${claimPhoneAttempts.get(attemptKey)?.count}`,
+          );
+          return res.status(409).json({ ok: false, reason: 'phone_mismatch', plate });
+        }
+        claimPhoneAttempts.delete(attemptKey);
+        // Phone matches — adopt the walk-in identity atomically.
+        const adopted = await db.transaction(async (tx) => {
+          if (!cust) {
+            // User has no customer row yet: take over the walk-in row so
+            // memberships, loyalty and history all follow automatically.
+            // Guarded re-check (user_id still NULL) so two concurrent
+            // claims can't both adopt.
+            const took = (await tx.execute(sql`
+              UPDATE customers SET user_id = ${userId}
+              WHERE id = ${claimed.customer_id} AND user_id IS NULL
+              RETURNING id
+            `)).rows[0];
+            if (!took) return null;
+            const car = (await tx.execute(sql`
+              UPDATE cars SET
+                user_id       = ${userId},
+                license_plate = ${plate},
+                brand     = COALESCE(${parsed.data.brand ?? null}, brand),
+                model     = COALESCE(${parsed.data.model ?? null}, model),
+                color     = COALESCE(${parsed.data.color ?? null}, color),
+                photo_url = COALESCE(${parsed.data.photo_url ?? null}, photo_url)
+              WHERE id = ${claimed.id} AND user_id IS NULL
+              RETURNING id, license_plate, brand, model, color, photo_url, last_seen_at
+            `)).rows[0];
+            return car ?? null;
+          }
+          // User already has their own customer row: re-point this car and
+          // its memberships to it (the walk-in shell row keeps any other
+          // history it may have).
+          await tx.execute(sql`
+            UPDATE memberships SET customer_id = ${cust.id}
+            WHERE vehicle_id = ${claimed.id} AND customer_id = ${claimed.customer_id}
+          `);
+          const car = (await tx.execute(sql`
+            UPDATE cars SET
+              user_id       = ${userId},
+              customer_id   = ${cust.id},
+              license_plate = ${plate},
+              brand     = COALESCE(${parsed.data.brand ?? null}, brand),
+              model     = COALESCE(${parsed.data.model ?? null}, model),
+              color     = COALESCE(${parsed.data.color ?? null}, color),
+              photo_url = COALESCE(${parsed.data.photo_url ?? null}, photo_url)
+            WHERE id = ${claimed.id} AND user_id IS NULL
+            RETURNING id, license_plate, brand, model, color, photo_url, last_seen_at
+          `)).rows[0];
+          return car ?? null;
+        });
+        if (!adopted) {
+          return res.status(409).json({ ok: false, reason: 'plate_claimed', plate });
+        }
+        console.log(
+          `[customer/cars POST] walk-in plate ${plate} adopted by user ${userId} via phone match`,
+        );
+        return res.json({ ok: true, car: adopted });
       }
 
       // An unclaimed car for this plate may already exist — typically created
@@ -9927,6 +10039,231 @@ export async function registerRoutes(app: Express): Promise<Server> {
     } catch (err) {
       console.error('[pos.memberships.create] failed:', err);
       res.status(500).json({ error: 'membership_create_failed' });
+    }
+  });
+
+  // POST /api/pos/subscriptions/sell — sell (or renew) a counter-paid
+  // Unlimited pass for a plate. Unlike the CyberSource web flow, this is a
+  // one-month prepaid pass paid at the till (cash/card/wallet QR):
+  //   1. Upserts the car by plate (creating an unclaimed row if new).
+  //   2. Upserts a walk-in customer by phone (unique) unless the car is
+  //      already linked to a customer — then THAT customer holds the pass.
+  //   3. Creates an ACTIVE kind='unlimited' membership bound to the vehicle
+  //      (expires +1 month), or EXTENDS an existing active one by +1 month
+  //      (renewal) — never stacks duplicates.
+  //   4. Rings a normal paid POS order for the pass price so the sale hits
+  //      the drawer/cash tally, shift, and all sales reports.
+  // Price is server-authoritative from the shared plan catalog (B$39/mo) —
+  // the client never sends an amount. When the customer later registers on
+  // the website, the plate-claim flow (POST /api/customer/cars) attaches
+  // this membership to their account via a phone match, and the dashboard
+  // "Show wash QR" works immediately.
+  const sellPosSubscriptionSchema = z.object({
+    plate: z.string().trim().min(1).max(20),
+    brand: z.string().trim().max(60).optional().nullable(),
+    model: z.string().trim().max(60).optional().nullable(),
+    customer_name: z.string().trim().max(120).optional().nullable(),
+    customer_phone: z.string().trim().max(30).optional().nullable(),
+    payment_method: z.enum(['cash', 'card', 'bank_transfer', 'baiduri_pay', 'quick_pay', 'qr_code']),
+    qr_provider: z.string().trim().max(40).optional().nullable(),
+    payment_ref: z.string().trim().max(120).optional().nullable(),
+    paid_amount_cents: z.number().int().nonnegative().max(1_000_000).optional().nullable(),
+    branch_id: z.number().int().positive(),
+    // Guard against phone typos silently assigning the pass to an existing
+    // customer: the first attempt 409s with the existing customer's name
+    // and the cashier must explicitly confirm before we reuse that row.
+    confirm_existing_customer: z.boolean().optional(),
+  });
+  app.post('/api/pos/subscriptions/sell', requireStaff, requireStaffRole('owner', 'manager', 'lane', 'cashier'), async (req, res) => {
+    const parsed = sellPosSubscriptionSchema.safeParse(req.body);
+    if (!parsed.success) {
+      return res.status(400).json({ error: 'invalid_request', details: parsed.error.flatten() });
+    }
+    const body = parsed.data;
+    const plan = getSubscriptionPlan('unlimited')!;
+    const priceCents = plan.priceCents;
+
+    // Mirror the POS order payment gates.
+    if (body.payment_method === 'cash') {
+      if (body.paid_amount_cents == null) return res.status(400).json({ error: 'cash_amount_required' });
+      if (body.paid_amount_cents < priceCents) return res.status(400).json({ error: 'cash_amount_too_low' });
+    }
+    if (body.payment_method === 'bank_transfer' && !(body.payment_ref ?? '').trim()) {
+      return res.status(400).json({ error: 'bank_transfer_reference_required' });
+    }
+    if (body.payment_method === 'qr_code' && !(body.qr_provider ?? '').trim()) {
+      return res.status(400).json({ error: 'qr_provider_required' });
+    }
+
+    const staffUser = req.staff!.user as any;
+    const staffId = staffUser.id as string;
+    const staffRole = staffUser.role as 'owner' | 'manager' | 'lane' | 'cashier';
+    const staffBranchId = staffUser.branchId as number | null;
+    const VALID_BRANCH_IDS = [1, 2, 3, 4, 5];
+    let effectiveBranchId: number;
+    if (staffRole === 'owner' || staffRole === 'manager') {
+      if (!VALID_BRANCH_IDS.includes(body.branch_id)) {
+        return res.status(400).json({ error: 'invalid_branch' });
+      }
+      effectiveBranchId = body.branch_id;
+    } else {
+      if (staffBranchId == null) return res.status(400).json({ error: 'staff_no_branch' });
+      effectiveBranchId = staffBranchId;
+    }
+
+    const plateUpper = body.plate.toUpperCase().replace(/\s+/g, ' ').trim();
+    const plateNorm = plateUpper.replace(/\s+/g, '');
+    const phoneNorm = (body.customer_phone ?? '').replace(/\D+/g, '');
+
+    try {
+      const out = await db.transaction(async (tx) => {
+        // 1. Car: find by normalized plate, else create an unclaimed row.
+        let car = (await tx.execute(sql`
+          SELECT id, customer_id, user_id FROM cars
+          WHERE UPPER(REGEXP_REPLACE(license_plate, '\\s+', '', 'g')) = ${plateNorm}
+          LIMIT 1
+          FOR UPDATE
+        `)).rows[0] as { id: number; customer_id: number | null; user_id: number | null } | undefined;
+        if (!car) {
+          car = (await tx.execute(sql`
+            INSERT INTO cars (license_plate, brand, model)
+            VALUES (${plateUpper}, ${body.brand ?? null}, ${body.model ?? null})
+            RETURNING id, customer_id, user_id
+          `)).rows[0] as any;
+        }
+
+        // 2. Resolve the membership holder.
+        let customerId: number;
+        if (car!.customer_id != null) {
+          // Car already belongs to a customer — the pass is theirs.
+          customerId = car!.customer_id;
+        } else {
+          // Need a customer row: upsert by phone (unique).
+          if (!phoneNorm || !(body.customer_name ?? '').trim()) {
+            throw Object.assign(new Error('customer_details_required'), { httpStatus: 400 });
+          }
+          // Typo guard: if this phone already belongs to a customer, the
+          // cashier must explicitly confirm before the pass is attached to
+          // that existing account — otherwise a mistyped digit silently
+          // gives someone else's account a paid membership.
+          const existingCust = (await tx.execute(sql`
+            SELECT id, name, user_id FROM customers WHERE phone = ${phoneNorm} LIMIT 1
+          `)).rows[0] as { id: number; name: string | null; user_id: number | null } | undefined;
+          if (existingCust && !body.confirm_existing_customer) {
+            throw Object.assign(new Error('phone_belongs_to_existing_customer'), {
+              httpStatus: 409,
+              extra: { existing_customer_name: existingCust.name },
+            });
+          }
+          const cust = existingCust ?? (await tx.execute(sql`
+            INSERT INTO customers (phone, name)
+            VALUES (${phoneNorm}, ${body.customer_name!.trim()})
+            ON CONFLICT (phone) DO UPDATE SET updated_at = now()
+            RETURNING id, user_id
+          `)).rows[0] as { id: number; user_id: number | null };
+          customerId = cust.id;
+          // Link the car to the buyer. If that phone belongs to a customer
+          // who already registered online, link the user too so the pass
+          // shows on their dashboard instantly.
+          await tx.execute(sql`
+            UPDATE cars SET
+              customer_id = ${customerId},
+              user_id     = COALESCE(user_id, ${cust.user_id}),
+              brand       = COALESCE(${body.brand ?? null}, brand),
+              model       = COALESCE(${body.model ?? null}, model)
+            WHERE id = ${car!.id}
+          `);
+        }
+
+        // 3. Membership: extend an existing active unlimited pass on this
+        //    vehicle, otherwise create a fresh one-month pass.
+        const existing = (await tx.execute(sql`
+          SELECT id, expires_at FROM memberships
+          WHERE vehicle_id = ${car!.id}
+            AND kind = 'unlimited'
+            AND status = 'active'
+            AND (expires_at IS NULL OR expires_at > now())
+          ORDER BY created_at DESC
+          LIMIT 1
+          FOR UPDATE
+        `)).rows[0] as { id: string; expires_at: string | null } | undefined;
+
+        let membership: any;
+        let renewed = false;
+        if (existing) {
+          renewed = true;
+          membership = (await tx.execute(sql`
+            UPDATE memberships
+               SET expires_at = GREATEST(COALESCE(expires_at, now()), now()) + interval '1 month'
+             WHERE id = ${existing.id}
+             RETURNING id, customer_id, vehicle_id, kind, status, expires_at, price_cents
+          `)).rows[0];
+        } else {
+          const membershipId = `mem_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 8)}`;
+          membership = (await tx.execute(sql`
+            INSERT INTO memberships (
+              id, customer_id, vehicle_id, kind, total_washes, remaining_washes,
+              price_cents, status, expires_at, sold_by_staff_id, sold_at_branch_id, source
+            ) VALUES (
+              ${membershipId}, ${customerId}, ${car!.id}, 'unlimited', 0, 0,
+              ${priceCents}, 'active', now() + interval '1 month',
+              ${staffId}, ${effectiveBranchId}, 'pos'
+            )
+            RETURNING id, customer_id, vehicle_id, kind, status, expires_at, price_cents
+          `)).rows[0];
+        }
+
+        // 4. Ring the sale as a normal paid order (hits drawer + reports).
+        const shiftRows = (await tx.execute(sql`
+          SELECT id FROM cashier_shifts
+           WHERE opened_by_staff_id = ${staffId}
+             AND branch_id = ${effectiveBranchId}
+             AND status = 'open'
+           LIMIT 1
+        `)).rows as Array<{ id: number }>;
+        const shiftIdForOrder: number | null = shiftRows[0]?.id ?? null;
+        const paidAmountCents = body.paid_amount_cents ?? priceCents;
+        const changeCents = Math.max(0, paidAmountCents - priceCents);
+        const orderId = `ord_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 8)}`;
+        const packageName = renewed
+          ? `${plan.name} — Monthly Pass (renewal)`
+          : `${plan.name} — Monthly Pass`;
+        await tx.execute(sql`
+          INSERT INTO orders (
+            id, branch_id, staff_id, plate,
+            package_id, package_name, package_price_cents,
+            addons, subtotal_cents, total_cents,
+            payment_method, qr_provider, payment_ref,
+            paid_amount_cents, change_cents,
+            ticket_code, status,
+            vehicle_id, customer_id,
+            shift_id
+          ) VALUES (
+            ${orderId}, ${effectiveBranchId}, ${staffId}, ${plateUpper},
+            NULL, ${packageName}, ${priceCents},
+            '[]'::jsonb, ${priceCents}, ${priceCents},
+            ${body.payment_method}, ${(body.payment_method === 'qr_code' || body.payment_method === 'bank_transfer') ? (body.qr_provider ?? null) : null}, ${body.payment_method === 'cash' ? null : (body.payment_ref ?? null)},
+            ${paidAmountCents}, ${changeCents},
+            NULL, 'done',
+            ${car!.id}, ${customerId},
+            ${shiftIdForOrder}
+          )
+        `);
+
+        console.log(
+          `[pos.subscriptions.sell] staff=${staffUser.email ?? staffId} branch=${effectiveBranchId} ` +
+          `plate=${plateUpper} car=${car!.id} customer=${customerId} membership=${membership.id} ` +
+          `${renewed ? 'RENEWED' : 'NEW'} until=${membership.expires_at} order=${orderId} ` +
+          `method=${body.payment_method} amount=B$${(priceCents / 100).toFixed(2)}`,
+        );
+        return { membership, order_id: orderId, renewed, change_cents: changeCents };
+      });
+      res.status(201).json({ ok: true, ...out });
+    } catch (err: any) {
+      const status = err?.httpStatus;
+      if (status) return res.status(status).json({ error: err.message, ...(err.extra ?? {}) });
+      console.error('[pos.subscriptions.sell] failed:', err);
+      res.status(500).json({ error: 'subscription_sale_failed' });
     }
   });
 

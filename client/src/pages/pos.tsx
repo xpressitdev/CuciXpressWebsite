@@ -62,6 +62,8 @@ import LoyaltyStampTab from "@/components/admin/LoyaltyStampTab";
 import {
   Dialog,
   DialogContent,
+  DialogDescription,
+  DialogFooter,
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog";
@@ -379,6 +381,17 @@ export default function POS() {
   const [editModel, setEditModel] = useState<string>("");
   const plateInputRef = useRef<HTMLInputElement | null>(null);
 
+  // Counter-sold Unlimited pass (sell/renew) dialog state.
+  const [sellPassOpen, setSellPassOpen] = useState<boolean>(false);
+  const [sellName, setSellName] = useState<string>("");
+  const [sellPhone, setSellPhone] = useState<string>("");
+  const [sellPayKey, setSellPayKey] = useState<string>("cash");
+  const [sellCash, setSellCash] = useState<string>("");
+  const [sellRef, setSellRef] = useState<string>("");
+  // Set when the phone entered already belongs to an existing customer:
+  // the cashier must confirm before the pass attaches to that account.
+  const [sellExistingName, setSellExistingName] = useState<string | null>(null);
+
   // Confirmation state
   const [lastOrder, setLastOrder] = useState<CreatedOrder | null>(null);
   // Which Today's-orders row is currently re-printing (per-row spinner).
@@ -657,6 +670,112 @@ export default function POS() {
     const pinned = list.find(m => m.vehicle_id === matchedVehicleId);
     return pinned ?? list[0];
   }, [membershipData, matchedVehicleId]);
+
+  // Counter-sold Unlimited pass. Price is server-authoritative (B$39/mo)
+  // — this constant is display-only. The sale rings a normal paid order
+  // so it lands in the drawer + today's list.
+  const UNLIMITED_PASS_CENTS = 3900;
+  const hasKnownCustomer = !!vehicleHistory?.customer;
+  const unlimitedOnCar =
+    activeMembership?.kind === "unlimited" ? activeMembership : null;
+  const sellPayOption = useMemo(
+    () =>
+      PAYMENT_OPTIONS.find((o) => o.key === sellPayKey) ?? PAYMENT_OPTIONS[0],
+    [sellPayKey],
+  );
+  const sellCashCents = (() => {
+    const t = sellCash.trim();
+    if (t === "") return null;
+    const n = parseFloat(t);
+    return Number.isFinite(n) && n >= 0 ? Math.round(n * 100) : null;
+  })();
+  const sellNeedsContact = !hasKnownCustomer;
+  const canSellPass =
+    plate.trim().length > 0 &&
+    branchId !== null &&
+    (!sellNeedsContact ||
+      (sellName.trim().length > 0 && sellPhone.trim().length > 0)) &&
+    (sellPayOption.method !== "cash" ||
+      (sellCashCents != null && sellCashCents >= UNLIMITED_PASS_CENTS)) &&
+    (sellPayOption.method !== "bank_transfer" || sellRef.trim().length > 0);
+
+  const sellPass = useMutation({
+    mutationFn: async () => {
+      const r = await apiRequest("POST", "/api/pos/subscriptions/sell", {
+        plate: plate.trim(),
+        brand: newCarBrand.trim() || null,
+        model: newCarModel.trim() || null,
+        customer_name: sellName.trim() || null,
+        customer_phone: sellPhone.trim() || null,
+        payment_method: sellPayOption.method,
+        qr_provider: sellPayOption.qrProvider,
+        payment_ref: sellRef.trim() || null,
+        paid_amount_cents:
+          sellPayOption.method === "cash" ? sellCashCents : null,
+        branch_id: branchId,
+        confirm_existing_customer: sellExistingName !== null,
+      });
+      return (await r.json()) as {
+        ok: true;
+        renewed: boolean;
+        change_cents: number;
+        membership: { expires_at: string | null };
+      };
+    },
+    onSuccess: (data) => {
+      setSellPassOpen(false);
+      setSellName("");
+      setSellPhone("");
+      setSellCash("");
+      setSellRef("");
+      setSellExistingName(null);
+      const until = data.membership.expires_at
+        ? new Date(data.membership.expires_at).toLocaleDateString("en-GB", {
+            day: "numeric",
+            month: "short",
+            year: "numeric",
+            timeZone: "Asia/Brunei",
+          })
+        : "";
+      toast({
+        title: data.renewed ? "Pass renewed" : "Unlimited pass sold",
+        description:
+          `Valid until ${until}.` +
+          (data.change_cents > 0
+            ? ` Change: ${formatBND(data.change_cents)}.`
+            : ""),
+      });
+      queryClient.invalidateQueries({ queryKey: ["/api/pos/orders/today", branchId] });
+      queryClient.invalidateQueries({ queryKey: ["/api/pos/memberships/active"] });
+      if (matchedVehicleId !== null) {
+        queryClient.invalidateQueries({
+          queryKey: ["/api/pos/vehicles", matchedVehicleId, "history"],
+        });
+      }
+    },
+    onError: (err: any) => {
+      const text = String(err?.message ?? "");
+      if (text.includes("phone_belongs_to_existing_customer")) {
+        // Surface the existing account so the cashier confirms (or fixes
+        // a typo) before the pass attaches to it.
+        let name: string | null = null;
+        const jsonStart = text.indexOf("{");
+        if (jsonStart >= 0) {
+          try {
+            name = JSON.parse(text.slice(jsonStart))?.existing_customer_name ?? null;
+          } catch { /* keep null */ }
+        }
+        setSellExistingName(name ?? "an existing customer");
+        return;
+      }
+      const msg = text.includes("customer_details_required")
+        ? "Enter the customer's name and phone number."
+        : text.includes("cash_amount_too_low")
+          ? "Cash received is less than B$39.00."
+          : "Could not complete the pass sale. Try again.";
+      toast({ title: msg, variant: "destructive" });
+    },
+  });
 
   // When the cashier picks "Subscription" AND we have an active wash-pack
   // for the customer, the pack covers the full subtotal (Phase 2 model —
@@ -1853,8 +1972,167 @@ export default function POS() {
                       )}
                     </div>
                   )}
+
+                  {/* Counter-sold Unlimited pass — sell or renew a one-month
+                      pass paid at the till. Shown once a plate is entered
+                      (matched car or first-timer with details filled). */}
+                  {plate.trim().length > 0 &&
+                    (!isFirstTimerPlate || newCarDetailsComplete) && (
+                    <div className="pt-1 border-t border-gray-100">
+                      <Button
+                        type="button"
+                        variant="outline"
+                        size="sm"
+                        className="border-emerald-300 text-emerald-800 hover:bg-emerald-50"
+                        onClick={() => setSellPassOpen(true)}
+                        data-testid="button-sell-unlimited-pass"
+                      >
+                        <ShieldCheck className="w-4 h-4 mr-1.5" />
+                        {unlimitedOnCar
+                          ? "Renew Unlimited Pass · +1 month · B$39"
+                          : "Sell Unlimited Pass · 1 month · B$39"}
+                      </Button>
+                    </div>
+                  )}
                 </CardContent>
               </Card>
+
+              {/* Sell / renew Unlimited pass dialog */}
+              <Dialog open={sellPassOpen} onOpenChange={setSellPassOpen}>
+                <DialogContent className="sm:max-w-md">
+                  <DialogHeader>
+                    <DialogTitle>
+                      {unlimitedOnCar ? "Renew Unlimited Pass" : "Sell Unlimited Pass"}
+                    </DialogTitle>
+                    <DialogDescription>
+                      {unlimitedOnCar
+                        ? `Extends ${plate.trim().toUpperCase()}'s pass by 1 month for ${formatBND(UNLIMITED_PASS_CENTS)}.`
+                        : `1 month of unlimited washes for ${plate.trim().toUpperCase()} — ${formatBND(UNLIMITED_PASS_CENTS)}, paid at the counter.`}
+                    </DialogDescription>
+                  </DialogHeader>
+                  <div className="space-y-3">
+                    {sellNeedsContact ? (
+                      <div className="grid grid-cols-1 gap-2">
+                        <div>
+                          <Label htmlFor="sell-name">Customer name</Label>
+                          <Input
+                            id="sell-name"
+                            value={sellName}
+                            onChange={(e) => setSellName(e.target.value)}
+                            placeholder="e.g. Hjh Aminah"
+                            data-testid="input-sell-name"
+                          />
+                        </div>
+                        <div>
+                          <Label htmlFor="sell-phone">Phone number</Label>
+                          <Input
+                            id="sell-phone"
+                            type="tel"
+                            value={sellPhone}
+                            onChange={(e) => {
+                              setSellPhone(e.target.value);
+                              setSellExistingName(null);
+                            }}
+                            placeholder="e.g. 8123456"
+                            data-testid="input-sell-phone"
+                          />
+                          {sellExistingName && (
+                            <p className="text-[11px] text-amber-700 bg-amber-50 border border-amber-200 rounded px-2 py-1 mt-1">
+                              This number belongs to{" "}
+                              <span className="font-semibold">{sellExistingName}</span>.
+                              Check the number — if it's right, press{" "}
+                              {unlimitedOnCar ? "Renew" : "Sell"} again to
+                              attach the pass to their account.
+                            </p>
+                          )}
+                          <p className="text-[11px] text-gray-500 mt-1">
+                            The customer uses this number to link the pass to
+                            their account when they register on the website.
+                          </p>
+                        </div>
+                      </div>
+                    ) : (
+                      <p className="text-xs text-gray-600">
+                        Pass goes to{" "}
+                        <span className="font-medium">
+                          {vehicleHistory?.customer?.name ?? "the car's owner on file"}
+                        </span>.
+                      </p>
+                    )}
+                    <div>
+                      <Label>Payment</Label>
+                      <Select value={sellPayKey} onValueChange={setSellPayKey}>
+                        <SelectTrigger data-testid="select-sell-payment">
+                          <SelectValue />
+                        </SelectTrigger>
+                        <SelectContent>
+                          {PAYMENT_OPTIONS.filter(
+                            (o) => o.method !== "subscription" && o.method !== "voucher",
+                          ).map((o) => (
+                            <SelectItem key={o.key} value={o.key}>
+                              {o.label}
+                            </SelectItem>
+                          ))}
+                        </SelectContent>
+                      </Select>
+                    </div>
+                    {sellPayOption.method === "cash" && (
+                      <div>
+                        <Label htmlFor="sell-cash">Cash received (required)</Label>
+                        <Input
+                          id="sell-cash"
+                          type="number"
+                          inputMode="decimal"
+                          min="0"
+                          step="0.05"
+                          value={sellCash}
+                          onChange={(e) => setSellCash(e.target.value)}
+                          placeholder="39.00"
+                          data-testid="input-sell-cash"
+                        />
+                        {sellCashCents != null && sellCashCents >= UNLIMITED_PASS_CENTS && (
+                          <p className="text-xs text-gray-600 mt-1">
+                            Change: {formatBND(sellCashCents - UNLIMITED_PASS_CENTS)}
+                          </p>
+                        )}
+                      </div>
+                    )}
+                    {sellPayOption.method === "bank_transfer" && (
+                      <div>
+                        <Label htmlFor="sell-ref">Reference (required)</Label>
+                        <Input
+                          id="sell-ref"
+                          value={sellRef}
+                          onChange={(e) => setSellRef(e.target.value)}
+                          placeholder="Transaction reference"
+                          data-testid="input-sell-ref"
+                        />
+                      </div>
+                    )}
+                  </div>
+                  <DialogFooter>
+                    <Button
+                      variant="outline"
+                      onClick={() => setSellPassOpen(false)}
+                      disabled={sellPass.isPending}
+                    >
+                      Cancel
+                    </Button>
+                    <Button
+                      onClick={() => sellPass.mutate()}
+                      disabled={!canSellPass || sellPass.isPending}
+                      data-testid="button-confirm-sell-pass"
+                    >
+                      {sellPass.isPending && (
+                        <Loader2 className="w-4 h-4 mr-1.5 animate-spin" />
+                      )}
+                      {unlimitedOnCar
+                        ? `Renew — ${formatBND(UNLIMITED_PASS_CENTS)}`
+                        : `Sell — ${formatBND(UNLIMITED_PASS_CENTS)}`}
+                    </Button>
+                  </DialogFooter>
+                </DialogContent>
+              </Dialog>
 
               {/* Package picker — Step 2 */}
               <Card>
