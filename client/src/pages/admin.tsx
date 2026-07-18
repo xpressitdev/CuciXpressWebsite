@@ -1521,6 +1521,23 @@ function OrdersReportTab() {
     },
   });
 
+  // Subscription earnings recognized up to the filtered end date, so the
+  // owner can reconcile: wash sales (above) + recognized subscription
+  // earnings = total earnings. Owner/manager only (endpoint is role-gated).
+  const { staff } = useStaffAuth();
+  const canSeeSubRevenue = staff?.role === "owner" || staff?.role === "manager";
+  const { data: subRevAsOf } = useQuery<{
+    totals: { recognized_cents: number; deferred_cents: number; earned_today_cents: number };
+  }>({
+    queryKey: ["/api/admin/subscriptions/revenue", to],
+    enabled: canSeeSubRevenue && /^\d{4}-\d{2}-\d{2}$/.test(to),
+    queryFn: async () => {
+      const res = await fetch(`/api/admin/subscriptions/revenue?date=${to}`, { credentials: "include" });
+      if (!res.ok) throw new Error("sub_revenue_failed");
+      return res.json();
+    },
+  });
+
   const branches = data?.branches ?? [];
   const staffList = data?.staff ?? [];
   const totals = data?.totals;
@@ -1603,6 +1620,13 @@ function OrdersReportTab() {
         { label: "Net Revenue",        value: formatBND(totals.sales_cents - totals.refund_total_cents), testId: "report-tile-revenue" },
         { label: "Transaction Fees (MDR)", value: formatBND(totals.mdr_fee_cents),       testId: "report-tile-mdr-fee" },
         { label: "Net After Fees",     value: formatBND(totals.net_after_fees_cents),   testId: "report-tile-net-after-fees" },
+        ...(subRevAsOf
+          ? [{
+              label: `Subscription Earnings (to ${to})`,
+              value: formatBND(subRevAsOf.totals.recognized_cents),
+              testId: "report-tile-sub-recognized",
+            }]
+          : []),
       ]
     : [];
 

@@ -269,6 +269,15 @@ export async function registerRoutes(app: Express): Promise<Server> {
   const realOrders = (prefix: '' | 'o.' = '') =>
     sql.raw(`AND ${prefix}status NOT IN ('voided', 'pending_payment')`);
 
+  // Counter-sold Unlimited passes are rung as normal paid orders so the cash
+  // drawer and payment-method tallies stay correct (money WAS collected that
+  // day), but their REVENUE is recognized over 30 days in the Subscription
+  // tab — exactly like online subscriptions. Exclude them from lump-sum
+  // earnings surfaces (dashboard sales tiles, order-report totals, trends,
+  // best-selling); do NOT apply this to cash/shift or payment-method reports.
+  const excludeSubscriptionSales = (prefix: '' | 'o.' = '') =>
+    sql.raw(`AND COALESCE(${prefix}order_type, '') <> 'counter_subscription'`);
+
   // Gross sales = money actually collected from completed sales. Refund
   // handling differs by data lineage, so this SUM must too:
   //  - LIVE refund: the ORIGINAL order is flipped to status='refunded' (one
@@ -755,6 +764,64 @@ export async function registerRoutes(app: Express): Promise<Server> {
         };
       });
 
+      // Counter-sold passes: each POS sale/renewal ORDER is its own 30-day
+      // recognition window (a renewal is a fresh B$39 purchase). The cash was
+      // collected at the till (drawer/payment tallies keep it), but earnings
+      // are spread here just like online subscriptions. MDR uses the order's
+      // ACTUAL payment method (cash/bank transfer = 0). Refunded pass orders
+      // recognize nothing.
+      const posRows = (await db.execute(sql`
+        SELECT o.id, o.total_cents, o.payment_method, o.qr_provider,
+               o.created_at, o.plate, o.package_name,
+               c.name AS customer_name,
+               car.brand AS car_brand, car.model AS car_model
+          FROM orders o
+          LEFT JOIN customers c ON c.id = o.customer_id
+          LEFT JOIN cars    car ON car.id = o.vehicle_id
+         WHERE o.order_type = 'counter_subscription'
+           AND o.status NOT IN ('voided', 'pending_payment', 'refunded')
+         ORDER BY o.created_at DESC
+      `)).rows as Array<{
+        id: string; total_cents: number; payment_method: string;
+        qr_provider: string | null; created_at: string | Date;
+        plate: string | null; package_name: string;
+        customer_name: string | null; car_brand: string | null; car_model: string | null;
+      }>;
+      for (const o of posRows) {
+        const gross = Number(o.total_cents) || 0;
+        const bps = mdrRateFor(rateMap, o.payment_method, o.qr_provider);
+        const mdrFee = Math.round((gross * bps) / 10000);
+        const net = gross - mdrFee;
+        const createdYmd = bntDateStr(new Date(o.created_at));
+        const elapsed = asOfDay - dayNum(createdYmd) + 1;
+        const recDays = Math.min(Math.max(elapsed, 0), RECOGNITION_DAYS);
+        const recognized = recognizedAt(net, elapsed);
+        const earnedToday = recognized - recognizedAt(net, elapsed - 1);
+        const endMs = new Date(o.created_at).getTime() + RECOGNITION_DAYS * 86400000;
+        subscriptions.push({
+          id: o.id,
+          customer_name: o.customer_name,
+          plate: o.plate ?? null,
+          car_brand: o.car_brand ?? null,
+          car_model: o.car_model ?? null,
+          plan_label: `${planLabel(gross)} — Counter${o.package_name.includes('renewal') ? ' renewal' : ''}`,
+          status: recDays < RECOGNITION_DAYS ? 'active' : 'completed',
+          created_at: o.created_at,
+          expires_at: new Date(endMs).toISOString(),
+          price_cents: gross,
+          mdr_fee_cents: mdrFee,
+          net_cents: net,
+          daily_cents: Math.round(net / RECOGNITION_DAYS),
+          day_index: recDays,
+          days_remaining: Math.max(0, RECOGNITION_DAYS - recDays),
+          recognized_cents: recognized,
+          deferred_cents: net - recognized,
+          earned_today_cents: earnedToday,
+        });
+      }
+      subscriptions.sort((a, b) =>
+        new Date(b.created_at as any).getTime() - new Date(a.created_at as any).getTime());
+
       const totals = {
         total_count: subscriptions.length,
         active_count: subscriptions.filter((s) => s.status === 'active').length,
@@ -836,7 +903,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
           SELECT *
             FROM orders
            WHERE date(${bizDay()} AT TIME ZONE 'Asia/Brunei') = ${targetDate}::date
-             ${branchFilter} ${realOrders()}
+             ${branchFilter} ${realOrders()} ${excludeSubscriptionSales()}
         ),
         paid AS (SELECT * FROM day_orders WHERE status <> 'refunded'),
         ref  AS (SELECT * FROM day_orders WHERE status =  'refunded')
@@ -858,7 +925,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
                COALESCE(SUM(CASE WHEN status =  'refunded' THEN total_cents ELSE 0 END), 0)::bigint AS refund_cents
           FROM orders
          WHERE date(${bizDay()} AT TIME ZONE 'Asia/Brunei') = ${targetDate}::date
-           ${branchFilter} ${realOrders()}
+           ${branchFilter} ${realOrders()} ${excludeSubscriptionSales()}
          GROUP BY 1
          ORDER BY 1
       `)).rows as Array<{ hour: number; sales_cents: string | number; refund_cents: string | number }>;
@@ -884,7 +951,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
                COALESCE(SUM(CASE WHEN status =  'refunded' THEN total_cents ELSE 0 END),0)::int AS refund_cents
           FROM orders
          WHERE date(${bizDay()} AT TIME ZONE 'Asia/Brunei') = ${targetDate}::date
-           ${branchFilter} ${realOrders()}
+           ${branchFilter} ${realOrders()} ${excludeSubscriptionSales()}
          GROUP BY payment_method, qr_provider
       `)).rows as Array<{ payment_method: string; qr_provider: string | null; sales_cents: number; refund_cents: number }>;
       const rateMap = await loadMdrRateMap(db);
@@ -984,7 +1051,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
           COALESCE(SUM(CASE WHEN o.status <> 'refunded' THEN 1 + COALESCE(jsonb_array_length(o.addons),0) ELSE 0 END),0)::int AS items_sold
           FROM orders o
          WHERE date(${bizDay('o.')} AT TIME ZONE 'Asia/Brunei') BETWEEN ${from}::date AND ${to}::date
-           ${branchFilter} ${pmFilter} ${staffFilter} ${searchFilter} ${realOrders('o.')}
+           ${branchFilter} ${pmFilter} ${staffFilter} ${searchFilter} ${realOrders('o.')} ${excludeSubscriptionSales('o.')}
       `)).rows[0] as any;
 
       const countRow = (await db.execute(sql`
@@ -1024,7 +1091,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
                ${grossSalesCents('o.')}::int AS sales_cents
           FROM orders o
          WHERE date(${bizDay('o.')} AT TIME ZONE 'Asia/Brunei') BETWEEN ${from}::date AND ${to}::date
-           ${branchFilter} ${pmFilter} ${staffFilter} ${searchFilter} ${realOrders('o.')}
+           ${branchFilter} ${pmFilter} ${staffFilter} ${searchFilter} ${realOrders('o.')} ${excludeSubscriptionSales('o.')}
          GROUP BY o.payment_method, o.qr_provider
       `)).rows as Array<{ payment_method: string; qr_provider: string | null; sales_cents: number }>;
       const rateMap = await loadMdrRateMap(db);
@@ -1494,7 +1561,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
             FROM orders
            WHERE status <> 'refunded'
              AND date(${bizDay()} AT TIME ZONE 'Asia/Brunei') BETWEEN ${from}::date AND ${to}::date
-             ${branchFilter} ${realOrders()}
+             ${branchFilter} ${realOrders()} ${excludeSubscriptionSales()}
         ),
         pkg_items AS (
           SELECT
@@ -1538,7 +1605,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
           FROM orders
          WHERE status <> 'refunded'
            AND date(${bizDay()} AT TIME ZONE 'Asia/Brunei') BETWEEN ${from}::date AND ${to}::date
-           ${branchFilter} ${realOrders()}
+           ${branchFilter} ${realOrders()} ${excludeSubscriptionSales()}
       `)).rows[0] as { items_sold: number; revenue_cents: number };
 
       const totalQty     = Number(totalsRow.items_sold ?? 0);
@@ -1617,7 +1684,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
           FROM days
           LEFT JOIN orders o
             ON date(${bizDay('o.')} AT TIME ZONE 'Asia/Brunei') = d
-            ${branchFilter} ${realOrders('o.')}
+            ${branchFilter} ${realOrders('o.')} ${excludeSubscriptionSales('o.')}
          GROUP BY d
          ORDER BY d
       `)).rows as Array<{ date: string; sales_cents: string | number; refund_cents: string | number; transactions: number }>;
@@ -1632,7 +1699,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
           LEFT JOIN orders o
             ON o.branch_id = b.id
            AND date(${bizDay('o.')} AT TIME ZONE 'Asia/Brunei') BETWEEN ${from}::date AND ${to}::date
-           ${realOrders('o.')}
+           ${realOrders('o.')} ${excludeSubscriptionSales('o.')}
          ${branchId !== null ? sql`WHERE b.id = ${branchId}` : sql``}
          GROUP BY b.id, b.name
          ORDER BY sales_cents DESC, b.name
@@ -1647,7 +1714,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
           FROM orders o
          WHERE date(${bizDay('o.')} AT TIME ZONE 'Asia/Brunei') BETWEEN ${from}::date AND ${to}::date
            AND o.status <> 'refunded'
-           ${branchFilter} ${realOrders('o.')}
+           ${branchFilter} ${realOrders('o.')} ${excludeSubscriptionSales('o.')}
          GROUP BY 1, 2
          ORDER BY 1, 2
       `)).rows as Array<{ dow: number; hour: number; transactions: number; sales_cents: string | number }>;
@@ -1660,7 +1727,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
                COUNT(*) FILTER (WHERE o.status =  'refunded')::int AS refund_count
           FROM orders o
          WHERE date(${bizDay('o.')} AT TIME ZONE 'Asia/Brunei') BETWEEN ${from}::date AND ${to}::date
-           ${branchFilter} ${realOrders('o.')}
+           ${branchFilter} ${realOrders('o.')} ${excludeSubscriptionSales('o.')}
       `)).rows[0] as any;
 
       const sales = Number(totalsRow.sales_cents ?? 0);
@@ -10265,7 +10332,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
             paid_amount_cents, change_cents,
             ticket_code, status,
             vehicle_id, customer_id,
-            shift_id
+            shift_id, order_type
           ) VALUES (
             ${orderId}, ${effectiveBranchId}, ${staffId}, ${plateUpper},
             NULL, ${packageName}, ${priceCents},
@@ -10274,7 +10341,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
             ${paidAmountCents}, ${changeCents},
             NULL, 'done',
             ${car!.id}, ${customerId},
-            ${shiftIdForOrder}
+            ${shiftIdForOrder}, 'counter_subscription'
           )
         `);
 

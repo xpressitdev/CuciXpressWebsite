@@ -650,6 +650,11 @@ export const orders = pgTable("orders", {
   // a free-wash redemption, points at the loyalty_redemptions row that
   // consumed it. NULL = still eligible to count toward a future stamp.
   loyalty_consumed_in: text("loyalty_consumed_in"),
+  // Counter-pass accounting (2026-07-18): 'counter_subscription' marks a
+  // POS-sold Unlimited pass order. These keep the lump sum in cash/drawer
+  // tallies but are EXCLUDED from lump-sum earnings surfaces and instead
+  // recognized over 30 days via /api/admin/subscriptions/revenue.
+  order_type: text("order_type"),
 });
 
 // Allowed payment methods. Mirrors the orders.payment_method CHECK

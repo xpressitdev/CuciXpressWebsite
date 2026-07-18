@@ -47,5 +47,6 @@
 - [Branch accounts hold plates](branch-account-claimed-plates.md) — "this plate is mine" complaints = branch shell accounts bulk-claimed walk-in cars; fix via owner Plate Transfer tool, history follows the car.
 - [users.last_login is legacy](users-lastlogin-legacy.md) — only the old LiveQue JWT login sets it; count dashboard sign-ins via auth_sessions user_type='customer', CRM "Registered" = customers.user_id NOT NULL.
 - [Counter-sold pass phone claim](counter-pass-phone-claim.md) — POS pass sale makes a walk-in customer by phone; online claim = phone match with rate limit + typo-collision confirm. Don't weaken either guard.
+- [Counter-pass revenue recognition](counter-pass-revenue-recognition.md) — POS pass B$39: drawer/method tallies keep lump; earnings exclude via order_type='counter_subscription' + 30-day spread from ORDERS.
 - [Subscription test sandbox](subscription-test-sandbox.md) — owner-only CyberSource test subs stay invisible via membership_id/user_id/customer_id NULL; gate sandbox routes on isCyberSourceTestMode().
 - [Google reviews billing](google-reviews-billing.md) — rating badge silently shows fake 4.8/150 when Places API fails (usually billing on wrong GCP project); keep cache + placeId allowlist.
