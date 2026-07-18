@@ -1984,7 +1984,14 @@ export default function POS() {
                         variant="outline"
                         size="sm"
                         className="border-emerald-300 text-emerald-800 hover:bg-emerald-50"
-                        onClick={() => setSellPassOpen(true)}
+                        onClick={() => {
+                          // Prefill from the customer on file so the cashier
+                          // sees who the pass will go to (still editable).
+                          setSellName(vehicleHistory?.customer?.name ?? "");
+                          setSellPhone(vehicleHistory?.customer?.phone ?? "");
+                          setSellExistingName(null);
+                          setSellPassOpen(true);
+                        }}
                         data-testid="button-sell-unlimited-pass"
                       >
                         <ShieldCheck className="w-4 h-4 mr-1.5" />
@@ -2011,8 +2018,12 @@ export default function POS() {
                     </DialogDescription>
                   </DialogHeader>
                   <div className="space-y-3">
-                    {sellNeedsContact ? (
-                      <div className="grid grid-cols-1 gap-2">
+                    <div className="grid grid-cols-1 gap-2">
+                      {!sellNeedsContact && (
+                        <p className="text-xs text-gray-600">
+                          Customer on file — details prefilled below.
+                        </p>
+                      )}
                         <div>
                           <Label htmlFor="sell-name">Customer name</Label>
                           <Input
@@ -2051,14 +2062,6 @@ export default function POS() {
                           </p>
                         </div>
                       </div>
-                    ) : (
-                      <p className="text-xs text-gray-600">
-                        Pass goes to{" "}
-                        <span className="font-medium">
-                          {vehicleHistory?.customer?.name ?? "the car's owner on file"}
-                        </span>.
-                      </p>
-                    )}
                     <div>
                       <Label>Payment</Label>
                       <Select value={sellPayKey} onValueChange={setSellPayKey}>

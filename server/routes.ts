@@ -701,6 +701,12 @@ export async function registerRoutes(app: Express): Promise<Server> {
           LEFT JOIN customers c ON c.id = m.customer_id
           LEFT JOIN cars      car ON car.id = m.vehicle_id
          WHERE m.kind = 'unlimited'
+           -- Counter-sold passes (source='pos') are rung as normal paid POS
+           -- orders, so they already appear in the daily sales report, cash
+           -- drawer, and payment-method breakdown on the sale day. Including
+           -- them here would double-count revenue AND apply the wrong
+           -- (Pocket Pay) MDR fee to a cash/card sale.
+           AND m.source IS DISTINCT FROM 'pos'
          ORDER BY m.created_at DESC
       `)).rows as Array<{
         id: string; price_cents: number; status: string;
