@@ -9849,9 +9849,14 @@ export async function registerRoutes(app: Express): Promise<Server> {
       const vehicleRows = (await db.execute(sql`
         SELECT c.id, c.license_plate, c.brand, c.model, c.color, c."type", c.last_seen_at,
                c.vip_tier, c.vip_rank,
-               cu.id AS customer_id, cu.phone AS customer_phone, cu.name AS customer_name
+               COALESCE(cu.id, cuu.id)       AS customer_id,
+               COALESCE(cu.phone, cuu.phone) AS customer_phone,
+               COALESCE(cu.name, cuu.name)   AS customer_name
           FROM cars c
           LEFT JOIN customers cu ON cu.id = c.customer_id
+          -- Cars added from the customer dashboard only set cars.user_id,
+          -- so fall back to that account's customer profile.
+          LEFT JOIN customers cuu ON cuu.user_id = c.user_id
          WHERE c.id = ${id} LIMIT 1
       `)).rows as any[];
       if (vehicleRows.length === 0) return res.status(404).json({ error: 'not_found' });
@@ -10140,9 +10145,26 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
         // 2. Resolve the membership holder.
         let customerId: number;
-        if (car!.customer_id != null) {
+        // Cars added from the customer dashboard only set cars.user_id, so
+        // fall back to that account's customer profile before treating the
+        // buyer as a brand-new walk-in (avoids duplicate customer rows).
+        let ownerCustomerId = car!.customer_id;
+        if (ownerCustomerId == null && car!.user_id != null) {
+          const byUser = (await tx.execute(sql`
+            SELECT id FROM customers WHERE user_id = ${car!.user_id} LIMIT 1
+          `)).rows[0] as { id: number } | undefined;
+          if (byUser) {
+            ownerCustomerId = byUser.id;
+            // Backfill the link so future lookups are direct.
+            await tx.execute(sql`
+              UPDATE cars SET customer_id = ${ownerCustomerId}
+              WHERE id = ${car!.id} AND customer_id IS NULL
+            `);
+          }
+        }
+        if (ownerCustomerId != null) {
           // Car already belongs to a customer — the pass is theirs.
-          customerId = car!.customer_id;
+          customerId = ownerCustomerId;
         } else {
           // Need a customer row: upsert by phone (unique).
           if (!phoneNorm || !(body.customer_name ?? '').trim()) {
