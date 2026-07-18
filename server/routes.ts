@@ -9013,7 +9013,6 @@ export async function registerRoutes(app: Express): Promise<Server> {
            AND date(${bizDay()} AT TIME ZONE 'Asia/Brunei') = (now() AT TIME ZONE 'Asia/Brunei')::date
            ${realOrders()}
          ORDER BY ${bizDay()} DESC
-         LIMIT 50
       `)).rows;
       res.json({ orders: rows });
     } catch (err) {
