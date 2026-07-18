@@ -772,7 +772,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
       // recognize nothing.
       const posRows = (await db.execute(sql`
         SELECT o.id, o.total_cents, o.payment_method, o.qr_provider,
-               o.created_at, o.plate, o.package_name,
+               o.created_at, o.plate, o.package_name, o.vehicle_id,
                c.name AS customer_name,
                car.brand AS car_brand, car.model AS car_model
           FROM orders o
@@ -780,24 +780,35 @@ export async function registerRoutes(app: Express): Promise<Server> {
           LEFT JOIN cars    car ON car.id = o.vehicle_id
          WHERE o.order_type = 'counter_subscription'
            AND o.status NOT IN ('voided', 'pending_payment', 'refunded')
-         ORDER BY o.created_at DESC
+         ORDER BY o.created_at ASC
       `)).rows as Array<{
         id: string; total_cents: number; payment_method: string;
         qr_provider: string | null; created_at: string | Date;
-        plate: string | null; package_name: string;
+        plate: string | null; package_name: string; vehicle_id: number | null;
         customer_name: string | null; car_brand: string | null; car_model: string | null;
       }>;
+      // Early renewals: the membership extends from the OLD expiry (customer
+      // keeps their remaining days), so the renewal's 30-day recognition
+      // window must also start after the previous window ends — not on the
+      // payment day — or the two windows would overlap and recognize the
+      // renewal's money during days the customer hasn't consumed yet.
+      // Chain windows per vehicle in purchase order (rows are ASC).
+      const lastWindowEnd = new Map<string, number>(); // key → last recognition day (inclusive)
       for (const o of posRows) {
         const gross = Number(o.total_cents) || 0;
         const bps = mdrRateFor(rateMap, o.payment_method, o.qr_provider);
         const mdrFee = Math.round((gross * bps) / 10000);
         const net = gross - mdrFee;
         const createdYmd = bntDateStr(new Date(o.created_at));
-        const elapsed = asOfDay - dayNum(createdYmd) + 1;
+        const chainKey = o.vehicle_id != null ? `v${o.vehicle_id}` : `o${o.id}`;
+        const prevEnd = lastWindowEnd.get(chainKey);
+        const startDay = Math.max(dayNum(createdYmd), prevEnd != null ? prevEnd + 1 : -Infinity);
+        lastWindowEnd.set(chainKey, startDay + RECOGNITION_DAYS - 1);
+        const elapsed = asOfDay - startDay + 1;
         const recDays = Math.min(Math.max(elapsed, 0), RECOGNITION_DAYS);
         const recognized = recognizedAt(net, elapsed);
         const earnedToday = recognized - recognizedAt(net, elapsed - 1);
-        const endMs = new Date(o.created_at).getTime() + RECOGNITION_DAYS * 86400000;
+        const endMs = startDay * 86400000 + RECOGNITION_DAYS * 86400000;
         subscriptions.push({
           id: o.id,
           customer_name: o.customer_name,
