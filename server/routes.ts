@@ -4634,9 +4634,12 @@ export async function registerRoutes(app: Express): Promise<Server> {
         // The Pocket Pay callback (below) flips status to 'paid' (or
         // 'voided' on failure) by looking up payment_ref. All inside one
         // transaction so a partial failure can't half-write the customer.
-        // Wrapped in try/catch — a DB hiccup must NOT break the customer's
-        // payment flow; they already have a working Pocket Pay link.
-        try {
+        // The insert is MANDATORY: if we can't record the order, we must NOT
+        // hand the customer a payment link — they'd be paying for a wash the
+        // system can never confirm (no callback match, no receipt, no QR).
+        // Retry a few times to ride out transient DB hiccups, then fail the
+        // checkout so the customer can simply try again.
+        const recordPendingOrder = async () => {
           await db.transaction(async (tx) => {
             const fallbackName = `Online: ${plateUpper}`;
             // Upsert customer by phone. ON CONFLICT bumps updated_at only —
@@ -4701,10 +4704,29 @@ export async function registerRoutes(app: Express): Promise<Server> {
               )
             `);
           });
-        } catch (dbErr) {
-          // Don't block the payment flow on a DB hiccup — log loudly so
-          // we can backfill from Pocket Pay's transaction list later.
-          console.error('Phase 12a: failed to record pending_payment order (continuing):', dbErr);
+        };
+
+        {
+          let recorded = false;
+          let lastErr: unknown = null;
+          for (let attempt = 1; attempt <= 3; attempt++) {
+            try {
+              await recordPendingOrder();
+              recorded = true;
+              break;
+            } catch (dbErr) {
+              lastErr = dbErr;
+              console.error(`Phase 12a: failed to record pending_payment order (attempt ${attempt}/3):`, dbErr);
+              if (attempt < 3) await new Promise(r => setTimeout(r, 300 * attempt));
+            }
+          }
+          if (!recorded) {
+            console.error('Phase 12a: giving up after 3 attempts — aborting checkout so customer is not sent to pay for an untracked order. Pocket Pay OrderId:', result.order_id, lastErr);
+            return res.status(503).json({
+              success: false,
+              message: 'We could not start your payment just now. Please try again in a moment — you have not been charged.'
+            });
+          }
         }
 
         // Create order in KedaiPOS system (async - don't wait)
