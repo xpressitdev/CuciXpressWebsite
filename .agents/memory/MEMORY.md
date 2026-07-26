@@ -51,3 +51,4 @@
 - [Subscription test sandbox](subscription-test-sandbox.md) — owner-only CyberSource test subs stay invisible via membership_id/user_id/customer_id NULL; gate sandbox routes on isCyberSourceTestMode().
 - [Google reviews billing](google-reviews-billing.md) — rating badge silently shows fake 4.8/150 when Places API fails (usually billing on wrong GCP project); keep cache + placeId allowlist.
 - [Web checkout order insert](web-checkout-order-insert.md) — pending order insert is mandatory (retry then abort checkout); never hand out a payment link for an unrecorded order.
+- [Membership near-expiry CTA](membership-expiry-cta.md) — active unlimited must keep wash-QR until expires_at; Renew prompts are additive, never replace the QR button.

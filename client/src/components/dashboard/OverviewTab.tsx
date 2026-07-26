@@ -262,14 +262,16 @@ function ActiveSubscriptionHero({
   const isUnlimited = membership.kind === "unlimited";
   const planName = isUnlimited ? "Unlimited Xpress" : "Wash Pack";
 
-  // An active unlimited plan that's within 7 days of expiry still gets
-  // the "Renew" button (so customers can keep their plan going). Anything
-  // comfortably active shows the "Show wash QR" action instead.
+  // An active unlimited plan ALWAYS keeps the "Show wash QR" action — the
+  // member is paid up until expires_at and must be able to wash. When the
+  // plan is within 7 days of expiry we ADD a "Renew" button alongside the
+  // QR (never replace it — see the July 2026 "no QR option" complaint).
   const isExpiringSoon =
     !!membership.expires_at &&
     new Date(membership.expires_at).getTime() - Date.now() <=
       7 * 24 * 60 * 60 * 1000;
-  const showWashQr = isUnlimited && !isExpiringSoon;
+  const showWashQr = isUnlimited;
+  const showRenew = isUnlimited && isExpiringSoon;
 
   const { toast } = useToast();
   const [qrVoucher, setQrVoucher] = useState<MembershipVoucher | null>(null);
@@ -403,7 +405,7 @@ function ActiveSubscriptionHero({
           </p>
         </div>
         <div className="flex flex-col gap-2 md:items-end shrink-0">
-          {showWashQr ? (
+          {showWashQr && (
             <button
               onClick={() => checkin.mutate()}
               disabled={checkin.isPending}
@@ -413,10 +415,15 @@ function ActiveSubscriptionHero({
               <QrCode className="w-4 h-4" />
               {checkin.isPending ? "Preparing…" : "Show wash QR"}
             </button>
-          ) : (
+          )}
+          {(showRenew || !isUnlimited) && (
             <Link
               href={isUnlimited ? "/subscriptions" : "/checkout"}
-              className="inline-flex items-center justify-center gap-1 px-5 py-3 bg-white text-gray-900 rounded-xl font-bold border-2 border-black whitespace-nowrap hover:translate-x-[-1px] hover:translate-y-[-1px] transition-transform"
+              className={
+                showWashQr
+                  ? "inline-flex items-center justify-center gap-1 px-5 py-2 rounded-xl font-bold border-2 border-white/70 text-white whitespace-nowrap hover:bg-white/10 transition-colors text-sm"
+                  : "inline-flex items-center justify-center gap-1 px-5 py-3 bg-white text-gray-900 rounded-xl font-bold border-2 border-black whitespace-nowrap hover:translate-x-[-1px] hover:translate-y-[-1px] transition-transform"
+              }
               data-testid="button-hero-pay"
             >
               {isUnlimited ? "Renew" : "Use my plan"} <ArrowRight className="w-4 h-4" />
