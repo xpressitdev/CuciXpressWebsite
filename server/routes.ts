@@ -6030,6 +6030,140 @@ export async function registerRoutes(app: Express): Promise<Server> {
     res.json({ ok: true, expiresAt: result.expiresAt, ttlSeconds: OTP_CONSTANTS.TTL_SECONDS });
   });
 
+  // GET /api/admin/registration-conflict?email=&phone=&plate=
+  // Staff-side diagnostic for the anti-enumeration registration flow above.
+  // register/start silently pretends to send an OTP when any field is taken,
+  // so a customer whose plate/email/phone is already claimed just sees "code
+  // sent" and nothing arrives. This tool lets an owner/manager paste what the
+  // customer tried and see exactly WHICH field conflicts and WHO holds it —
+  // never exposed to customers, so the enumeration protection stays intact.
+  // Any subset of the three fields may be supplied; each is checked
+  // independently (all conflicts are reported, not just the first).
+  app.get('/api/admin/registration-conflict', requireStaff, requireStaffRole('owner', 'manager'), async (req, res) => {
+    const rawPhone = String(req.query.phone ?? '').trim();
+    const rawEmail = String(req.query.email ?? '').trim();
+    const rawPlate = String(req.query.plate ?? '').trim();
+    if (!rawPhone && !rawEmail && !rawPlate) {
+      return res.status(400).json({ error: 'no_input' });
+    }
+    if (rawPhone.length > 30 || rawEmail.length > 200 || rawPlate.length > 20) {
+      return res.status(400).json({ error: 'invalid_input' });
+    }
+
+    try {
+      const out: any = { checked: {}, conflicts: [] as any[] };
+
+      if (rawPhone) {
+        const phone = normalisePhone(rawPhone);
+        out.checked.phone = phone || rawPhone;
+        if (!phone) {
+          out.conflicts.push({ field: 'phone', kind: 'invalid', detail: 'Not a valid phone number — registration would reject it before any uniqueness check.' });
+        } else {
+          const userHit = (await db.execute(sql`
+            SELECT id, TRIM(COALESCE(first_name,'') || ' ' || COALESCE(last_name,'')) AS name, email
+              FROM users WHERE phone_number = ${phone} LIMIT 1
+          `)).rows[0] as any;
+          const custHit = (await db.execute(sql`
+            SELECT c.id, c.name, c.user_id, u.email
+              FROM customers c LEFT JOIN users u ON u.id = c.user_id
+             WHERE c.phone = ${phone} LIMIT 1
+          `)).rows[0] as any;
+          if (userHit || custHit) {
+            out.conflicts.push({
+              field: 'phone',
+              kind: 'taken',
+              holder: {
+                name: (custHit?.name || userHit?.name || '').trim() || null,
+                email: userHit?.email ?? custHit?.email ?? null,
+                has_account: !!(userHit || custHit?.user_id),
+                user_id: userHit?.id != null ? Number(userHit.id) : (custHit?.user_id != null ? Number(custHit.user_id) : null),
+                customer_id: custHit?.id != null ? Number(custHit.id) : null,
+              },
+            });
+          }
+        }
+      }
+
+      if (rawEmail) {
+        const email = normaliseEmail(rawEmail);
+        out.checked.email = email;
+        if (!looksLikeValidEmail(email)) {
+          out.conflicts.push({ field: 'email', kind: 'invalid', detail: 'Not a valid email address — registration would reject it before any uniqueness check.' });
+        } else {
+          const hit = (await db.execute(sql`
+            SELECT id, TRIM(COALESCE(first_name,'') || ' ' || COALESCE(last_name,'')) AS name, phone_number
+              FROM users WHERE LOWER(email) = ${email} LIMIT 1
+          `)).rows[0] as any;
+          if (hit) {
+            out.conflicts.push({
+              field: 'email',
+              kind: 'taken',
+              holder: {
+                name: (hit.name || '').trim() || null,
+                phone: hit.phone_number ?? null,
+                has_account: true,
+                user_id: Number(hit.id),
+                customer_id: null,
+              },
+            });
+          }
+        }
+      }
+
+      if (rawPlate) {
+        const plateNorm = normalisePlate(rawPlate);
+        out.checked.plate = plateNorm;
+        if (plateNorm.length < 2) {
+          out.conflicts.push({ field: 'plate', kind: 'invalid', detail: 'Plate too short — registration would reject it before any uniqueness check.' });
+        } else {
+          const car = (await db.execute(sql`
+            SELECT car.id, car.license_plate, car.brand, car.model,
+                   car.user_id, car.customer_id,
+                   u.email AS holder_email,
+                   TRIM(COALESCE(u.first_name,'') || ' ' || COALESCE(u.last_name,'')) AS holder_user_name,
+                   u.phone_number AS holder_user_phone,
+                   c.name  AS holder_customer_name,
+                   c.phone AS holder_customer_phone
+              FROM cars car
+              LEFT JOIN users u     ON u.id = car.user_id
+              LEFT JOIN customers c ON c.id = car.customer_id
+             WHERE UPPER(REGEXP_REPLACE(car.license_plate, '\\s+', '', 'g')) = ${plateNorm}
+             LIMIT 1
+          `)).rows[0] as any;
+          // A plate row that exists but is UNCLAIMED (both ids NULL) does NOT
+          // block registration — registration links it to the new account.
+          if (car && (car.user_id != null || car.customer_id != null)) {
+            out.conflicts.push({
+              field: 'plate',
+              kind: 'taken',
+              car: {
+                id: Number(car.id),
+                license_plate: car.license_plate,
+                brand: car.brand ?? null,
+                model: car.model ?? null,
+              },
+              holder: {
+                name: car.holder_customer_name || car.holder_user_name || null,
+                email: car.holder_email ?? null,
+                phone: car.holder_customer_phone || car.holder_user_phone || null,
+                has_account: car.user_id != null,
+                user_id: car.user_id != null ? Number(car.user_id) : null,
+                customer_id: car.customer_id != null ? Number(car.customer_id) : null,
+              },
+            });
+          } else if (car) {
+            out.plate_unclaimed = true;
+          }
+        }
+      }
+
+      res.json(out);
+    } catch (err) {
+      console.error('[admin.registrationConflict] failed:', err);
+      res.status(500).json({ error: 'lookup_failed' });
+    }
+  });
+
   // POST /api/auth/customer/register/verify
   app.post('/api/auth/customer/register/verify', async (req, res) => {
     const parsed = registerVerifySchema.safeParse(req.body);

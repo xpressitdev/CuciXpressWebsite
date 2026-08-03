@@ -76,6 +76,7 @@ import { useStaffAuth } from "@/hooks/useStaffAuth";
 import type { CollaborationSubmission, SubscriptionSignup } from "@shared/schema";
 import CustomersTab, { LiabilitiesPanel } from "@/components/admin/CustomersTab";
 import PlateTransferPanel from "@/components/admin/PlateTransferPanel";
+import RegistrationConflictPanel from "@/components/admin/RegistrationConflictPanel";
 import { PendingPaymentsPanel } from "@/components/admin/PendingPaymentsPanel";
 import BranchesTab from "@/components/admin/BranchesTab";
 import DiscountsTab from "@/components/admin/DiscountsTab";
@@ -171,6 +172,9 @@ export default function Admin() {
   const { staff, isAuthenticated, isLoading: authLoading, login, logout } = useStaffAuth();
   const queryClient = useQueryClient();
   const [selectedSubmission, setSelectedSubmission] = useState<CollaborationSubmission | null>(null);
+  // Controlled so tools can cross-link tabs (e.g. Registration Check →
+  // Plate Transfer when the conflict is a claimed plate).
+  const [activeTab, setActiveTab] = useState<string>("dashboard");
 
   // Collaborations + subscriptions are owner/manager-only endpoints. Gating
   // the queries (not just the tabs) avoids background 403s for cashier/lane/
@@ -333,7 +337,7 @@ export default function Admin() {
             const isInvestor = role === "investor";
             const canSeeTrends = isManagerOrOwner || isInvestor;
             return (
-          <Tabs defaultValue="dashboard" className="w-full">
+          <Tabs value={activeTab} onValueChange={setActiveTab} className="w-full">
             <TabsList
               className="flex flex-wrap w-full justify-start gap-1 bg-white border-2 border-black rounded-xl p-1 h-auto"
               style={{
@@ -366,6 +370,12 @@ export default function Admin() {
                 <TabsTrigger value="customers" className="flex items-center gap-2" data-testid="tab-customers">
                   <UserCircle2 className="w-4 h-4" />
                   Customers
+                </TabsTrigger>
+              )}
+              {isManagerOrOwner && (
+                <TabsTrigger value="registration-check" className="flex items-center gap-2" data-testid="tab-registration-check">
+                  <ShieldCheck className="w-4 h-4" />
+                  Registration Check
                 </TabsTrigger>
               )}
               {isOwner && (
@@ -472,6 +482,15 @@ export default function Admin() {
             {isManagerOrOwner && (
               <TabsContent value="customers" className="mt-6">
                 <CustomersTab />
+              </TabsContent>
+            )}
+
+            {isManagerOrOwner && (
+              <TabsContent value="registration-check" className="mt-6">
+                <RegistrationConflictPanel
+                  canOpenPlateTransfer={isOwner}
+                  onOpenPlateTransfer={() => setActiveTab("plate-transfer")}
+                />
               </TabsContent>
             )}
 
