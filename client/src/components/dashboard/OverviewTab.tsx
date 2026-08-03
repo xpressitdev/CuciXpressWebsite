@@ -243,7 +243,7 @@ export function OverviewTab({ me, orders, memberships, cars, fullName, onChangeT
 // laid out wide with a Pay & Queue CTA on the right that picks the
 // shortest open branch from the same /api/queue/snapshot fetch.
 // ----------------------------------------------------------------------
-function ActiveSubscriptionHero({
+export function ActiveSubscriptionHero({
   membership,
   bestBranch,
   onManage,
