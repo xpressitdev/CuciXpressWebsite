@@ -14,9 +14,10 @@ import {
 // Central business contact line — identical on every printed receipt.
 export const BUSINESS_PHONE = "+673 838 7000";
 
-// Loyalty promo footer carried over from the printed thermal receipt.
+// Loyalty promo footer — digital stamps, no physical receipts needed.
+// Shown on the WhatsApp receipt caption, PDF receipt, and dashboard receipt.
 export const LOYALTY_PROMO =
-  "Collect 4 receipts from the B$12 package for the same car plate and get a FREE WASH of our B$12 full package. No validity period — show all 4 receipts to claim.";
+  "No need to keep receipts — your loyalty stamps are collected digitally! Log in at cucixpress.com to track your stamps: every B$12 wash earns 1 stamp, and 4 stamps = 1 FREE WASH. Redeem in the app and show the QR code at any branch.";
 
 export function payLabel(method: string, qrProvider?: string | null) {
   if (method === "cash") return "Cash";

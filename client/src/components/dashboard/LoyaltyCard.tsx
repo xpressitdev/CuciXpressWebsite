@@ -100,7 +100,7 @@ export function LoyaltyCard({ cars: _cars }: Props) {
           </p>
         </div>
         <h2 className="text-lg md:text-xl font-extrabold text-gray-900 mt-1">
-          Collect 4 × B$12 receipts → 1 free wash (per car)
+          Collect 4 × B$12 washes → 1 free wash (per car)
         </h2>
         <p className="text-sm text-gray-600 mt-2">
           Add a vehicle to your garage to start collecting stamps. Every paid{" "}
@@ -123,7 +123,7 @@ export function LoyaltyCard({ cars: _cars }: Props) {
           </p>
         </div>
         <h2 className="text-lg md:text-xl font-extrabold text-gray-900 mt-1">
-          Collect 4 × B$12 receipts → 1 free wash (per car)
+          Collect 4 × B$12 washes → 1 free wash (per car)
         </h2>
         <p className="text-sm text-gray-600 mt-1">
           Every paid <strong>{data.package_name}</strong> earns a stamp for
@@ -145,7 +145,7 @@ export function LoyaltyCard({ cars: _cars }: Props) {
         </div>
 
         <p className="text-[11px] text-gray-500 mt-4">
-          Receipts never expire. Drive into any Cuci Xpress branch — the
+          Stamps never expire. Drive into any Cuci Xpress branch — the
           branch that scans your QR adds the free wash to its queue.
         </p>
       </section>

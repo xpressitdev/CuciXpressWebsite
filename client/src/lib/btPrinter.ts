@@ -176,7 +176,12 @@ function buildReceiptBytes(r: ReceiptData): Uint8Array {
   p.align("center").raw([0x0a]);
   p.line("Thank you for choosing");
   p.bold(true).line("Cuci Xpress").bold(false);
-  p.line("cucixpress.com");
+  p.raw([0x0a]);
+  p.line("Collect digital stamps at");
+  p.bold(true).line("cucixpress.com").bold(false);
+  p.line("Every B$12 wash = 1 stamp");
+  p.line("4 stamps = 1 FREE wash");
+  p.line("Show your QR code to redeem");
   p.feedAndCut();
   return p.build();
 }
