@@ -8607,11 +8607,12 @@ export async function registerRoutes(app: Express): Promise<Server> {
     try {
       const updated = await db.transaction(async (tx) => {
         const rows = (await tx.execute(sql`
-          SELECT id, branch_id, status, total_cents
+          SELECT id, branch_id, status, total_cents,
+                 payment_method, qr_provider, vehicle_id, plate
             FROM orders
            WHERE id = ${orderId}
            FOR UPDATE
-        `)).rows as Array<{ id: string; branch_id: number; status: string; total_cents: number }>;
+        `)).rows as Array<{ id: string; branch_id: number; status: string; total_cents: number; payment_method: string; qr_provider: string | null; vehicle_id: number | null; plate: string }>;
         if (rows.length === 0) {
           throw Object.assign(new Error('not_found'), { httpStatus: 404 });
         }
@@ -8638,6 +8639,52 @@ export async function registerRoutes(app: Express): Promise<Server> {
        RETURNING id, ticket_code, plate, package_name, total_cents,
                  payment_method, status, created_at, refunded_at, refund_reason
         `)).rows[0];
+
+        // ── Loyalty voucher refund: give the stamps back ────────────────
+        // Refunding a redeemed free-wash order un-burns the 4 stamps that
+        // were consumed when the voucher was generated:
+        //   1. Un-punch the real B$12 orders (clear loyalty_consumed_in),
+        //   2. Re-credit however many came from cashier manual stamps as a
+        //      fresh manual-stamp row (audit-friendly: keeps who/when/why),
+        //   3. Delete the redemption row so counts + history are clean.
+        // (Added after the Aug 2026 BAT1166 mis-scan — POS refund alone
+        // left the customer at 0/4 with no way to regenerate the voucher.)
+        if (o.payment_method === 'voucher' && o.qr_provider === 'loyalty') {
+          const redemption = (await tx.execute(sql`
+            SELECT id FROM loyalty_redemptions
+             WHERE voucher_order_id = ${orderId}
+             FOR UPDATE
+          `)).rows[0] as { id: string } | undefined;
+
+          if (redemption) {
+            const unpunched = (await tx.execute(sql`
+              UPDATE orders
+                 SET loyalty_consumed_in = NULL
+               WHERE loyalty_consumed_in = ${redemption.id}
+           RETURNING id
+            `)).rows;
+
+            const manualTaken = LOYALTY_REQUIRED_COUNT - unpunched.length;
+            if (manualTaken > 0) {
+              const plateNorm = o.plate.toUpperCase().replace(/\s+/g, '');
+              await tx.execute(sql`
+                INSERT INTO loyalty_manual_stamps
+                  (id, vehicle_id, plate, plate_norm, stamps_total,
+                   stamps_remaining, note, branch_id, staff_id)
+                VALUES
+                  (${'lms_' + Date.now().toString(36) + '_' + Math.random().toString(36).slice(2, 8)},
+                   ${o.vehicle_id}, ${o.plate}, ${plateNorm}, ${manualTaken},
+                   ${manualTaken},
+                   ${'Auto-restored: free-wash voucher order ' + orderId + ' refunded'},
+                   ${o.branch_id}, ${staffId})
+              `);
+            }
+
+            await tx.execute(sql`
+              DELETE FROM loyalty_redemptions WHERE id = ${redemption.id}
+            `);
+          }
+        }
         return upd;
       });
       res.json({ ok: true, order: updated });
