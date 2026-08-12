@@ -2441,6 +2441,38 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
+  // When the OWNER transfers a plate to a customer, any ACTIVE unlimited
+  // membership bound to that vehicle follows the car — the entitlement is
+  // per-car, and both the dashboard list and the wash-QR checkin authorise
+  // via membership.customer_id → customers.user_id.
+  // Deliberately NOT called from self-service claim flows (registration,
+  // add-vehicle): a claim only proves the plate was unclaimed, not that the
+  // claimant owns the car, so auto-moving a paid membership there would let
+  // anyone who registers with a detached plate steal the entitlement. The
+  // owner-gated Plate Transfer tool is the sole authorised path.
+  // Billing (subscriptions rows) stays with the original payer on purpose:
+  // we cannot move whose card/account paid.
+  async function moveActiveMembershipsWithCar(
+    runner: { execute: (q: ReturnType<typeof sql>) => Promise<{ rows: unknown[] }> },
+    carId: number,
+    newCustomerId: number | null,
+  ) {
+    if (newCustomerId === null) return; // detach: membership stays with payer until re-transfer
+    const moved = (await runner.execute(sql`
+      UPDATE memberships SET customer_id = ${newCustomerId}
+       WHERE vehicle_id = ${carId}
+         AND kind = 'unlimited'
+         AND status = 'active'
+         AND customer_id IS DISTINCT FROM ${newCustomerId}
+      RETURNING id
+    `)).rows as Array<{ id: string }>;
+    if (moved.length > 0) {
+      console.log(
+        `[membership-follow-car] car=${carId} → customer=${newCustomerId} moved=${moved.map((m) => m.id).join(',')}`,
+      );
+    }
+  }
+
   // POST /api/admin/plate-transfer
   // Body: { car_id: number, target_customer_id: number | null }
   // target_customer_id = null → detach the car back to "unclaimed"
@@ -2474,10 +2506,13 @@ export async function registerRoutes(app: Express): Promise<Server> {
         targetName = target.name ?? null;
       }
 
-      await db.execute(sql`
-        UPDATE cars SET user_id = ${newUserId}, customer_id = ${target_customer_id}
-         WHERE id = ${car_id}
-      `);
+      await db.transaction(async (tx) => {
+        await tx.execute(sql`
+          UPDATE cars SET user_id = ${newUserId}, customer_id = ${target_customer_id}
+           WHERE id = ${car_id}
+        `);
+        await moveActiveMembershipsWithCar(tx, car_id, target_customer_id);
+      });
 
       console.log(
         `[admin.plateTransfer] staff=${(req as any).staff?.user?.email ?? 'unknown'} ` +
