@@ -6373,17 +6373,17 @@ export async function registerRoutes(app: Express): Promise<Server> {
   // ---- Customer dashboard endpoints (Lucia-protected) ---------------
   app.get('/api/customer/me', requireLuciaUser, async (req, res) => {
     const userId = Number(req.lucia!.user!.id);
-    const profile = (await db.execute(sql`
+    // Profile and stats are independent — run both round trips in parallel
+    // (each Neon round trip costs real latency under load).
+    const profilePromise = db.execute(sql`
       SELECT u.id, u.first_name, u.last_name, u.phone_number, u.email,
              c.id AS customer_id, c.name AS customer_name, c.phone AS customer_phone
       FROM users u
       LEFT JOIN customers c ON c.user_id = u.id
       WHERE u.id = ${userId}
       LIMIT 1
-    `)).rows[0] as any;
-    if (!profile) return res.status(404).json({ error: 'not_found' });
-
-    const stats = (await db.execute(sql`
+    `);
+    const statsPromise = db.execute(sql`
       SELECT
         (SELECT COUNT(*)::int FROM orders
            WHERE customer_id = ${userId} AND status = 'done') AS total_done,
@@ -6407,7 +6407,11 @@ export async function registerRoutes(app: Express): Promise<Server> {
         (SELECT COALESCE(SUM(price_cents),0)::int FROM memberships m
            JOIN customers cu ON cu.id = m.customer_id
            WHERE cu.user_id = ${userId} AND m.status = 'active') AS active_membership_cost_cents
-    `)).rows[0] as any;
+    `);
+    const [profileRes, statsRes] = await Promise.all([profilePromise, statsPromise]);
+    const profile = profileRes.rows[0] as any;
+    if (!profile) return res.status(404).json({ error: 'not_found' });
+    const stats = statsRes.rows[0] as any;
 
     const totalDone = Number(stats.total_done ?? 0);
     const washesThisMonth = Number(stats.washes_this_month ?? 0);
@@ -6563,14 +6567,28 @@ export async function registerRoutes(app: Express): Promise<Server> {
     //      (catches pre-Lucia legacy SharePoint orders that were imported
     //      before the customer linked their plate at login).
     // De-dup by id so a row matched two ways shows up once.
+    // Fetch the user's cars first (tiny, index-only), then match orders with
+    // literal ID/plate lists. Literal lists let the planner BitmapOr three
+    // indexes (customer_id, vehicle_id, plate_norm expression index) instead
+    // of seq-scanning all orders — this was a 115ms full-table scan before.
+    const myCars = (await db.execute(sql`
+      SELECT c.id,
+             UPPER(REGEXP_REPLACE(c.license_plate, '\\s+', '', 'g')) AS plate_norm
+        FROM cars c
+       WHERE c.user_id = ${userId}
+          OR c.customer_id = (SELECT id FROM customers WHERE user_id = ${userId} LIMIT 1)
+    `)).rows as Array<{ id: number; plate_norm: string }>;
+    const carIds = myCars.map((c) => c.id);
+    const plateNorms = myCars.map((c) => c.plate_norm).filter(Boolean);
+    const matchClauses = [sql`o.customer_id = ${userId}`];
+    if (carIds.length > 0) {
+      matchClauses.push(sql`o.vehicle_id IN (${sql.join(carIds.map((id) => sql`${id}`), sql`, `)})`);
+    }
+    if (plateNorms.length > 0) {
+      matchClauses.push(sql`UPPER(REGEXP_REPLACE(o.plate, '\\s+', '', 'g'))
+              IN (${sql.join(plateNorms.map((p) => sql`${p}`), sql`, `)})`);
+    }
     const rows = (await db.execute(sql`
-      WITH my_cars AS (
-        SELECT c.id,
-               UPPER(REGEXP_REPLACE(c.license_plate, '\\s+', '', 'g')) AS plate_norm
-          FROM cars c
-         WHERE c.user_id = ${userId}
-            OR c.customer_id = (SELECT id FROM customers WHERE user_id = ${userId} LIMIT 1)
-      )
       SELECT DISTINCT ON (o.id)
              o.id, o.branch_id, b.name AS branch_name, o.plate, o.package_name,
              o.package_price_cents, o.addons, o.subtotal_cents, o.discount_cents,
@@ -6583,10 +6601,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
       FROM orders o
       LEFT JOIN branches b ON b.id = o.branch_id
       LEFT JOIN staff s ON s.id = o.staff_id
-      WHERE o.customer_id = ${userId}
-         OR o.vehicle_id IN (SELECT id FROM my_cars)
-         OR UPPER(REGEXP_REPLACE(o.plate, '\\s+', '', 'g'))
-              IN (SELECT plate_norm FROM my_cars)
+      WHERE ${sql.join(matchClauses, sql` OR `)}
       ORDER BY o.id, o.created_at DESC
     `)).rows;
     // The DISTINCT ON forces a primary sort by id; resort by date for
