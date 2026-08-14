@@ -7349,9 +7349,33 @@ export async function registerRoutes(app: Express): Promise<Server> {
     // claims (and to resolve any residual unique-constraint race in catch).
     const plateNorm = plate.toUpperCase().replace(/\s+/g, '');
     try {
-      const cust = (await db.execute(sql`
+      let cust = (await db.execute(sql`
         SELECT id FROM customers WHERE user_id = ${userId} LIMIT 1
       `)).rows[0] as { id: number } | undefined;
+      if (!cust) {
+        // Legacy accounts (users imported from the old LiveQue site, created
+        // before the customers table existed) have no customers row, so
+        // claims used to leave cars.customer_id NULL and the CRM showed the
+        // plate as "NO ACCOUNT". Auto-create/link one from the users row —
+        // same INSERT ... ON CONFLICT (phone) pattern as register/verify —
+        // so every claim always sets customer_id. Never steal a customers
+        // row already linked to a different user.
+        const u = (await db.execute(sql`
+          SELECT phone_number, TRIM(CONCAT(first_name, ' ', last_name)) AS name
+            FROM users WHERE id = ${userId} LIMIT 1
+        `)).rows[0] as { phone_number: string | null; name: string | null } | undefined;
+        const uPhone = (u?.phone_number ?? '').trim();
+        if (uPhone) {
+          const uName = (u?.name ?? '').trim() || `Customer ${uPhone.slice(-4)}`;
+          cust = (await db.execute(sql`
+            INSERT INTO customers (phone, name, user_id)
+            VALUES (${uPhone}, ${uName}, ${userId})
+            ON CONFLICT (phone) DO UPDATE SET user_id = EXCLUDED.user_id
+              WHERE customers.user_id IS NULL
+            RETURNING id
+          `)).rows[0] as { id: number } | undefined;
+        }
+      }
       const dupe = (await db.execute(sql`
         SELECT id FROM cars
         WHERE UPPER(REGEXP_REPLACE(license_plate, '\\s+', '', 'g')) = ${plateNorm}
