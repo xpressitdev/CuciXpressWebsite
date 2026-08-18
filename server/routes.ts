@@ -2010,9 +2010,53 @@ export async function registerRoutes(app: Express): Promise<Server> {
           WHERE o.vehicle_id = car.id AND o.branch_id IS NOT NULL)                               AS branch_ids
       FROM cars car
       WHERE car.customer_id IS NULL
+        AND car.user_id IS NULL
         AND (car.vip_tier IS NOT NULL
           OR car.total_visits > 0
           OR EXISTS (SELECT 1 FROM orders o WHERE o.vehicle_id = car.id))
+
+      UNION ALL
+
+      -- "User-linked ghost" cars — linked to a users row (user_id set) but no customers
+      -- row. Typically legacy accounts whose users.phone_number is NULL so the
+      -- customers row was never created.  Show them as has_account=TRUE so they appear
+      -- in the Registered segment and the CRM can surface them.
+      SELECT
+        -car.id                                                                                  AS ref_id,
+        'ghost'::text                                                                            AS kind,
+        NULL::int                                                                                AS customer_id,
+        car.id                                                                                   AS ghost_car_id,
+        NULLIF(TRIM(CONCAT(u.first_name, ' ', u.last_name)), '')                                AS name,
+        u.phone_number                                                                           AS phone,
+        NULL::text                                                                               AS notes,
+        COALESCE(car.last_seen_at, u.created_at, '2020-01-01'::timestamptz)                    AS created_at,
+        TRUE                                                                                     AS has_account,
+        1                                                                                        AS vehicle_count,
+        (SELECT COUNT(*)::int FROM orders o WHERE o.vehicle_id = car.id AND o.status <> 'refunded')       AS visits,
+        GREATEST(
+          car.total_spent_cents,
+          COALESCE((SELECT SUM(o.total_cents)::bigint FROM orders o WHERE o.vehicle_id = car.id AND o.status <> 'refunded'), 0)
+        )                                                                                        AS total_spent_cents,
+        COALESCE(
+          (SELECT MAX(o.created_at) FROM orders o WHERE o.vehicle_id = car.id),
+          car.last_seen_at
+        )                                                                                        AS last_visit_at,
+        car.vip_tier                                                                             AS vip_tier,
+        (SELECT b.name FROM orders o JOIN branches b ON b.id = o.branch_id
+          WHERE o.vehicle_id = car.id AND o.status <> 'refunded'
+          GROUP BY b.id, b.name ORDER BY COUNT(*) DESC, MAX(o.created_at) DESC LIMIT 1)          AS favourite_branch,
+        (SELECT COUNT(DISTINCT o.branch_id)::int FROM orders o
+          WHERE o.vehicle_id = car.id AND o.status <> 'refunded')                                AS branches_visited,
+        (car.vip_tier IS NOT NULL OR EXISTS (
+          SELECT 1 FROM orders o WHERE o.vehicle_id = car.id AND o.legacy_source IS NOT NULL))   AS has_legacy,
+        EXISTS (SELECT 1 FROM orders o WHERE o.vehicle_id = car.id AND o.qr_provider = 'pocket_pay')      AS is_online,
+        car.license_plate                                                                        AS plates,
+        (SELECT ARRAY_AGG(DISTINCT o.branch_id) FROM orders o
+          WHERE o.vehicle_id = car.id AND o.branch_id IS NOT NULL)                               AS branch_ids
+      FROM cars car
+      JOIN users u ON u.id = car.user_id
+      WHERE car.customer_id IS NULL
+        AND car.user_id IS NOT NULL
     )`;
   }
 
@@ -2549,10 +2593,21 @@ export async function registerRoutes(app: Express): Promise<Server> {
         const car = (await db.execute(sql`
           SELECT id, license_plate, brand, model, color, "type", last_seen_at,
                  vip_tier, vip_rank, total_visits AS cached_total_visits,
-                 customer_id
+                 customer_id, user_id
             FROM cars WHERE id = ${carId} LIMIT 1
         `)).rows[0] as any;
         if (!car || car.customer_id) return res.status(404).json({ error: 'not_found' });
+
+        // Fetch linked user info when available (user-linked ghost: has user_id but no customers row).
+        let linkedUser: { id: number; name: string | null; email: string; phone: string | null } | null = null;
+        if (car.user_id) {
+          const ur = (await db.execute(sql`
+            SELECT id, NULLIF(TRIM(CONCAT(first_name, ' ', last_name)), '') AS name,
+                   email, phone_number AS phone
+              FROM users WHERE id = ${car.user_id} LIMIT 1
+          `)).rows[0] as any;
+          if (ur) linkedUser = { id: Number(ur.id), name: ur.name ?? null, email: ur.email, phone: ur.phone ?? null };
+        }
 
         const orders = (await db.execute(sql`
           SELECT o.id, o.ticket_code, o.plate, o.created_at, o.payment_method,
@@ -2592,9 +2647,15 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
         return res.json({
           customer: {
-            id, phone: null, name: car.license_plate, notes: null,
-            user_id: null, created_at: car.last_seen_at,
-            kind: 'ghost', has_account: false, email: null,
+            id,
+            phone:       linkedUser?.phone ?? null,
+            name:        linkedUser?.name ?? car.license_plate,
+            notes:       null,
+            user_id:     linkedUser?.id ?? null,
+            created_at:  car.last_seen_at,
+            kind:        'ghost',
+            has_account: linkedUser !== null,
+            email:       linkedUser?.email ?? null,
           },
           vehicles: [{
             id: car.id, license_plate: car.license_plate, brand: car.brand, model: car.model,
