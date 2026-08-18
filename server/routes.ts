@@ -3584,6 +3584,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
     name: z.string().trim().min(1).max(120),
     kind: z.enum(['percent', 'fixed']),
     value: z.number().int(),
+    only_package_id: z.string().trim().min(1).max(60).nullable().optional(),
     is_active: z.boolean().optional(),
     sort_order: z.number().int().min(0).max(999).optional(),
   });
@@ -3595,7 +3596,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
   app.get('/api/admin/discounts', requireStaff, requireStaffRole('owner'), async (_req, res) => {
     try {
       const rows = (await db.execute(sql`
-        SELECT d.id, d.name, d.kind, d.value, d.is_active, d.sort_order, d.created_at,
+        SELECT d.id, d.name, d.kind, d.value, d.only_package_id, d.is_active, d.sort_order, d.created_at,
                COALESCE(o.n, 0)::int AS order_count
           FROM discounts d
           LEFT JOIN (
@@ -3614,13 +3615,13 @@ export async function registerRoutes(app: Express): Promise<Server> {
   app.post('/api/admin/discounts', requireStaff, requireStaffRole('owner'), async (req, res) => {
     const parsed = discountBodySchema.safeParse(req.body);
     if (!parsed.success) return res.status(400).json({ error: 'invalid_body', details: parsed.error.flatten() });
-    const { name, kind, value, is_active, sort_order } = parsed.data;
+    const { name, kind, value, only_package_id, is_active, sort_order } = parsed.data;
     const id = `disc_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 8)}`;
     try {
       const row = (await db.execute(sql`
-        INSERT INTO discounts (id, name, kind, value, is_active, sort_order)
-        VALUES (${id}, ${name}, ${kind}, ${value}, ${is_active ?? true}, ${sort_order ?? 0})
-        RETURNING id, name, kind, value, is_active, sort_order, created_at
+        INSERT INTO discounts (id, name, kind, value, only_package_id, is_active, sort_order)
+        VALUES (${id}, ${name}, ${kind}, ${value}, ${only_package_id ?? null}, ${is_active ?? true}, ${sort_order ?? 0})
+        RETURNING id, name, kind, value, only_package_id, is_active, sort_order, created_at
       `)).rows[0];
       res.json({ row: { ...row, order_count: 0 } });
     } catch (err) {
@@ -3641,10 +3642,11 @@ export async function registerRoutes(app: Express): Promise<Server> {
            SET name       = COALESCE(${p.name ?? null}, name),
                kind       = COALESCE(${p.kind ?? null}, kind),
                value      = COALESCE(${p.value ?? null}, value),
+               only_package_id = CASE WHEN ${p.only_package_id !== undefined} THEN ${p.only_package_id ?? null} ELSE only_package_id END,
                is_active  = COALESCE(${p.is_active ?? null}, is_active),
                sort_order = COALESCE(${p.sort_order ?? null}, sort_order)
          WHERE id = ${id}
-         RETURNING id, name, kind, value, is_active, sort_order, created_at
+         RETURNING id, name, kind, value, only_package_id, is_active, sort_order, created_at
       `)).rows[0];
       if (!row) return res.status(404).json({ error: 'not_found' });
       res.json({ row });
@@ -8042,7 +8044,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
   app.get('/api/pos/discounts', requireStaff, async (_req, res) => {
     try {
       const rows = (await db.execute(sql`
-        SELECT id, name, kind, value
+        SELECT id, name, kind, value, only_package_id
           FROM discounts
          WHERE is_active = true
          ORDER BY sort_order ASC, name ASC
@@ -8529,12 +8531,17 @@ export async function registerRoutes(app: Express): Promise<Server> {
           // clamped to whatever's left, so the total can never go negative.
           if (body.discount_id) {
             const dRows = (await tx.execute(sql`
-              SELECT id, kind, value FROM discounts
+              SELECT id, kind, value, only_package_id FROM discounts
                WHERE id = ${body.discount_id} AND is_active = true
                LIMIT 1
-            `)).rows as Array<{ id: string; kind: 'percent' | 'fixed'; value: number }>;
+            `)).rows as Array<{ id: string; kind: 'percent' | 'fixed'; value: number; only_package_id: string | null }>;
             if (dRows.length === 0) throw new PosOrderError(400, 'discount_not_available');
             const d = dRows[0];
+            // Package-locked discount (e.g. BruHealth $2 Off → B$12 Full
+            // Package only). Enforced server-side so it can't be bypassed.
+            if (d.only_package_id && d.only_package_id !== body.package_id) {
+              throw new PosOrderError(400, 'discount_wrong_package');
+            }
             const raw = d.kind === 'percent'
               ? Math.round((subtotal * d.value) / 100)
               : d.value;

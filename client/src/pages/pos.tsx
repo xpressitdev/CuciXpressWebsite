@@ -132,6 +132,9 @@ interface PosDiscount {
   name: string;
   kind: "percent" | "fixed";
   value: number;
+  // When set, the discount only applies to orders for this package
+  // (e.g. BruHealth $2 Off → B$12 Full Package only).
+  only_package_id: string | null;
 }
 
 interface ActiveMembership {
@@ -793,6 +796,17 @@ export default function POS() {
     () => discountsData?.rows.find((d) => d.id === discountId) ?? null,
     [discountsData, discountId],
   );
+
+  // A package-locked discount stops applying the moment the cashier switches
+  // to a non-qualifying package — deselect it so it can't ride along.
+  useEffect(() => {
+    if (
+      selectedDiscount?.only_package_id &&
+      selectedDiscount.only_package_id !== packageId
+    ) {
+      setDiscountId("none");
+    }
+  }, [selectedDiscount, packageId]);
 
   const manualDiscountCents = useMemo(() => {
     if (paymentMethod === "subscription" || !selectedDiscount) return 0;
@@ -2431,15 +2445,19 @@ export default function POS() {
                           </SelectTrigger>
                           <SelectContent>
                             <SelectItem value="none">No discount</SelectItem>
-                            {(discountsData?.rows ?? []).map((d) => (
-                              <SelectItem key={d.id} value={d.id}>
-                                {d.name} (
-                                {d.kind === "percent"
-                                  ? `${d.value}%`
-                                  : formatBND(d.value)}
-                                )
-                              </SelectItem>
-                            ))}
+                            {(discountsData?.rows ?? []).map((d) => {
+                              const locked =
+                                !!d.only_package_id && d.only_package_id !== packageId;
+                              return (
+                                <SelectItem key={d.id} value={d.id} disabled={locked}>
+                                  {d.name} (
+                                  {d.kind === "percent"
+                                    ? `${d.value}%`
+                                    : formatBND(d.value)}
+                                  ){locked ? " — wrong package" : ""}
+                                </SelectItem>
+                              );
+                            })}
                           </SelectContent>
                         </Select>
                       </div>

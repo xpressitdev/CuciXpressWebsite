@@ -25,10 +25,17 @@ interface DiscountRow {
   name: string;
   kind: DiscountKind;
   value: number;
+  only_package_id: string | null;
   is_active: boolean;
   sort_order: number;
   created_at: string;
   order_count: number;
+}
+
+interface CatalogPackage {
+  id: string;
+  name: string;
+  price_cents: number;
 }
 
 interface DiscountListResp {
@@ -39,6 +46,7 @@ interface DiscountForm {
   name: string;
   kind: DiscountKind;
   value: string;
+  only_package_id: string; // "" = any package
   is_active: boolean;
   sort_order: string;
 }
@@ -47,6 +55,7 @@ const EMPTY_FORM: DiscountForm = {
   name: "",
   kind: "percent",
   value: "",
+  only_package_id: "",
   is_active: true,
   sort_order: "0",
 };
@@ -217,6 +226,12 @@ function DiscountCard({
           <span><strong>{d.order_count.toLocaleString()}</strong> orders</span>
         </div>
       </div>
+      {d.only_package_id && (
+        <div className="text-xs text-gray-600 border border-gray-200 rounded p-2 flex items-center gap-2">
+          <Tag className="w-3 h-3 text-gray-500" />
+          <span>Locked to one package — cashiers can't apply it elsewhere.</span>
+        </div>
+      )}
 
       <div className="flex gap-2 flex-wrap">
         <Button
@@ -276,11 +291,19 @@ function DiscountEditDialog({
             discount.kind === "percent"
               ? String(discount.value)
               : (discount.value / 100).toFixed(2),
+          only_package_id: discount.only_package_id ?? "",
           is_active: discount.is_active,
           sort_order: String(discount.sort_order),
         }
       : EMPTY_FORM,
   );
+
+  // Package list for the "restrict to package" picker. Unfiltered catalog =
+  // all active packages (branch filter only kicks in with a branch_id).
+  const { data: catalogData } = useQuery<{ packages: CatalogPackage[] }>({
+    queryKey: ["/api/pos/catalog"],
+  });
+  const catalogPackages = catalogData?.packages ?? [];
 
   const set = <K extends keyof DiscountForm>(k: K, v: DiscountForm[K]) =>
     setForm((f) => ({ ...f, [k]: v }));
@@ -295,6 +318,7 @@ function DiscountEditDialog({
         name: form.name.trim(),
         kind: form.kind,
         value,
+        only_package_id: form.only_package_id || null,
         is_active: form.is_active,
         sort_order: Math.round(Number(form.sort_order)) || 0,
       };
@@ -382,6 +406,28 @@ function DiscountEditDialog({
               {form.kind === "percent"
                 ? "Whole percent between 1 and 100."
                 : "Amount in B$ — converted to cents when saved."}
+            </p>
+          </div>
+          <div>
+            <Label>Restrict to package</Label>
+            <Select
+              value={form.only_package_id || "any"}
+              onValueChange={(v) => set("only_package_id", v === "any" ? "" : v)}
+            >
+              <SelectTrigger data-testid="select-discount-only-package">
+                <SelectValue placeholder="Any package" />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="any">Any package</SelectItem>
+                {catalogPackages.map((p) => (
+                  <SelectItem key={p.id} value={p.id}>
+                    {p.name}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+            <p className="text-[10px] text-gray-500 mt-1">
+              When set, cashiers can only apply this discount to that exact package (e.g. a partner promo locked to one wash).
             </p>
           </div>
           <div>

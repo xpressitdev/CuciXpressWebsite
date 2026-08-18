@@ -476,6 +476,9 @@ export const discounts = pgTable("discounts", {
   name: text("name").notNull(),
   kind: text("kind").notNull(), // 'percent' | 'fixed'
   value: integer("value").notNull(),
+  // When set, the discount may only be applied to orders for this package
+  // (e.g. partner promos locked to one wash). NULL = usable on any package.
+  only_package_id: text("only_package_id"),
   is_active: boolean("is_active").default(true).notNull(),
   sort_order: integer("sort_order").default(0).notNull(),
   created_at: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
