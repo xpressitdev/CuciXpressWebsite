@@ -39,3 +39,10 @@ uri = "file://brand-assets/cuci-xpress-legacy-logo-transparent.png"
 type = "image"
 title = "Cuci Xpress Legacy Logo PNG"
 description = "Existing logo artwork converted from white background to transparent PNG for slide placement."
+
+[[outputs]]
+id = "9kwZnrjtiB0eeYpFWLYYm"
+uri = "file://brand-assets/cuci-xpress-wordmark.png"
+type = "image"
+title = "Cuci Xpress Wordmark PNG"
+description = "High-resolution transparent PNG export of the Cuci Xpress wordmark for slides and presentations."
