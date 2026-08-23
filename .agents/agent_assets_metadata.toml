@@ -18,3 +18,24 @@ id = "gMuDMIEFxUUbGkKJY8vj4"
 uri = "file://exports/legacy_accounts_never_otp.csv"
 type = "table"
 title = "Legacy accounts with wash history, never logged in via OTP (279)"
+
+[[outputs]]
+id = "JDjyOG_41rIhkgx72krs6"
+uri = "file://brand-assets/cuci-xpress-brand-guidelines.pdf"
+type = "pdf"
+title = "Cuci Xpress Brand Guidelines"
+description = "One-page brand reference with exact colors, typography, gradient, and visual language."
+
+[[outputs]]
+id = "wmTQJ3ExteO97RT4uWkwP"
+uri = "file://brand-assets/cuci-xpress-wordmark.svg"
+type = "image"
+title = "Cuci Xpress Wordmark SVG"
+description = "Editable transparent-background Cuci Xpress wordmark using the website design-system colors."
+
+[[outputs]]
+id = "2gqbFi9sbeGxJWxwN3N5a"
+uri = "file://brand-assets/cuci-xpress-legacy-logo-transparent.png"
+type = "image"
+title = "Cuci Xpress Legacy Logo PNG"
+description = "Existing logo artwork converted from white background to transparent PNG for slide placement."
