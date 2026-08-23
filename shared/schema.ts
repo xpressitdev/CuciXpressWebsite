@@ -811,6 +811,27 @@ export const loyaltyRedemptions = pgTable("loyalty_redemptions", {
 });
 export type LoyaltyRedemption = typeof loyaltyRedemptions.$inferSelect;
 
+// --- Loyalty physical-card transfers -------------------------
+// One row deliberately moves one otherwise-digital B$12 receipt onto a
+// physical loyalty card. The original order remains untouched for sales
+// history. Active (not reversed) rows are excluded from digital counts and
+// redemption; a partial unique DB index allows only one active row per order.
+export const loyaltyPhysicalCardTransfers = pgTable("loyalty_physical_card_transfers", {
+  id: text("id").primaryKey(),
+  order_id: text("order_id").references(() => orders.id).notNull(),
+  transferred_at: timestamp("transferred_at", { withTimezone: true }).defaultNow().notNull(),
+  transferred_by_staff_id: text("transferred_by_staff_id").references(() => staff.id).notNull(),
+  note: text("note"),
+  physical_card_reference: text("physical_card_reference"),
+  used_at: timestamp("used_at", { withTimezone: true }),
+  used_by_staff_id: text("used_by_staff_id").references(() => staff.id),
+  use_note: text("use_note"),
+  reversed_at: timestamp("reversed_at", { withTimezone: true }),
+  reversed_by_staff_id: text("reversed_by_staff_id").references(() => staff.id),
+  reversal_note: text("reversal_note"),
+});
+export type LoyaltyPhysicalCardTransfer = typeof loyaltyPhysicalCardTransfers.$inferSelect;
+
 // --- Loyalty manual stamps (cashier-credited) ----------------
 // Migration backstop (2026-06-07): when launching digital receipts,
 // some plates' physical B$12 receipts won't auto-count (plate typo /

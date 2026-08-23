@@ -6953,8 +6953,15 @@ export async function registerRoutes(app: Express): Promise<Server> {
            WHERE o.package_id           = ${LOYALTY_PKG_ID}
              AND o.loyalty_consumed_in IS NULL
              AND o.status               IN ('paid','queued','washing','done')
+             AND o.total_cents          > 0
              AND NOT (o.payment_method  = 'voucher' AND o.qr_provider = 'loyalty')
              AND o.id NOT IN (SELECT order_id FROM membership_redemptions)
+             AND NOT EXISTS (
+                   SELECT 1
+                     FROM loyalty_physical_card_transfers pct
+                    WHERE pct.order_id = o.id
+                      AND pct.reversed_at IS NULL
+                 )
              AND o.created_at           >= ${LOYALTY_COLLECTION_START}
            GROUP BY c.id
         ),
@@ -7113,8 +7120,15 @@ export async function registerRoutes(app: Express): Promise<Server> {
              AND package_id           = ${LOYALTY_PKG_ID}
              AND loyalty_consumed_in IS NULL
              AND status               IN ('paid','queued','washing','done')
+              AND total_cents          > 0
              AND NOT (payment_method  = 'voucher' AND qr_provider = 'loyalty')
              AND id NOT IN (SELECT order_id FROM membership_redemptions)
+              AND NOT EXISTS (
+                    SELECT 1
+                      FROM loyalty_physical_card_transfers pct
+                     WHERE pct.order_id = orders.id
+                       AND pct.reversed_at IS NULL
+                  )
              AND created_at           >= ${LOYALTY_COLLECTION_START}
            ORDER BY created_at ASC
            LIMIT ${LOYALTY_REQUIRED_COUNT}
@@ -7184,6 +7198,12 @@ export async function registerRoutes(app: Express): Promise<Server> {
             UPDATE orders SET loyalty_consumed_in = ${redemptionId}
              WHERE id = ${row.id}
                AND loyalty_consumed_in IS NULL
+               AND NOT EXISTS (
+                     SELECT 1
+                       FROM loyalty_physical_card_transfers pct
+                      WHERE pct.order_id = orders.id
+                        AND pct.reversed_at IS NULL
+                   )
           `);
         }
 
@@ -9024,6 +9044,10 @@ export async function registerRoutes(app: Express): Promise<Server> {
          LIMIT 1
       `)).rows[0] as { id: number; license_plate: string; brand: string | null; model: string | null } | undefined;
       const carId = car?.id ?? null;
+      const staffUser = req.staff!.user as any;
+      const staffRole = String(staffUser.role);
+      const staffBranchId = (staffUser.branchId ?? null) as number | null;
+      const isPrivileged = staffRole === 'owner' || staffRole === 'manager';
 
       // Auto stamps: eligible paid B$12 orders for this plate, not yet consumed.
       // Same attribution as the customer card: vehicle_id FK wins; plate fallback
@@ -9033,8 +9057,15 @@ export async function registerRoutes(app: Express): Promise<Server> {
          WHERE o.package_id           = ${LOYALTY_PKG_ID}
            AND o.loyalty_consumed_in IS NULL
            AND o.status               IN ('paid','queued','washing','done')
+           AND o.total_cents          > 0
            AND NOT (o.payment_method  = 'voucher' AND o.qr_provider = 'loyalty')
            AND o.id NOT IN (SELECT order_id FROM membership_redemptions)
+           AND NOT EXISTS (
+                 SELECT 1
+                   FROM loyalty_physical_card_transfers pct
+                  WHERE pct.order_id = o.id
+                    AND pct.reversed_at IS NULL
+               )
            AND o.created_at           >= ${LOYALTY_COLLECTION_START}
            AND (
                  (${carId}::int IS NOT NULL AND o.vehicle_id = ${carId})
@@ -9042,6 +9073,93 @@ export async function registerRoutes(app: Express): Promise<Server> {
                      AND REGEXP_REPLACE(UPPER(o.plate), '\s+', '', 'g') = ${norm})
                )
       `)).rows[0] as { n: number };
+
+      const eligibleOrderRows = (await db.execute(sql`
+        SELECT o.id, o.created_at, o.branch_id, b.name AS branch_name,
+               COALESCE(
+                 NULLIF(o.original_receipt_no, ''),
+                 NULLIF(o.kedaipos_order_number, ''),
+                 NULLIF(o.ticket_code, ''),
+                 NULLIF(o.payment_ref, ''),
+                 o.id
+               ) AS receipt_reference,
+               COALESCE(o.paid_amount_cents, o.total_cents)::int AS paid_amount_cents,
+               o.status
+          FROM orders o
+          LEFT JOIN branches b ON b.id = o.branch_id
+         WHERE o.package_id           = ${LOYALTY_PKG_ID}
+           AND o.loyalty_consumed_in IS NULL
+           AND o.status               IN ('paid','queued','washing','done')
+           AND o.total_cents          > 0
+           AND NOT (o.payment_method  = 'voucher' AND o.qr_provider = 'loyalty')
+           AND o.id NOT IN (SELECT order_id FROM membership_redemptions)
+           AND NOT EXISTS (
+                 SELECT 1
+                   FROM loyalty_physical_card_transfers pct
+                  WHERE pct.order_id = o.id
+                    AND pct.reversed_at IS NULL
+               )
+           AND o.created_at           >= ${LOYALTY_COLLECTION_START}
+           AND (
+                 (${carId}::int IS NOT NULL AND o.vehicle_id = ${carId})
+                 OR (o.vehicle_id IS NULL
+                     AND REGEXP_REPLACE(UPPER(o.plate), '\s+', '', 'g') = ${norm})
+               )
+         ORDER BY o.created_at ASC, o.id ASC
+      `)).rows as Array<{
+        id: string; created_at: string; branch_id: number | null;
+        branch_name: string | null; receipt_reference: string;
+        paid_amount_cents: number; status: string;
+      }>;
+      const eligible_orders = eligibleOrderRows.map((o) => {
+        const canTransfer =
+          isPrivileged || (staffBranchId !== null && o.branch_id === staffBranchId);
+        return {
+          ...o,
+          paid_amount_cents: Number(o.paid_amount_cents),
+          loyalty_status: 'digital',
+          can_transfer: canTransfer,
+          transfer_reason: canTransfer ? null : 'other_branch',
+        };
+      });
+
+      const physicalTransferRows = (await db.execute(sql`
+        SELECT pct.id, pct.order_id, pct.transferred_at, pct.note,
+               pct.physical_card_reference, pct.used_at, pct.use_note,
+               pct.reversed_at, pct.reversal_note,
+               o.created_at AS order_created_at, o.branch_id,
+               b.name AS branch_name,
+               COALESCE(
+                 NULLIF(o.original_receipt_no, ''),
+                 NULLIF(o.kedaipos_order_number, ''),
+                 NULLIF(o.ticket_code, ''),
+                 NULLIF(o.payment_ref, ''),
+                 o.id
+               ) AS receipt_reference,
+               COALESCE(o.paid_amount_cents, o.total_cents)::int AS paid_amount_cents,
+               ts.name AS transferred_by_staff_name,
+               us.name AS used_by_staff_name,
+               rs.name AS reversed_by_staff_name
+          FROM loyalty_physical_card_transfers pct
+          JOIN orders o ON o.id = pct.order_id
+          LEFT JOIN branches b ON b.id = o.branch_id
+          LEFT JOIN staff ts ON ts.id = pct.transferred_by_staff_id
+          LEFT JOIN staff us ON us.id = pct.used_by_staff_id
+          LEFT JOIN staff rs ON rs.id = pct.reversed_by_staff_id
+         WHERE (
+                 (${carId}::int IS NOT NULL AND o.vehicle_id = ${carId})
+                 OR (o.vehicle_id IS NULL
+                     AND REGEXP_REPLACE(UPPER(o.plate), '\s+', '', 'g') = ${norm})
+               )
+         ORDER BY pct.transferred_at DESC, pct.id DESC
+      `)).rows as Array<any>;
+      const physical_transfers = physicalTransferRows.map((t) => ({
+        ...t,
+        paid_amount_cents: Number(t.paid_amount_cents),
+        status: t.reversed_at ? 'reversed' : t.used_at ? 'used' : 'physical',
+        can_reverse: isPrivileged && !t.used_at && !t.reversed_at,
+        can_mark_used: isPrivileged && !t.used_at && !t.reversed_at,
+      }));
 
       const manualRow = (await db.execute(sql`
         SELECT COALESCE(SUM(stamps_remaining), 0)::int AS n FROM loyalty_manual_stamps
@@ -9062,10 +9180,6 @@ export async function registerRoutes(app: Express): Promise<Server> {
       // removed only if none of it has been used toward a redeemed reward
       // (stamps_remaining === stamps_total) and — for branch-locked cashiers —
       // only if it belongs to their own branch. Owners/managers may remove any.
-      const staffUser = req.staff!.user as any;
-      const staffRole = String(staffUser.role);
-      const staffBranchId = (staffUser.branchId ?? null) as number | null;
-      const isPrivileged = staffRole === 'owner' || staffRole === 'manager';
       const entryRows = (await db.execute(sql`
         SELECT lms.id, lms.created_at, lms.stamps_total, lms.stamps_remaining,
                lms.note, lms.receipt_no, lms.branch_id,
@@ -9113,6 +9227,8 @@ export async function registerRoutes(app: Express): Promise<Server> {
         total_stamps: total,
         required: LOYALTY_REQUIRED_COUNT,
         can_redeem: total >= LOYALTY_REQUIRED_COUNT,
+        eligible_orders,
+        physical_transfers,
         manual_entries,
       });
     } catch (err) {
@@ -9121,16 +9237,206 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
-  // POST /api/pos/loyalty/stamp  Body: { plate, count, note?, receipt_no?, branch_id }
-  // Staff (owner/manager/cashier). Credits `count` manual stamps to a plate,
+  const physicalTransferSchema = z.object({
+    order_id: z.string().trim().min(1).max(100),
+    note: z.string().trim().max(160).optional().nullable(),
+    physical_card_reference: z.string().trim().max(80).optional().nullable(),
+  }).superRefine((value, ctx) => {
+    if (!value.note && !value.physical_card_reference) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: 'note_or_reference_required',
+        path: ['note'],
+      });
+    }
+  });
+
+  // Move one currently eligible digital wash onto the customer's physical
+  // loyalty card. The order row is locked before eligibility is re-checked, so
+  // a concurrent digital redemption or second transfer cannot consume it too.
+  // Owners/managers may transfer any branch; cashiers may only transfer a
+  // receipt from their own branch.
+  app.post(
+    '/api/pos/loyalty/physical-transfer',
+    requireStaff,
+    requireStaffRole('owner', 'manager', 'cashier'),
+    async (req, res) => {
+      const parsed = physicalTransferSchema.safeParse(req.body);
+      if (!parsed.success) return res.status(400).json({ error: 'invalid_request' });
+
+      const staffUser = req.staff!.user as any;
+      const staffId = String(staffUser.id);
+      const staffRole = String(staffUser.role);
+      const staffBranchId = (staffUser.branchId ?? null) as number | null;
+      const isPrivileged = staffRole === 'owner' || staffRole === 'manager';
+      const note = parsed.data.note || null;
+      const physicalCardReference = parsed.data.physical_card_reference || null;
+
+      try {
+        const out = await db.transaction(async (tx) => {
+          const order = (await tx.execute(sql`
+            SELECT o.id, o.branch_id, o.package_id, o.loyalty_consumed_in,
+                   o.status, o.total_cents, o.payment_method, o.qr_provider,
+                   o.created_at,
+                   EXISTS (
+                     SELECT 1 FROM membership_redemptions mr
+                      WHERE mr.order_id = o.id
+                   ) AS is_membership,
+                   EXISTS (
+                     SELECT 1 FROM loyalty_physical_card_transfers pct
+                      WHERE pct.order_id = o.id
+                        AND pct.reversed_at IS NULL
+                   ) AS already_transferred
+              FROM orders o
+             WHERE o.id = ${parsed.data.order_id}
+             LIMIT 1
+             FOR UPDATE
+          `)).rows[0] as {
+            id: string; branch_id: number | null; package_id: string | null;
+            loyalty_consumed_in: string | null; status: string;
+            total_cents: number; payment_method: string; qr_provider: string | null;
+            created_at: string; is_membership: boolean; already_transferred: boolean;
+          } | undefined;
+
+          if (!order) return { http: 404, body: { error: 'order_not_found' } };
+          if (!isPrivileged && (staffBranchId === null || order.branch_id !== staffBranchId)) {
+            return { http: 403, body: { error: 'other_branch' } };
+          }
+          if (order.already_transferred) {
+            return { http: 409, body: { error: 'already_transferred' } };
+          }
+
+          const eligible =
+            order.package_id === LOYALTY_PKG_ID &&
+            order.loyalty_consumed_in === null &&
+            ['paid', 'queued', 'washing', 'done'].includes(order.status) &&
+            Number(order.total_cents) > 0 &&
+            !(order.payment_method === 'voucher' && order.qr_provider === 'loyalty') &&
+            !order.is_membership &&
+            new Date(order.created_at).getTime() >= new Date(LOYALTY_COLLECTION_START).getTime();
+          if (!eligible) return { http: 409, body: { error: 'order_not_eligible' } };
+
+          const id = `lpct_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 8)}`;
+          await tx.execute(sql`
+            INSERT INTO loyalty_physical_card_transfers
+              (id, order_id, transferred_by_staff_id, note, physical_card_reference)
+            VALUES
+              (${id}, ${order.id}, ${staffId}, ${note}, ${physicalCardReference})
+          `);
+          return { http: 201, body: { ok: true, transfer_id: id, order_id: order.id } };
+        });
+        return res.status(out.http).json(out.body);
+      } catch (err: any) {
+        if (String(err?.code ?? '') === '23505') {
+          return res.status(409).json({ error: 'already_transferred' });
+        }
+        console.error('[pos.loyalty.physical-transfer] failed:', err);
+        return res.status(500).json({ error: 'transfer_failed' });
+      }
+    },
+  );
+
+  const physicalUseSchema = z.object({
+    note: z.string().trim().max(160).optional().nullable(),
+  });
+
+  // Record that the physical-card entry has now been used. This terminal state
+  // is what prevents an owner/manager from reversing it back to digital later.
+  app.post(
+    '/api/pos/loyalty/physical-transfer/:id/use',
+    requireStaff,
+    requireStaffRole('owner', 'manager'),
+    async (req, res) => {
+      const parsed = physicalUseSchema.safeParse(req.body ?? {});
+      if (!parsed.success) return res.status(400).json({ error: 'invalid_request' });
+      const id = String(req.params.id ?? '').trim();
+      if (!id) return res.status(400).json({ error: 'id_required' });
+      const staffId = String((req.staff!.user as any).id);
+      const note = parsed.data.note || null;
+      try {
+        const used = (await db.execute(sql`
+          UPDATE loyalty_physical_card_transfers
+             SET used_at = now(), used_by_staff_id = ${staffId}, use_note = ${note}
+           WHERE id = ${id}
+             AND used_at IS NULL
+             AND reversed_at IS NULL
+          RETURNING id
+        `)).rows[0];
+        if (used) return res.json({ ok: true });
+
+        const state = (await db.execute(sql`
+          SELECT used_at, reversed_at
+            FROM loyalty_physical_card_transfers
+           WHERE id = ${id}
+           LIMIT 1
+        `)).rows[0] as { used_at: string | null; reversed_at: string | null } | undefined;
+        if (!state) return res.status(404).json({ error: 'not_found' });
+        return res.status(409).json({
+          error: state.reversed_at ? 'already_reversed' : 'already_used',
+        });
+      } catch (err) {
+        console.error('[pos.loyalty.physical-transfer.use] failed:', err);
+        return res.status(500).json({ error: 'use_failed' });
+      }
+    },
+  );
+
+  const physicalReverseSchema = z.object({
+    note: z.string().trim().min(1).max(160),
+  });
+
+  // Owner/manager correction only. The conditional UPDATE is the atomic guard:
+  // once staff record that the physical entry was used, reversal is impossible.
+  app.post(
+    '/api/pos/loyalty/physical-transfer/:id/reverse',
+    requireStaff,
+    requireStaffRole('owner', 'manager'),
+    async (req, res) => {
+      const parsed = physicalReverseSchema.safeParse(req.body);
+      if (!parsed.success) return res.status(400).json({ error: 'invalid_request' });
+      const id = String(req.params.id ?? '').trim();
+      if (!id) return res.status(400).json({ error: 'id_required' });
+      const staffId = String((req.staff!.user as any).id);
+      try {
+        const reversed = (await db.execute(sql`
+          UPDATE loyalty_physical_card_transfers
+             SET reversed_at = now(),
+                 reversed_by_staff_id = ${staffId},
+                 reversal_note = ${parsed.data.note}
+           WHERE id = ${id}
+             AND used_at IS NULL
+             AND reversed_at IS NULL
+          RETURNING id
+        `)).rows[0];
+        if (reversed) return res.json({ ok: true });
+
+        const state = (await db.execute(sql`
+          SELECT used_at, reversed_at
+            FROM loyalty_physical_card_transfers
+           WHERE id = ${id}
+           LIMIT 1
+        `)).rows[0] as { used_at: string | null; reversed_at: string | null } | undefined;
+        if (!state) return res.status(404).json({ error: 'not_found' });
+        return res.status(409).json({
+          error: state.used_at ? 'already_used' : 'already_reversed',
+        });
+      } catch (err) {
+        console.error('[pos.loyalty.physical-transfer.reverse] failed:', err);
+        return res.status(500).json({ error: 'reverse_failed' });
+      }
+    },
+  );
+
+  // POST /api/pos/loyalty/stamp  Body: { plate, count: 1, note?, receipt_no, branch_id }
+  // Staff (owner/manager/cashier). Credits one historic receipt to a plate,
   // tagged to a branch for audit. Owners/managers have no fixed branch so they
   // pass branch_id explicitly; cashiers/lane are pinned to their own branch
   // server-side and any body branch_id is ignored.
   const manualStampSchema = z.object({
     plate: z.string().trim().min(1).max(20),
-    count: z.coerce.number().int().min(1).max(4),
+    count: z.coerce.number().int().refine((value) => value === 1),
     note: z.string().trim().max(160).optional().nullable(),
-    receipt_no: z.string().trim().max(40).optional().nullable(),
+    receipt_no: z.string().trim().min(1).max(40),
   });
   app.post('/api/pos/loyalty/stamp', requireStaff, requireStaffRole('owner', 'manager', 'cashier'), async (req, res) => {
     const parsed = manualStampSchema.safeParse(req.body);
@@ -9160,26 +9466,79 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
     const { plate, count } = parsed.data;
     const note = parsed.data.note && parsed.data.note.length > 0 ? parsed.data.note : null;
-    const receiptNo = parsed.data.receipt_no && parsed.data.receipt_no.length > 0 ? parsed.data.receipt_no : null;
+    const receiptNo = parsed.data.receipt_no;
+    const receiptKey = receiptNo.trim().toUpperCase();
     const norm = LOYALTY_PLATE_NORM(plate);
 
     try {
-      const car = (await db.execute(sql`
-        SELECT id FROM cars
-         WHERE REGEXP_REPLACE(UPPER(license_plate), '\s+', '', 'g') = ${norm}
-         LIMIT 1
-      `)).rows[0] as { id: number } | undefined;
-      const vehicleId = car?.id ?? null;
+      const inserted = await db.transaction(async (tx) => {
+        // Serialize this receipt reference globally. A historic paper receipt
+        // may be credited once, never once per plate. We avoid adding a risky
+        // unique index over historical free-text rows that may already contain
+        // duplicates, while preventing every new duplicate atomically.
+        await tx.execute(sql`
+          SELECT pg_advisory_xact_lock(
+            hashtextextended(${receiptKey}, 0)
+          )
+        `);
+        const car = (await tx.execute(sql`
+          SELECT id FROM cars
+           WHERE REGEXP_REPLACE(UPPER(license_plate), '\s+', '', 'g') = ${norm}
+           LIMIT 1
+        `)).rows[0] as { id: number } | undefined;
+        const vehicleId = car?.id ?? null;
 
-      const id = `lms_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 8)}`;
-      await db.execute(sql`
-        INSERT INTO loyalty_manual_stamps
-          (id, vehicle_id, plate, plate_norm, stamps_total, stamps_remaining,
-           note, receipt_no, branch_id, staff_id)
-        VALUES
-          (${id}, ${vehicleId}, ${plate.toUpperCase()}, ${norm}, ${count}, ${count},
-           ${note}, ${receiptNo}, ${branchId}, ${staffId})
-      `);
+        const duplicateManual = (await tx.execute(sql`
+          SELECT id
+            FROM loyalty_manual_stamps
+           WHERE UPPER(BTRIM(receipt_no)) = UPPER(BTRIM(${receiptNo}))
+           LIMIT 1
+        `)).rows[0];
+        if (duplicateManual) {
+          return { error: 'receipt_already_credited' as const, vehicleId };
+        }
+
+        // Manual stamps are only for historic paper receipts that have no
+        // matching order ANYWHERE. A receipt must not be credited to another
+        // plate when its original order remains digital on the actual vehicle.
+        // This intentionally has no plate/vehicle filter.
+        const matchingOrder = (await tx.execute(sql`
+          SELECT o.id
+            FROM orders o
+           WHERE o.package_id = ${LOYALTY_PKG_ID}
+             AND o.status IN ('paid','queued','washing','done')
+             AND o.total_cents > 0
+             AND NOT (o.payment_method = 'voucher' AND o.qr_provider = 'loyalty')
+             AND o.id NOT IN (SELECT order_id FROM membership_redemptions)
+             AND UPPER(BTRIM(${receiptNo})) = ANY (ARRAY[
+                   UPPER(BTRIM(COALESCE(o.original_receipt_no, ''))),
+                   UPPER(BTRIM(COALESCE(o.kedaipos_order_number, ''))),
+                   UPPER(BTRIM(COALESCE(o.ticket_code, ''))),
+                   UPPER(BTRIM(COALESCE(o.payment_ref, ''))),
+                   UPPER(BTRIM(o.id))
+                 ])
+           LIMIT 1
+           FOR UPDATE
+        `)).rows[0];
+        if (matchingOrder) {
+          return { error: 'matching_digital_order' as const, vehicleId };
+        }
+
+        const id = `lms_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 8)}`;
+        await tx.execute(sql`
+          INSERT INTO loyalty_manual_stamps
+            (id, vehicle_id, plate, plate_norm, stamps_total, stamps_remaining,
+             note, receipt_no, branch_id, staff_id)
+          VALUES
+            (${id}, ${vehicleId}, ${plate.toUpperCase()}, ${norm}, 1, 1,
+             ${note}, ${receiptNo}, ${branchId}, ${staffId})
+        `);
+        return { error: null, vehicleId };
+      });
+      if (inserted.error) {
+        return res.status(409).json({ error: inserted.error });
+      }
+      const vehicleId = inserted.vehicleId;
 
       // Recompute the plate's total for the response so the cashier sees the
       // new running count immediately.
@@ -9188,8 +9547,15 @@ export async function registerRoutes(app: Express): Promise<Server> {
          WHERE o.package_id           = ${LOYALTY_PKG_ID}
            AND o.loyalty_consumed_in IS NULL
            AND o.status               IN ('paid','queued','washing','done')
+           AND o.total_cents          > 0
            AND NOT (o.payment_method  = 'voucher' AND o.qr_provider = 'loyalty')
            AND o.id NOT IN (SELECT order_id FROM membership_redemptions)
+           AND NOT EXISTS (
+                 SELECT 1
+                   FROM loyalty_physical_card_transfers pct
+                  WHERE pct.order_id = o.id
+                    AND pct.reversed_at IS NULL
+               )
            AND o.created_at           >= ${LOYALTY_COLLECTION_START}
            AND (
                  (${vehicleId}::int IS NOT NULL AND o.vehicle_id = ${vehicleId})
@@ -9375,8 +9741,15 @@ export async function registerRoutes(app: Express): Promise<Server> {
              AND package_id           = ${LOYALTY_PKG_ID}
              AND loyalty_consumed_in IS NULL
              AND status               IN ('paid','queued','washing','done')
+              AND total_cents          > 0
              AND NOT (payment_method  = 'voucher' AND qr_provider = 'loyalty')
              AND id NOT IN (SELECT order_id FROM membership_redemptions)
+              AND NOT EXISTS (
+                    SELECT 1
+                      FROM loyalty_physical_card_transfers pct
+                     WHERE pct.order_id = orders.id
+                       AND pct.reversed_at IS NULL
+                  )
              AND created_at           >= ${LOYALTY_COLLECTION_START}
            ORDER BY created_at ASC
            LIMIT ${LOYALTY_REQUIRED_COUNT}
@@ -9436,7 +9809,14 @@ export async function registerRoutes(app: Express): Promise<Server> {
         for (const row of ordersToConsume) {
           await tx.execute(sql`
             UPDATE orders SET loyalty_consumed_in = ${redemptionId}
-             WHERE id = ${row.id} AND loyalty_consumed_in IS NULL
+             WHERE id = ${row.id}
+               AND loyalty_consumed_in IS NULL
+               AND NOT EXISTS (
+                     SELECT 1
+                       FROM loyalty_physical_card_transfers pct
+                      WHERE pct.order_id = orders.id
+                        AND pct.reversed_at IS NULL
+                   )
           `);
         }
         for (const row of manualRows) {

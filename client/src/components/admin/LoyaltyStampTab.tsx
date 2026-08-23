@@ -7,6 +7,14 @@ import { Label } from "@/components/ui/label";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog";
+import {
   Select,
   SelectContent,
   SelectItem,
@@ -43,6 +51,42 @@ type ManualEntry = {
   reason: string | null;
 };
 
+type EligibleOrder = {
+  id: string;
+  created_at: string;
+  branch_id: number | null;
+  branch_name: string | null;
+  receipt_reference: string;
+  paid_amount_cents: number;
+  status: string;
+  loyalty_status: "digital";
+  can_transfer: boolean;
+  transfer_reason: string | null;
+};
+
+type PhysicalTransfer = {
+  id: string;
+  order_id: string;
+  transferred_at: string;
+  note: string | null;
+  physical_card_reference: string | null;
+  used_at: string | null;
+  use_note: string | null;
+  reversed_at: string | null;
+  reversal_note: string | null;
+  order_created_at: string;
+  branch_id: number | null;
+  branch_name: string | null;
+  receipt_reference: string;
+  paid_amount_cents: number;
+  transferred_by_staff_name: string | null;
+  used_by_staff_name: string | null;
+  reversed_by_staff_name: string | null;
+  status: "physical" | "used" | "reversed";
+  can_reverse: boolean;
+  can_mark_used: boolean;
+};
+
 type LoyaltyLookup = {
   plate: string;
   vehicle_id: number | null;
@@ -53,6 +97,8 @@ type LoyaltyLookup = {
   total_stamps: number;
   required: number;
   can_redeem: boolean;
+  eligible_orders: EligibleOrder[];
+  physical_transfers: PhysicalTransfer[];
   manual_entries: ManualEntry[];
 };
 
@@ -71,6 +117,8 @@ const fmtStampDate = (iso: string) => {
   }
 };
 
+const fmtMoney = (cents: number) => `B$${(cents / 100).toFixed(2)}`;
+
 type BranchRow = { id: number; name: string; location: string };
 
 export default function LoyaltyStampTab() {
@@ -82,10 +130,12 @@ export default function LoyaltyStampTab() {
   const canPickBranch = staff?.role === "owner" || staff?.role === "manager";
   const [plate, setPlate] = useState("");
   const [info, setInfo] = useState<LoyaltyLookup | null>(null);
-  const [count, setCount] = useState("1");
   const [note, setNote] = useState("");
   const [receiptNo, setReceiptNo] = useState("");
   const [branchId, setBranchId] = useState("");
+  const [transferOrder, setTransferOrder] = useState<EligibleOrder | null>(null);
+  const [transferNote, setTransferNote] = useState("");
+  const [physicalCardReference, setPhysicalCardReference] = useState("");
 
   const { data: branchData } = useQuery<{ rows: BranchRow[] }>({
     queryKey: ["/api/admin/branches"],
@@ -114,7 +164,7 @@ export default function LoyaltyStampTab() {
     mutationFn: async () => {
       const r = await apiRequest("POST", "/api/pos/loyalty/stamp", {
         plate: plate.trim(),
-        count: Number(count),
+        count: 1,
         note: note.trim() || null,
         receipt_no: receiptNo.trim() || null,
         // Cashiers are branch-pinned server-side; only owners/managers choose.
@@ -123,11 +173,10 @@ export default function LoyaltyStampTab() {
       return (await r.json()) as LoyaltyLookup & { ok: boolean; added: number };
     },
     onSuccess: (data) => {
-      setCount("1");
       setNote("");
       setReceiptNo("");
       toast({
-        title: `Added ${data.added} stamp${data.added === 1 ? "" : "s"}`,
+        title: "Historic receipt stamp added",
         description: `${data.total_stamps} of ${data.required} on ${plate
           .trim()
           .toUpperCase()}.`,
@@ -139,7 +188,12 @@ export default function LoyaltyStampTab() {
     onError: (err: any) =>
       toast({
         title: "Couldn't add stamps",
-        description: err?.message ?? "Please try again.",
+        description:
+          err?.message === "matching_digital_order"
+            ? "That receipt already matches a system wash. Move the matching wash to a physical card instead."
+            : err?.message === "receipt_already_credited"
+              ? "That historic receipt has already been credited."
+              : err?.message ?? "Please try again.",
         variant: "destructive",
       }),
   });
@@ -164,6 +218,89 @@ export default function LoyaltyStampTab() {
           err?.message === "already_used"
             ? "This credit was already used toward a free wash."
             : err?.message ?? "Please try again.",
+        variant: "destructive",
+      }),
+  });
+
+  const transfer = useMutation({
+    mutationFn: async () => {
+      if (!transferOrder) throw new Error("order_required");
+      const r = await apiRequest("POST", "/api/pos/loyalty/physical-transfer", {
+        order_id: transferOrder.id,
+        note: transferNote.trim() || null,
+        physical_card_reference: physicalCardReference.trim() || null,
+      });
+      return (await r.json()) as { ok: boolean; transfer_id: string };
+    },
+    onSuccess: () => {
+      setTransferOrder(null);
+      setTransferNote("");
+      setPhysicalCardReference("");
+      toast({
+        title: "Moved to physical card",
+        description: "This wash no longer counts on the digital stamp card.",
+      });
+      lookup.mutate();
+    },
+    onError: (err: any) =>
+      toast({
+        title: "Couldn't move this wash",
+        description:
+          err?.message === "already_transferred"
+            ? "Another staff member already moved this wash."
+            : err?.message === "order_not_eligible"
+              ? "This wash is no longer eligible for transfer."
+              : err?.message === "other_branch"
+                ? "Cashiers can only move receipts from their own branch."
+                : err?.message ?? "Please try again.",
+        variant: "destructive",
+      }),
+  });
+
+  const reverseTransfer = useMutation({
+    mutationFn: async ({ id, note }: { id: string; note: string }) => {
+      const r = await apiRequest(
+        "POST",
+        `/api/pos/loyalty/physical-transfer/${encodeURIComponent(id)}/reverse`,
+        { note },
+      );
+      return (await r.json()) as { ok: boolean };
+    },
+    onSuccess: () => {
+      toast({
+        title: "Transfer reversed",
+        description: "The wash is available on the digital card again.",
+      });
+      lookup.mutate();
+    },
+    onError: (err: any) =>
+      toast({
+        title: "Couldn't reverse transfer",
+        description:
+          err?.message === "already_used"
+            ? "This physical-card entry was already used and cannot be reversed."
+            : err?.message ?? "Please try again.",
+        variant: "destructive",
+      }),
+  });
+
+  const markTransferUsed = useMutation({
+    mutationFn: async (id: string) => {
+      const r = await apiRequest(
+        "POST",
+        `/api/pos/loyalty/physical-transfer/${encodeURIComponent(id)}/use`,
+        {},
+      );
+      return (await r.json()) as { ok: boolean };
+    },
+    onSuccess: () => {
+      toast({ title: "Physical-card entry marked used" });
+      lookup.mutate();
+    },
+    onError: (err: any) =>
+      toast({
+        title: "Couldn't update entry",
+        description: err?.message ?? "Please try again.",
         variant: "destructive",
       }),
   });
@@ -206,7 +343,10 @@ export default function LoyaltyStampTab() {
 
   const canCheck = plate.trim().length >= 1 && !lookup.isPending;
   const canAdd =
-    !!info && (!canPickBranch || branchId !== "") && !add.isPending;
+    !!info &&
+    receiptNo.trim().length > 0 &&
+    (!canPickBranch || branchId !== "") &&
+    !add.isPending;
   // Owners/managers must pick a branch before queuing (the picker sits below).
   const canRedeem =
     !!info && info.can_redeem && (!canPickBranch || branchId !== "") && !redeem.isPending;
@@ -222,11 +362,10 @@ export default function LoyaltyStampTab() {
         </CardHeader>
         <CardContent className="space-y-3">
           <p className="text-xs text-gray-500">
-            Verify a customer's physical B$12 receipts and add the matching
-            stamps to their plate. Past washes already in the system count
-            automatically — check first so you only top up the difference. Every
-            credit is recorded with the branch, your account, and any note for
-            the audit trail.
+            Check every digital B$12 wash for this plate. If the customer shows
+            the matching receipt and wants it on a physical card, move that
+            specific wash below. Manual stamps are only for old paper receipts
+            with no matching order in the system.
           </p>
           <div>
             <Label className="text-xs">License plate</Label>
@@ -298,6 +437,196 @@ export default function LoyaltyStampTab() {
           )}
 
           {info && (
+            <div className="space-y-2 pt-1" data-testid="loyalty-eligible-orders">
+              <div>
+                <Label className="text-xs">Digital-eligible washes</Label>
+                <p className="text-[11px] text-gray-500">
+                  Each row is one wash currently counted on the online card.
+                  Only move it after seeing the matching printed receipt.
+                </p>
+              </div>
+              {info.eligible_orders.length === 0 ? (
+                <p className="rounded-md border border-dashed border-gray-300 px-3 py-2 text-xs text-gray-500">
+                  No digital-eligible washes.
+                </p>
+              ) : (
+                info.eligible_orders.map((order) => (
+                  <div
+                    key={order.id}
+                    className="rounded-md border border-gray-200 bg-white px-3 py-2 text-xs"
+                    data-testid={`loyalty-order-${order.id}`}
+                  >
+                    <div className="flex items-start justify-between gap-3">
+                      <div className="min-w-0 space-y-0.5">
+                        <div className="flex flex-wrap items-center gap-1.5">
+                          <span className="font-semibold text-gray-800">
+                            {fmtStampDate(order.created_at)}
+                          </span>
+                          <Badge className="bg-blue-600 text-white">Digital</Badge>
+                        </div>
+                        <div className="text-gray-500">
+                          {order.branch_name ?? "Branch not recorded"} ·{" "}
+                          {fmtMoney(order.paid_amount_cents)}
+                        </div>
+                        <div className="text-gray-500 break-all">
+                          Receipt/ticket: {order.receipt_reference}
+                        </div>
+                      </div>
+                      <div className="shrink-0">
+                        <Button
+                          variant="outline"
+                          size="sm"
+                          className="h-auto min-h-8 max-w-32 whitespace-normal border-2 border-black px-2 py-1 text-[11px]"
+                          disabled={!order.can_transfer || transfer.isPending}
+                          onClick={() => {
+                            setTransferOrder(order);
+                            setTransferNote("");
+                            setPhysicalCardReference("");
+                          }}
+                          data-testid={`button-loyalty-transfer-${order.id}`}
+                        >
+                          Move to physical card
+                        </Button>
+                        {!order.can_transfer && (
+                          <p className="mt-1 max-w-32 text-[10px] text-gray-400">
+                            Original wash branch only
+                          </p>
+                        )}
+                      </div>
+                    </div>
+                  </div>
+                ))
+              )}
+            </div>
+          )}
+
+          {info && info.physical_transfers.length > 0 && (
+            <div className="space-y-2 pt-1" data-testid="loyalty-transfer-history">
+              <div>
+                <Label className="text-xs">Physical-card transfer history</Label>
+                <p className="text-[11px] text-gray-500">
+                  Transfers stay here for audit. Owners and managers can reverse
+                  a mistake only before the physical entry is marked used.
+                </p>
+              </div>
+              {info.physical_transfers.map((entry) => (
+                <div
+                  key={entry.id}
+                  className="rounded-md border border-gray-200 px-3 py-2 text-xs"
+                  data-testid={`loyalty-transfer-${entry.id}`}
+                >
+                  <div className="flex items-start justify-between gap-3">
+                    <div className="min-w-0 space-y-0.5">
+                      <div className="flex flex-wrap items-center gap-1.5">
+                        <span className="font-semibold text-gray-800">
+                          {fmtStampDate(entry.order_created_at)}
+                        </span>
+                        <Badge
+                          className={
+                            entry.status === "physical"
+                              ? "bg-amber-600 text-white"
+                              : entry.status === "used"
+                                ? "bg-gray-700 text-white"
+                                : "bg-gray-400 text-white"
+                          }
+                        >
+                          {entry.status === "physical"
+                            ? "Physical card"
+                            : entry.status === "used"
+                              ? "Physical entry used"
+                              : "Reversed"}
+                        </Badge>
+                      </div>
+                      <div className="text-gray-500">
+                        {entry.branch_name ?? "Branch not recorded"} ·{" "}
+                        {fmtMoney(entry.paid_amount_cents)}
+                      </div>
+                      <div className="text-gray-500 break-all">
+                        Receipt/ticket: {entry.receipt_reference}
+                      </div>
+                      <div className="text-gray-500">
+                        Moved {fmtStampDate(entry.transferred_at)}
+                        {entry.transferred_by_staff_name
+                          ? ` by ${entry.transferred_by_staff_name}`
+                          : ""}
+                      </div>
+                      {entry.physical_card_reference && (
+                        <div className="text-gray-500">
+                          Card/reference: {entry.physical_card_reference}
+                        </div>
+                      )}
+                      {entry.note && (
+                        <div className="text-gray-500 break-words">“{entry.note}”</div>
+                      )}
+                      {entry.used_at && (
+                        <div className="text-gray-500">
+                          Used {fmtStampDate(entry.used_at)}
+                          {entry.used_by_staff_name
+                            ? ` by ${entry.used_by_staff_name}`
+                            : ""}
+                        </div>
+                      )}
+                      {entry.reversed_at && (
+                        <div className="text-gray-500">
+                          Reversed {fmtStampDate(entry.reversed_at)}
+                          {entry.reversed_by_staff_name
+                            ? ` by ${entry.reversed_by_staff_name}`
+                            : ""}
+                          {entry.reversal_note ? ` · ${entry.reversal_note}` : ""}
+                        </div>
+                      )}
+                    </div>
+                    {(entry.can_mark_used || entry.can_reverse) && (
+                      <div className="flex shrink-0 flex-col gap-1">
+                        {entry.can_mark_used && (
+                          <Button
+                            variant="outline"
+                            size="sm"
+                            className="h-7 border-2 border-black px-2 text-[10px]"
+                            disabled={markTransferUsed.isPending}
+                            onClick={() => {
+                              if (
+                                window.confirm(
+                                  "Mark this physical-card entry as used? It can no longer be reversed.",
+                                )
+                              ) {
+                                markTransferUsed.mutate(entry.id);
+                              }
+                            }}
+                          >
+                            Mark used
+                          </Button>
+                        )}
+                        {entry.can_reverse && (
+                          <Button
+                            variant="outline"
+                            size="sm"
+                            className="h-7 border-2 border-black px-2 text-[10px] text-red-600"
+                            disabled={reverseTransfer.isPending}
+                            onClick={() => {
+                              const reason = window.prompt(
+                                "Why is this transfer being reversed?",
+                              );
+                              if (reason?.trim()) {
+                                reverseTransfer.mutate({
+                                  id: entry.id,
+                                  note: reason.trim(),
+                                });
+                              }
+                            }}
+                          >
+                            Reverse
+                          </Button>
+                        )}
+                      </div>
+                    )}
+                  </div>
+                </div>
+              ))}
+            </div>
+          )}
+
+          {info && (
             <>
               {canPickBranch && (
                 <div>
@@ -316,39 +645,28 @@ export default function LoyaltyStampTab() {
                   </Select>
                 </div>
               )}
-              <div className="grid grid-cols-2 gap-2">
-                <div>
-                  <Label className="text-xs">Stamps to add</Label>
-                  <Select value={count} onValueChange={setCount}>
-                    <SelectTrigger data-testid="select-loyalty-count">
-                      <SelectValue />
-                    </SelectTrigger>
-                    <SelectContent>
-                      {[1, 2, 3, 4].map((n) => (
-                        <SelectItem key={n} value={String(n)}>
-                          {n}
-                        </SelectItem>
-                      ))}
-                    </SelectContent>
-                  </Select>
-                </div>
-                <div>
-                  <Label className="text-xs">Receipt no. (optional)</Label>
-                  <Input
-                    value={receiptNo}
-                    maxLength={40}
-                    placeholder="e.g. 00231"
-                    onChange={(e) => setReceiptNo(e.target.value)}
-                    data-testid="input-loyalty-receipt"
-                  />
-                </div>
+              <div>
+                <Label className="text-xs">
+                  Historic receipt no. (required)
+                </Label>
+                <Input
+                  value={receiptNo}
+                  maxLength={40}
+                  placeholder="e.g. 00231"
+                  onChange={(e) => setReceiptNo(e.target.value)}
+                  data-testid="input-loyalty-receipt"
+                />
+                <p className="mt-1 text-[10px] text-gray-500">
+                  One stamp per receipt. A receipt matching a system order will
+                  be rejected—move that wash above instead.
+                </p>
               </div>
               <div>
-                <Label className="text-xs">Note (encouraged)</Label>
+                <Label className="text-xs">Historic receipt note (optional)</Label>
                 <Input
                   value={note}
                   maxLength={160}
-                  placeholder="e.g. 3 paper receipts verified & collected"
+                  placeholder="e.g. old paper receipt verified"
                   onChange={(e) => setNote(e.target.value)}
                   data-testid="input-loyalty-note"
                 />
@@ -359,9 +677,7 @@ export default function LoyaltyStampTab() {
                 onClick={() => add.mutate()}
                 data-testid="button-loyalty-add"
               >
-                {add.isPending
-                  ? "Adding…"
-                  : `Add ${count} stamp${count === "1" ? "" : "s"}`}
+                {add.isPending ? "Adding…" : "Add historic receipt stamp"}
               </Button>
             </>
           )}
@@ -439,6 +755,84 @@ export default function LoyaltyStampTab() {
           )}
         </CardContent>
       </Card>
+
+      <Dialog
+        open={transferOrder !== null}
+        onOpenChange={(open) => {
+          if (!open && !transfer.isPending) setTransferOrder(null);
+        }}
+      >
+        <DialogContent className="max-w-md">
+          <DialogHeader>
+            <DialogTitle>Move wash to physical card?</DialogTitle>
+            <DialogDescription>
+              Confirm that you can see the matching printed receipt. This wash
+              will immediately disappear from the customer&apos;s digital stamp
+              count.
+            </DialogDescription>
+          </DialogHeader>
+          {transferOrder && (
+            <div className="space-y-3">
+              <div className="rounded-md border border-gray-200 bg-gray-50 px-3 py-2 text-xs">
+                <div className="font-semibold">
+                  {fmtStampDate(transferOrder.created_at)}
+                </div>
+                <div className="text-gray-500">
+                  {transferOrder.branch_name ?? "Branch not recorded"} ·{" "}
+                  {fmtMoney(transferOrder.paid_amount_cents)}
+                </div>
+                <div className="break-all text-gray-500">
+                  Receipt/ticket: {transferOrder.receipt_reference}
+                </div>
+              </div>
+              <div>
+                <Label className="text-xs">Physical card/reference</Label>
+                <Input
+                  value={physicalCardReference}
+                  maxLength={80}
+                  placeholder="e.g. Card 104"
+                  onChange={(e) => setPhysicalCardReference(e.target.value)}
+                  data-testid="input-physical-card-reference"
+                />
+              </div>
+              <div>
+                <Label className="text-xs">Note</Label>
+                <Input
+                  value={transferNote}
+                  maxLength={160}
+                  placeholder="e.g. receipt seen and stamped"
+                  onChange={(e) => setTransferNote(e.target.value)}
+                  data-testid="input-physical-card-note"
+                />
+                <p className="mt-1 text-[10px] text-gray-500">
+                  Add a card/reference or a short note.
+                </p>
+              </div>
+            </div>
+          )}
+          <DialogFooter>
+            <Button
+              variant="outline"
+              className="border-2 border-black"
+              disabled={transfer.isPending}
+              onClick={() => setTransferOrder(null)}
+            >
+              Cancel
+            </Button>
+            <Button
+              className="border-2 border-black bg-amber-600 text-white hover:bg-amber-700"
+              disabled={
+                transfer.isPending ||
+                (!physicalCardReference.trim() && !transferNote.trim())
+              }
+              onClick={() => transfer.mutate()}
+              data-testid="button-confirm-physical-transfer"
+            >
+              {transfer.isPending ? "Moving…" : "Confirm move"}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }

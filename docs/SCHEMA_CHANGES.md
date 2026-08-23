@@ -1385,3 +1385,26 @@ Voucher orders show up in:
   customers who paid before having an account. Could be added
   later as a "manual punch" button in the customer detail.
 - No SMS/email notification when stamp 4 is earned.
+
+---
+
+## 2026-08-20 — Physical-card loyalty transfer audit
+
+**Migration:** `migrations/manual/2026-08-20_01_loyalty_physical_card_transfers.sql`
+
+- Added `loyalty_physical_card_transfers`, an order-level audit ledger that
+  moves a qualifying B$12 wash from the digital punch card to a physical card
+  without changing or deleting the sale.
+- Records transfer staff/time, optional note and physical-card reference,
+  physical use, and owner/manager reversal details.
+- An active-row partial unique index prevents the same order being moved twice.
+- Used physical-card entries cannot be reversed; reversed rows remain as audit
+  history and no longer exclude the order from digital loyalty.
+- `2026-08-20_02_bay4522_physical_card_correction.sql` records the known
+  BAY4522 July receipt as transferred at the time of its August physical free
+  wash and marks the physical entry used, so it cannot be reversed back to
+  digital loyalty. It is an idempotent data correction and does not alter
+  either order.
+- `2026-08-20_03_bay4522_mark_physical_entry_used.sql` is the forward-only
+  guard for databases where the initial correction was already applied before
+  the used state was recorded.
