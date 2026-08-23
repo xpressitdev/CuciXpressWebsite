@@ -210,7 +210,7 @@ export function decodeIdTokenClaims(idToken: string): GoogleIdTokenClaims {
   if (typeof claims.sub !== "string" || claims.sub.length === 0) {
     throw new Error("[google-oauth] id_token is missing `sub` claim");
   }
-  return claims as GoogleIdTokenClaims;
+  return { ...claims, sub: claims.sub };
 }
 
 // ---- Find-or-create -----------------------------------------

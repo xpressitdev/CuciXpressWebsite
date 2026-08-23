@@ -55,3 +55,4 @@
 - [Membership follows car via Plate Transfer only](membership-follow-car.md) — unlimited membership moves ONLY through owner plate-transfer, never on self-service plate claims (entitlement-theft risk).
 - [Membership near-expiry CTA](membership-expiry-cta.md) — active unlimited must keep wash-QR until expires_at; Renew prompts are additive, never replace the QR button.
 - [Vitest UI component tests](vitest-ui-component-tests.md) — .test.tsx needs jsdom pragma + oxc.jsx in vitest.config (rolldown-vite ignores esbuild.jsx); one known pre-existing POS test failure.
+- [Lucia multi-instance typing](lucia-multi-instance-typing.md) — Lucia v3 has one global Register; distinct runtime user shapes need explicit local types at adapter boundaries.

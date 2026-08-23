@@ -1,15 +1,5 @@
 import { motion } from "framer-motion";
-import { MapPin, Navigation, Star } from "lucide-react";
-import { useState } from "react";
-
-interface TestimonialProps {
-  name: string;
-  role: string;
-  content: string;
-  rating: number;
-  initials: string;
-  bgColor: string;
-}
+import { MapPin, Navigation } from "lucide-react";
 
 interface LocationProps {
   name: string;
@@ -21,7 +11,6 @@ interface LocationProps {
     lat: number;
     lng: number;
   };
-  testimonials: TestimonialProps[];
 }
 
 function LocationCard({ name, address, hours, bgColor, iconBg, coordinates }: LocationProps) {

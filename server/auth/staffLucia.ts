@@ -28,6 +28,17 @@ import { db } from "../db";
 
 const USER_TYPE_STAFF = "staff" as const;
 
+type StaffRole = "owner" | "manager" | "lane" | "cashier" | "investor";
+
+interface StaffDatabaseUserAttributes {
+  email: string;
+  name: string;
+  role: StaffRole;
+  branchId: number | null;
+}
+
+type StaffUserAttributes = StaffDatabaseUserAttributes;
+
 class StaffSessionAdapter implements Adapter {
   async getSessionAndUser(
     sessionId: string
@@ -73,7 +84,7 @@ class StaffSessionAdapter implements Adapter {
               name: r.st_name,
               role: r.st_role,
               branchId: r.st_branch_id,
-            },
+            } as unknown as DatabaseUser["attributes"],
           };
 
     return [session, user];
@@ -132,12 +143,9 @@ class StaffSessionAdapter implements Adapter {
   }
 }
 
-// Note: this `staffLucia` is a SEPARATE Lucia instance from the
-// customer one, so the typing for cookie name + user attributes lives
-// in its own narrow declare-module block. We can't share the Register
-// interface — Lucia v3 only allows one global Register augmentation
-// per process. So we use Lucia's instance-level types directly when
-// reading req.staff in middleware.
+// This is a separate runtime instance from customer Lucia. Lucia v3's
+// DatabaseUserAttributes registration is global, though, so the adapter
+// boundary above bridges to this instance's explicit staff-only shape.
 export const staffLucia = new Lucia(new StaffSessionAdapter(), {
   sessionExpiresIn: new TimeSpan(12, "h"),
   sessionCookie: {
@@ -149,14 +157,17 @@ export const staffLucia = new Lucia(new StaffSessionAdapter(), {
       path: "/",
     },
   },
-  getUserAttributes: (attrs) => ({
-    email: attrs.email as string,
-    name: attrs.name as string,
-    role: attrs.role as "owner" | "manager" | "lane" | "cashier" | "investor",
-    branchId: attrs.branchId as number | null,
-  }),
+  getUserAttributes: (attrs): StaffUserAttributes => {
+    const staffAttrs = attrs as unknown as StaffDatabaseUserAttributes;
+    return {
+      email: staffAttrs.email,
+      name: staffAttrs.name,
+      role: staffAttrs.role,
+      branchId: staffAttrs.branchId,
+    };
+  },
 });
 
-export type StaffLuciaUser = ReturnType<typeof staffLucia.getUserAttributes> & {
+export type StaffLuciaUser = StaffUserAttributes & {
   id: string;
 };
