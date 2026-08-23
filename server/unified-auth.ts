@@ -21,10 +21,14 @@ declare global {
  * everywhere a JWT is signed or verified.
  */
 export function requireJwtSecret(): string {
-  const s = process.env.JWT_SECRET;
+  // Existing projects may have only SESSION_SECRET configured. It is already
+  // a private server-side signing secret, so it is a safe compatibility
+  // source for the legacy cross-domain JWTs while a separate JWT_SECRET is
+  // unavailable in a development workspace.
+  const s = process.env.JWT_SECRET ?? process.env.SESSION_SECRET;
   if (!s || s.length < 32) {
     throw new Error(
-      'JWT_SECRET is required and must be at least 32 characters. ' +
+      'JWT_SECRET or SESSION_SECRET is required and must be at least 32 characters. ' +
       'Set it in Replit Secrets before booting.'
     );
   }
