@@ -153,6 +153,12 @@ describe("Refunding a free-wash voucher restores the loyalty stamps", () => {
     if (!pool) return;
     try {
       await pool.query(
+        `UPDATE orders
+            SET loyalty_consumed_in = NULL
+          WHERE vehicle_id = $1 OR plate = $2`,
+        [carId, plate],
+      );
+      await pool.query(
         `DELETE FROM loyalty_redemptions
           WHERE customer_user_id = $1
              OR voucher_order_id IN (SELECT id FROM orders WHERE vehicle_id = $2)`,
@@ -357,10 +363,13 @@ describe("Refunding a free-wash voucher restores the loyalty stamps", () => {
       expect(d.stamps).toBe(0);
       // Clean up the surviving voucher so the suite leaves no live state.
       await pool.query(
+        `UPDATE orders SET loyalty_consumed_in = NULL WHERE vehicle_id = $1`,
+        [carId],
+      );
+      await pool.query(
         `DELETE FROM loyalty_redemptions WHERE voucher_order_id = $1`,
         [live.rows[0].id],
       );
-      await pool.query(`UPDATE orders SET loyalty_consumed_in = NULL WHERE vehicle_id = $1`, [carId]);
       await pool.query(`DELETE FROM orders WHERE id = $1`, [live.rows[0].id]);
     } else {
       // Redeem lost the race with a 409; stamps must be fully restored.
