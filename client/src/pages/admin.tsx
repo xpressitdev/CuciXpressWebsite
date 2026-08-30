@@ -87,6 +87,7 @@ import LoyaltyStampTab from "@/components/admin/LoyaltyStampTab";
 import SubscriptionTestTab from "@/components/admin/SubscriptionTestTab";
 import CategoriesSection from "@/components/admin/CategoriesSection";
 import { SendReceiptButton } from "@/components/admin/SendReceiptButton";
+import { CorrectPlateDialog } from "@/components/admin/CorrectPlateDialog";
 import {
   AreaChart,
   Area,
@@ -1545,6 +1546,7 @@ function OrdersReportTab() {
   // earnings = total earnings. Owner/manager only (endpoint is role-gated).
   const { staff } = useStaffAuth();
   const canSeeSubRevenue = staff?.role === "owner" || staff?.role === "manager";
+  const canCorrectPlates = canSeeSubRevenue;
   const { data: subRevAsOf } = useQuery<{
     totals: { recognized_cents: number; deferred_cents: number; earned_today_cents: number };
   }>({
@@ -1771,7 +1773,7 @@ function OrdersReportTab() {
                     <TableHead>Staff</TableHead>
                     <TableHead className="text-right">Total</TableHead>
                     <TableHead>Status</TableHead>
-                    <TableHead className="text-right">Receipt</TableHead>
+                    <TableHead className="text-right">Actions</TableHead>
                   </TableRow>
                 </TableHeader>
                 <TableBody>
@@ -1804,9 +1806,24 @@ function OrdersReportTab() {
                           )}
                         </TableCell>
                         <TableCell className="text-right">
-                          {r.status !== "pending_payment" && (
-                            <SendReceiptButton orderId={r.id} size="sm" variant="ghost" className="h-7 px-2 text-emerald-700" />
-                          )}
+                          <div className="flex justify-end items-center gap-1 whitespace-nowrap">
+                            {canCorrectPlates && ["paid", "done", "completed"].includes(r.status.toLowerCase()) && (
+                              <CorrectPlateDialog
+                                order={{
+                                  id: r.id,
+                                  plate: r.plate,
+                                  customerName: r.customer_name_walkin,
+                                  createdAt: r.created_at,
+                                  branchName: r.branch_name ?? String(r.branch_id),
+                                  ticketCode: r.ticket_code,
+                                  packageName: r.package_name,
+                                }}
+                              />
+                            )}
+                            {r.status !== "pending_payment" && (
+                              <SendReceiptButton orderId={r.id} size="sm" variant="ghost" className="h-7 px-2 text-emerald-700" />
+                            )}
+                          </div>
                         </TableCell>
                       </TableRow>
                     );

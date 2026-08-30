@@ -680,6 +680,30 @@ export const insertOrderSchema = createInsertSchema(orders).omit({
 export type Order = typeof orders.$inferSelect;
 export type InsertOrder = z.infer<typeof insertOrderSchema>;
 
+// Immutable manager audit for correcting the vehicle attribution of one order.
+// Vehicle ids are deliberately not foreign keys: the source typo car may be
+// safely removed in the same transaction, while its identity must remain in
+// the audit forever.
+export const orderPlateCorrections = pgTable("order_plate_corrections", {
+  id: bigserial("id", { mode: "number" }).primaryKey(),
+  order_id: text("order_id").notNull(),
+  old_plate: text("old_plate").notNull(),
+  new_plate: text("new_plate").notNull(),
+  old_vehicle_id: integer("old_vehicle_id"),
+  new_vehicle_id: integer("new_vehicle_id").notNull(),
+  old_order_customer_id: integer("old_order_customer_id"),
+  new_order_customer_id: integer("new_order_customer_id"),
+  old_vehicle_user_id: integer("old_vehicle_user_id"),
+  new_vehicle_user_id: integer("new_vehicle_user_id"),
+  old_vehicle_customer_id: integer("old_vehicle_customer_id"),
+  new_vehicle_customer_id: integer("new_vehicle_customer_id"),
+  corrected_by_staff_id: text("corrected_by_staff_id").notNull(),
+  reason: text("reason").notNull(),
+  corrected_at: timestamp("corrected_at", { withTimezone: true }).defaultNow().notNull(),
+  old_car_deleted: boolean("old_car_deleted").default(false).notNull(),
+});
+export type OrderPlateCorrection = typeof orderPlateCorrections.$inferSelect;
+
 // --- Memberships (prepaid wash-pack) -------------------------
 // Added by 2026-05-04_04_memberships.sql (replacing the unused
 // `subscriptions` stub which modelled a different product).

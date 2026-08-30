@@ -1176,6 +1176,345 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
+  const plateCorrectionTargetSchema = z.object({
+    vehicle_id: z.coerce.number().int().positive().optional(),
+    new_plate: z.string().trim().min(1).max(20).optional(),
+  }).refine((v) => (v.vehicle_id == null) !== (v.new_plate == null), {
+    message: 'exactly_one_destination_required',
+  });
+
+  const correctionPlateNorm = (value: string) =>
+    value.toUpperCase().replace(/\s+/g, '');
+
+  const plateCorrectionPreview = async (req: any, res: any) => {
+    const orderId = String(req.params.id ?? '').trim();
+    if (!orderId) return res.status(400).json({ error: 'invalid_id' });
+    const parsed = plateCorrectionTargetSchema.safeParse(req.query);
+    if (!parsed.success) {
+      return res.status(400).json({ error: 'invalid_destination' });
+    }
+    try {
+      const source = (await db.execute(sql`
+        SELECT o.id, o.plate, o.vehicle_id, o.customer_id, o.status,
+               o.package_id, o.total_cents, o.loyalty_consumed_in,
+               o.created_at, o.ticket_code, o.package_name,
+               b.name AS branch_name,
+               c.license_plate AS vehicle_plate, c.user_id AS vehicle_user_id,
+               c.customer_id AS vehicle_customer_id,
+               COALESCE(c.user_id, cc.user_id, o.customer_id) AS attributed_user_id,
+               COALESCE(cc.name, oc.name, ou.first_name || ' ' || ou.last_name) AS customer_name,
+               COALESCE(cc.phone, oc.phone, ou.phone_number) AS customer_phone,
+               oc.id AS order_profile_customer_id,
+               EXISTS (SELECT 1 FROM membership_redemptions mr WHERE mr.order_id=o.id) AS membership_redemption,
+               EXISTS (
+                 SELECT 1 FROM loyalty_physical_card_transfers p
+                  WHERE p.order_id=o.id AND p.reversed_at IS NULL
+               ) AS active_physical_transfer,
+               EXISTS (
+                 SELECT 1 FROM order_plate_corrections pc WHERE pc.order_id=o.id
+               ) AS has_prior_correction
+          FROM orders o
+          LEFT JOIN branches b ON b.id=o.branch_id
+          LEFT JOIN cars c ON c.id=o.vehicle_id
+          LEFT JOIN customers cc ON cc.id=c.customer_id
+          LEFT JOIN customers oc ON oc.user_id=o.customer_id
+          LEFT JOIN users ou ON ou.id=o.customer_id
+         WHERE o.id=${orderId}
+         LIMIT 1
+      `)).rows[0] as any;
+      if (!source) return res.status(404).json({ error: 'not_found' });
+
+      let destination: any;
+      if (parsed.data.vehicle_id != null) {
+        destination = (await db.execute(sql`
+          SELECT c.id, c.license_plate, c.user_id, c.customer_id,
+                 COALESCE(c.user_id, cu.user_id) AS attributed_user_id,
+                 COALESCE(cu.name, u.first_name || ' ' || u.last_name) AS customer_name,
+                 COALESCE(cu.phone, u.phone_number) AS customer_phone
+            FROM cars c
+            LEFT JOIN customers cu ON cu.id=c.customer_id
+            LEFT JOIN users u ON u.id=COALESCE(c.user_id, cu.user_id)
+           WHERE c.id=${parsed.data.vehicle_id}
+        `)).rows[0];
+        if (!destination) return res.status(404).json({ error: 'destination_vehicle_not_found' });
+      } else {
+        const norm = correctionPlateNorm(parsed.data.new_plate!);
+        const matches = (await db.execute(sql`
+          SELECT id FROM cars
+           WHERE REGEXP_REPLACE(UPPER(license_plate), '\s+', '', 'g')=${norm}
+           ORDER BY id
+        `)).rows;
+        if (matches.length > 0) {
+          return res.status(409).json({
+            error: 'destination_plate_exists_use_vehicle_id',
+            vehicle_ids: matches.map((r: any) => r.id),
+          });
+        }
+        destination = {
+          id: null,
+          license_plate: norm,
+          user_id: source.vehicle_user_id ?? source.customer_id,
+          customer_id: source.vehicle_customer_id ?? source.order_profile_customer_id,
+          attributed_user_id: source.attributed_user_id,
+          customer_name: source.customer_name,
+          customer_phone: source.customer_phone,
+          will_create: true,
+        };
+      }
+
+      const loyaltyEligible =
+        source.package_id === 'pkg_basic_tyre_wax' &&
+        source.loyalty_consumed_in == null &&
+        ['paid', 'queued', 'washing', 'done'].includes(source.status) &&
+        Number(source.total_cents) > 0 &&
+        !source.membership_redemption &&
+        !source.active_physical_transfer &&
+        new Date(source.created_at).getTime() >= new Date('2026-06-13T16:00:00Z').getTime();
+      return res.json({
+        order: source,
+        destination,
+        blocked: {
+          unsupported_status: !['paid', 'done'].includes(source.status),
+          digitally_consumed: source.loyalty_consumed_in != null,
+          active_physical_transfer: source.active_physical_transfer,
+          membership_redemption: source.membership_redemption,
+        },
+        has_prior_correction: source.has_prior_correction,
+        customer_effect: {
+          old_user_id: source.customer_id,
+          new_user_id: destination.attributed_user_id ?? null,
+          old_customer_name: source.customer_name,
+          new_customer_name: destination.customer_name ?? null,
+        },
+        loyalty_effect: {
+          eligible_order_moves: loyaltyEligible,
+          source_stamp_delta: loyaltyEligible ? -1 : 0,
+          destination_stamp_delta: loyaltyEligible ? 1 : 0,
+          digitally_consumed: source.loyalty_consumed_in != null,
+          physical_card_active: source.active_physical_transfer,
+          membership_redemption: source.membership_redemption,
+        },
+      });
+    } catch (err) {
+      console.error('[admin.order.plate-correction.preview] failed:', err);
+      return res.status(500).json({ error: 'preview_failed' });
+    }
+  };
+
+  app.get('/api/admin/orders/:id/plate-correction/preview',
+    requireStaff, requireStaffRole('owner', 'manager'), plateCorrectionPreview);
+
+  const plateCorrectionDetail = async (req: any, res: any) => {
+      const orderId = String(req.params.id ?? '').trim();
+      if (!orderId) return res.status(400).json({ error: 'invalid_id' });
+      try {
+        const order = (await db.execute(sql`
+          SELECT id, plate, vehicle_id, customer_id
+            FROM orders
+           WHERE id=${orderId}
+           LIMIT 1
+        `)).rows[0] as any;
+        if (!order) return res.status(404).json({ error: 'not_found' });
+        const corrections = (await db.execute(sql`
+          SELECT pc.*, s.name AS corrected_by_staff_name
+            FROM order_plate_corrections pc
+            LEFT JOIN staff s ON s.id=pc.corrected_by_staff_id
+           WHERE pc.order_id=${orderId}
+           ORDER BY pc.corrected_at DESC, pc.id DESC
+        `)).rows as any[];
+        return res.json({
+          order: {
+            id: order.id, plate: order.plate, vehicle_id: order.vehicle_id,
+            customer_id: order.customer_id,
+          },
+          correction: corrections[0] ?? null,
+          corrections,
+        });
+      } catch (err) {
+        console.error('[admin.order.plate-correction.audit] failed:', err);
+        return res.status(500).json({ error: 'detail_failed' });
+      }
+    };
+  app.get('/api/admin/orders/:id/plate-correction',
+    requireStaff, requireStaffRole('owner', 'manager'), plateCorrectionDetail);
+  app.get('/api/admin/orders/:id/plate-correction/audit',
+    requireStaff, requireStaffRole('owner', 'manager'), plateCorrectionDetail);
+
+  const plateCorrectionSchema = plateCorrectionTargetSchema.and(z.object({
+    reason: z.string().trim().min(3).max(500),
+    expected_vehicle_id: z.number().int().positive().nullable(),
+    expected_plate: z.string().trim().min(1).max(20),
+  }));
+
+  app.post('/api/admin/orders/:id/plate-correction',
+    requireStaff, requireStaffRole('owner', 'manager'), async (req, res) => {
+      const orderId = String(req.params.id ?? '').trim();
+      if (!orderId) return res.status(400).json({ error: 'invalid_id' });
+      const parsed = plateCorrectionSchema.safeParse(req.body ?? {});
+      if (!parsed.success) return res.status(400).json({ error: 'invalid_request' });
+      const body = parsed.data;
+      const staffId = String((req.staff!.user as any).id);
+      try {
+        const result = await db.transaction(async (tx) => {
+          // Loyalty redemption locks the car before its eligible orders. Lock
+          // every known source/destination car in id order before this order so
+          // correction-vs-redemption and opposite-direction corrections cannot
+          // form order→car / car→order deadlocks.
+          const carIdsToLock = Array.from(new Set(
+            [body.expected_vehicle_id, body.vehicle_id]
+              .filter((id): id is number => id != null),
+          )).sort((a, b) => a - b);
+          if (carIdsToLock.length > 0) {
+            await tx.execute(sql`
+              SELECT id
+                FROM cars
+               WHERE id IN (${sql.join(carIdsToLock.map((id) => sql`${id}`), sql`, `)})
+               ORDER BY id
+               FOR UPDATE
+            `);
+          }
+
+          const order = (await tx.execute(sql`
+            SELECT o.id, o.plate, o.vehicle_id, o.customer_id,
+                   o.status, o.loyalty_consumed_in,
+                   EXISTS (SELECT 1 FROM membership_redemptions mr WHERE mr.order_id=o.id)
+                     AS membership_redemption,
+                   EXISTS (
+                     SELECT 1 FROM loyalty_physical_card_transfers p
+                      WHERE p.order_id=o.id AND p.reversed_at IS NULL
+                   ) AS active_physical_transfer
+              FROM orders o WHERE o.id=${orderId} FOR UPDATE
+          `)).rows[0] as any;
+          if (!order) throw Object.assign(new Error('not_found'), { httpStatus: 404 });
+
+          if (order.vehicle_id !== body.expected_vehicle_id) {
+            throw Object.assign(new Error('source_changed'), { httpStatus: 409 });
+          }
+          if (correctionPlateNorm(order.plate) !== correctionPlateNorm(body.expected_plate)) {
+            throw Object.assign(new Error('source_changed'), { httpStatus: 409 });
+          }
+          if (!['paid', 'done'].includes(order.status)) {
+            throw Object.assign(new Error('order_not_completed'), { httpStatus: 409 });
+          }
+          if (order.loyalty_consumed_in != null) {
+            throw Object.assign(new Error('digitally_consumed'), { httpStatus: 409 });
+          }
+          if (order.active_physical_transfer) {
+            throw Object.assign(new Error('active_physical_transfer'), { httpStatus: 409 });
+          }
+          if (order.membership_redemption) {
+            throw Object.assign(new Error('membership_redemption'), { httpStatus: 409 });
+          }
+
+          const oldCar = order.vehicle_id == null ? null : (await tx.execute(sql`
+            SELECT id, license_plate, user_id, customer_id, brand, model, "type",
+                   photo_url, color, last_seen_at
+              FROM cars WHERE id=${order.vehicle_id}
+          `)).rows[0] as any;
+
+          let destination: any;
+          if (body.vehicle_id != null) {
+            destination = (await tx.execute(sql`
+              SELECT c.id, c.license_plate, c.user_id, c.customer_id,
+                     COALESCE(c.user_id, cu.user_id) AS attributed_user_id
+                FROM cars c LEFT JOIN customers cu ON cu.id=c.customer_id
+               WHERE c.id=${body.vehicle_id}
+            `)).rows[0];
+            if (!destination) {
+              throw Object.assign(new Error('destination_vehicle_not_found'), { httpStatus: 404 });
+            }
+          } else {
+            const norm = correctionPlateNorm(body.new_plate!);
+            const existing = (await tx.execute(sql`
+              SELECT id FROM cars
+               WHERE REGEXP_REPLACE(UPPER(license_plate), '\s+', '', 'g')=${norm}
+               FOR UPDATE
+            `)).rows;
+            if (existing.length > 0) {
+              throw Object.assign(new Error('destination_plate_exists_use_vehicle_id'), { httpStatus: 409 });
+            }
+            const newUserId = oldCar?.user_id ?? order.customer_id ?? null;
+            const newCustomerId = oldCar?.customer_id ?? (newUserId == null ? null :
+              ((await tx.execute(sql`
+                SELECT id FROM customers WHERE user_id=${newUserId} LIMIT 1
+              `)).rows[0] as any)?.id ?? null);
+            destination = (await tx.execute(sql`
+              INSERT INTO cars
+                (license_plate, user_id, customer_id, brand, model, "type",
+                 photo_url, color, last_seen_at)
+              VALUES
+                (${norm}, ${newUserId}, ${newCustomerId},
+                 ${oldCar?.brand ?? null}, ${oldCar?.model ?? null}, ${oldCar?.type ?? null},
+                 ${oldCar?.photo_url ?? null}, ${oldCar?.color ?? null},
+                 ${oldCar?.last_seen_at ?? null})
+              RETURNING id, license_plate, user_id, customer_id,
+                COALESCE(user_id, (
+                  SELECT cu.user_id FROM customers cu WHERE cu.id=cars.customer_id
+                )) AS attributed_user_id
+            `)).rows[0];
+          }
+
+          if (order.vehicle_id === destination.id &&
+              correctionPlateNorm(order.plate) === correctionPlateNorm(destination.license_plate)) {
+            throw Object.assign(new Error('no_change'), { httpStatus: 409 });
+          }
+
+          // These are intentionally the only mutable order columns.
+          const changed = (await tx.execute(sql`
+            UPDATE orders
+               SET plate=${destination.license_plate},
+                   vehicle_id=${destination.id},
+                   customer_id=${destination.attributed_user_id ?? null}
+             WHERE id=${orderId}
+               AND plate=${order.plate}
+               AND vehicle_id IS NOT DISTINCT FROM ${order.vehicle_id}
+            RETURNING id, plate, vehicle_id, customer_id
+          `)).rows[0];
+          if (!changed) throw Object.assign(new Error('source_changed'), { httpStatus: 409 });
+
+          let oldCarDeleted = false;
+          if (oldCar && oldCar.id !== destination.id &&
+              oldCar.user_id == null && oldCar.customer_id == null) {
+            const deleted = (await tx.execute(sql`
+              DELETE FROM cars
+               WHERE id=${oldCar.id}
+                 AND user_id IS NULL AND customer_id IS NULL
+                 AND NOT car_has_references(${oldCar.id})
+              RETURNING id
+            `)).rows[0];
+            oldCarDeleted = Boolean(deleted);
+          }
+
+          const audit = (await tx.execute(sql`
+            INSERT INTO order_plate_corrections (
+              order_id, old_plate, new_plate, old_vehicle_id, new_vehicle_id,
+              old_order_customer_id, new_order_customer_id,
+              old_vehicle_user_id, new_vehicle_user_id,
+              old_vehicle_customer_id, new_vehicle_customer_id,
+              corrected_by_staff_id, reason, old_car_deleted
+            ) VALUES (
+              ${orderId}, ${order.plate}, ${destination.license_plate},
+              ${order.vehicle_id}, ${destination.id},
+              ${order.customer_id}, ${destination.attributed_user_id ?? null},
+              ${oldCar?.user_id ?? null}, ${destination.user_id ?? null},
+              ${oldCar?.customer_id ?? null}, ${destination.customer_id ?? null},
+              ${staffId}, ${body.reason}, ${oldCarDeleted}
+            )
+            RETURNING *
+          `)).rows[0];
+          return { order: changed, correction: audit };
+        });
+        return res.json({ ok: true, ...result });
+      } catch (err: any) {
+        if (String(err?.code ?? '') === '23505') {
+          return res.status(409).json({ error: 'destination_plate_exists_use_vehicle_id' });
+        }
+        const status = err?.httpStatus ?? 500;
+        if (status === 500) console.error('[admin.order.plate-correction] failed:', err);
+        return res.status(status).json({ error: err?.message ?? 'correction_failed' });
+      }
+    });
+
   // GET /api/admin/orders/:id/receipt — full digital-receipt payload for a
   // single order so an admin can WhatsApp it to the customer. Returns the
   // same rich shape the customer dashboard uses (package + add-on line items,
