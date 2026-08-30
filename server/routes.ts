@@ -8562,6 +8562,12 @@ export async function registerRoutes(app: Express): Promise<Server> {
       });
     }
     const body = parsed.data;
+    // A missing package is only valid for the streamlined Unlimited
+    // subscription wash. Validate the order shape before payment-specific
+    // fields so cashiers see the actionable error first.
+    if (!body.package_id && body.payment_method !== 'subscription') {
+      return res.status(400).json({ error: 'package_required' });
+    }
     // Cash payments must record the cash tendered (mirrors the POS "Cash
     // received (required)" gate) so the drawer reconciles and change is
     // computed from a real figure rather than assumed-exact.
