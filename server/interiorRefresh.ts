@@ -314,6 +314,39 @@ export function registerInteriorRefreshRoutes(app: Express) {
     } catch (err) { dbError(res, "schedule", err); }
   });
 
+  app.get("/api/staff/interior-refresh/calendar", requireStaff, async (req, res) => {
+    const month = String(req.query.month ?? bruneiDate().slice(0, 7));
+    if (!/^\d{4}-(0[1-9]|1[0-2])$/.test(month)) {
+      return res.status(400).json({ error: "invalid_month" });
+    }
+    try {
+      const c = await config();
+      if (!c?.branch_id) return res.status(503).json({ error: "tungku_not_configured" });
+      if (!staffCanUseTungku(req, Number(c.branch_id))) {
+        return res.status(403).json({ error: "tungku_staff_only" });
+      }
+      const days = (await db.execute(sql`
+        SELECT
+          to_char((b.slot_start AT TIME ZONE 'Asia/Brunei')::date, 'YYYY-MM-DD') AS date,
+          COUNT(*)::int AS total,
+          COUNT(*) FILTER (WHERE b.status = 'booked')::int AS booked,
+          COUNT(*) FILTER (WHERE b.status = 'checked_in')::int AS checked_in,
+          COUNT(*) FILTER (WHERE b.status = 'completed')::int AS completed,
+          COUNT(*) FILTER (WHERE b.status = 'cancelled')::int AS cancelled,
+          COUNT(*) FILTER (WHERE b.status = 'no_show')::int AS no_show
+        FROM interior_refresh_bookings b
+        WHERE b.branch_id = ${c.branch_id}
+          AND (b.slot_start AT TIME ZONE 'Asia/Brunei')::date >= (${month} || '-01')::date
+          AND (b.slot_start AT TIME ZONE 'Asia/Brunei')::date
+            < ((${month} || '-01')::date + INTERVAL '1 month')
+        GROUP BY (b.slot_start AT TIME ZONE 'Asia/Brunei')::date
+        ORDER BY (b.slot_start AT TIME ZONE 'Asia/Brunei')::date
+      `)).rows;
+      res.set("Cache-Control", "no-store");
+      res.json({ month, timezone: INTERIOR_REFRESH.zone, days });
+    } catch (err) { dbError(res, "calendar", err); }
+  });
+
   const statusSchema = z.object({ status: z.enum(["checked_in", "completed", "cancelled", "no_show"]) });
   app.patch("/api/staff/interior-refresh/bookings/:id/status", requireStaff, async (req, res) => {
     const parsed = statusSchema.safeParse(req.body);

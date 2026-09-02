@@ -1,6 +1,6 @@
 import { useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { CalendarCheck2, Loader2, Settings2, Sparkles } from "lucide-react";
+import { CalendarCheck2, List, Loader2, Settings2, Sparkles } from "lucide-react";
 import { apiRequest } from "@/lib/queryClient";
 import { useToast } from "@/hooks/use-toast";
 import { Badge } from "@/components/ui/badge";
@@ -9,6 +9,7 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Switch } from "@/components/ui/switch";
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import {
   InteriorRefreshAppointment,
   InteriorRefreshStatus,
@@ -215,6 +216,7 @@ function DailySchedule() {
   const qc = useQueryClient();
   const { toast } = useToast();
   const [date, setDate] = useState(todayInBrunei);
+  const [view, setView] = useState("calendar");
 
   const schedule = useQuery<{
     bookings: Array<{
@@ -260,6 +262,7 @@ function DailySchedule() {
     },
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ["/api/staff/interior-refresh/schedule", date] });
+      qc.invalidateQueries({ queryKey: ["/api/staff/interior-refresh/calendar"] });
       qc.invalidateQueries({ queryKey: ["/api/admin/interior-refresh/report"] });
       toast({ title: "Appointment updated" });
     },
@@ -287,53 +290,182 @@ function DailySchedule() {
   return (
     <Card data-testid="panel-interior-refresh-schedule">
       <CardHeader className="pb-3">
-        <div className="flex flex-wrap items-center justify-between gap-3">
-          <CardTitle className="flex items-center gap-2"><CalendarCheck2 className="h-5 w-5 text-cuci-primary" />Tungku Interior Refresh schedule</CardTitle>
-          <Input aria-label="Schedule date" type="date" className="w-44" value={date} onChange={(e) => setDate(e.target.value)} />
-        </div>
+        <CardTitle className="flex items-center gap-2"><CalendarCheck2 className="h-5 w-5 text-cuci-primary" />Tungku Interior Refresh schedule</CardTitle>
       </CardHeader>
       <CardContent>
-        {schedule.isLoading && <p className="text-sm text-gray-500">Loading schedule…</p>}
-        {schedule.isError && <p className="text-sm text-red-700">The schedule could not be loaded.</p>}
-        {!schedule.isLoading && !schedule.isError && appointments.length === 0 && (
-          <div className="rounded-lg bg-gray-50 p-5 text-center text-sm text-gray-500">No Interior Refresh appointments for this date.</div>
-        )}
-        <div className="divide-y">
-          {appointments.map((appointment) => (
-            <div key={appointment.id} className="grid gap-3 py-4 md:grid-cols-[90px_1fr_auto] md:items-center">
-              <p className="text-xl font-black">{appointmentTime(appointment.starts_at)}</p>
-              <div>
-                <p className="font-bold">{appointment.customer_name ?? "Subscriber"} · {appointment.vehicle_plate}</p>
-                <p className="text-sm text-gray-500">
-                  {appointment.vehicle_label ?? "Covered vehicle"}
-                  {appointment.customer_phone ? ` · ${appointment.customer_phone}` : ""}
-                </p>
-                <Badge variant="outline" className="mt-1 capitalize">{appointment.status.replace("_", " ")}</Badge>
-              </div>
-              <div className="flex flex-wrap gap-2">
-                {allowedActions(appointment.status).map((status) => (
-                  <Button
-                    key={status}
-                    size="sm"
-                    variant={status === "checked_in" || status === "completed" ? "default" : "outline"}
-                    disabled={update.isPending}
-                    onClick={() => {
-                      const destructive = status === "cancelled" || status === "no_show";
-                      if (!destructive || window.confirm(`Mark this appointment ${actionLabels[status]?.toLowerCase()}?`)) {
-                        update.mutate({ id: appointment.id, status });
-                      }
-                    }}
-                    data-testid={`button-refresh-${status}-${appointment.id}`}
-                  >
-                    {actionLabels[status]}
-                  </Button>
-                ))}
-              </div>
+        <Tabs value={view} onValueChange={setView}>
+          <TabsList className="grid w-full max-w-sm grid-cols-2">
+            <TabsTrigger value="calendar"><CalendarCheck2 className="mr-1.5 h-4 w-4" />Calendar overview</TabsTrigger>
+            <TabsTrigger value="day"><List className="mr-1.5 h-4 w-4" />Daily schedule</TabsTrigger>
+          </TabsList>
+          <TabsContent value="calendar" className="mt-4">
+            <BookingCalendar
+              selectedDate={date}
+              onSelectDate={(next) => {
+                setDate(next);
+                setView("day");
+              }}
+            />
+          </TabsContent>
+          <TabsContent value="day" className="mt-4">
+            <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
+              <p className="text-sm font-bold text-gray-700">Appointments for selected day</p>
+              <Input aria-label="Schedule date" type="date" className="w-44" value={date} onChange={(e) => setDate(e.target.value)} />
             </div>
-          ))}
-        </div>
-        <p className="mt-3 flex items-center gap-1 text-xs text-gray-500"><Sparkles className="h-3 w-3" />Check-in and no-show permanently consume the cycle benefit. Cancellation releases it unless already checked in.</p>
+            {schedule.isLoading && <p className="text-sm text-gray-500">Loading schedule…</p>}
+            {schedule.isError && <p className="text-sm text-red-700">The schedule could not be loaded.</p>}
+            {!schedule.isLoading && !schedule.isError && appointments.length === 0 && (
+              <div className="rounded-lg bg-gray-50 p-5 text-center text-sm text-gray-500">No Interior Refresh appointments for this date.</div>
+            )}
+            <div className="divide-y">
+              {appointments.map((appointment) => (
+                <div key={appointment.id} className="grid gap-3 py-4 md:grid-cols-[90px_1fr_auto] md:items-center">
+                  <p className="text-xl font-black">{appointmentTime(appointment.starts_at)}</p>
+                  <div>
+                    <p className="font-bold">{appointment.customer_name ?? "Subscriber"} · {appointment.vehicle_plate}</p>
+                    <p className="text-sm text-gray-500">
+                      {appointment.vehicle_label ?? "Covered vehicle"}
+                      {appointment.customer_phone ? ` · ${appointment.customer_phone}` : ""}
+                    </p>
+                    <Badge variant="outline" className="mt-1 capitalize">{appointment.status.replace("_", " ")}</Badge>
+                  </div>
+                  <div className="flex flex-wrap gap-2">
+                    {allowedActions(appointment.status).map((status) => (
+                      <Button
+                        key={status}
+                        size="sm"
+                        variant={status === "checked_in" || status === "completed" ? "default" : "outline"}
+                        disabled={update.isPending}
+                        onClick={() => {
+                          const destructive = status === "cancelled" || status === "no_show";
+                          if (!destructive || window.confirm(`Mark this appointment ${actionLabels[status]?.toLowerCase()}?`)) {
+                            update.mutate({ id: appointment.id, status });
+                          }
+                        }}
+                        data-testid={`button-refresh-${status}-${appointment.id}`}
+                      >
+                        {actionLabels[status]}
+                      </Button>
+                    ))}
+                  </div>
+                </div>
+              ))}
+            </div>
+            <p className="mt-3 flex items-center gap-1 text-xs text-gray-500"><Sparkles className="h-3 w-3" />Check-in and no-show permanently consume the cycle benefit. Cancellation releases it unless already checked in.</p>
+          </TabsContent>
+        </Tabs>
       </CardContent>
     </Card>
+  );
+}
+
+type CalendarDay = {
+  date: string;
+  total: number;
+  booked: number;
+  checked_in: number;
+  completed: number;
+  cancelled: number;
+  no_show: number;
+};
+
+function BookingCalendar({
+  selectedDate,
+  onSelectDate,
+}: {
+  selectedDate: string;
+  onSelectDate: (date: string) => void;
+}) {
+  const [month, setMonth] = useState(selectedDate.slice(0, 7));
+  const calendar = useQuery<{ days: CalendarDay[] }>({
+    queryKey: ["/api/staff/interior-refresh/calendar", month],
+    queryFn: async () => {
+      const response = await fetch(
+        `/api/staff/interior-refresh/calendar?month=${encodeURIComponent(month)}`,
+        { credentials: "include" },
+      );
+      if (!response.ok) throw new Error(await response.text());
+      return response.json();
+    },
+  });
+
+  const [year, monthNumber] = month.split("-").map(Number);
+  const daysInMonth = new Date(Date.UTC(year, monthNumber, 0)).getUTCDate();
+  const mondayOffset = (new Date(Date.UTC(year, monthNumber - 1, 1)).getUTCDay() + 6) % 7;
+  const byDate = new Map((calendar.data?.days ?? []).map((day) => [day.date, day]));
+  const scheduledTotal = (calendar.data?.days ?? []).reduce(
+    (sum, day) => sum + day.booked + day.checked_in + day.completed + day.no_show,
+    0,
+  );
+
+  return (
+    <div data-testid="interior-refresh-calendar">
+      <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
+        <div>
+          <p className="font-bold text-gray-900">Monthly resource overview</p>
+          <p className="text-xs text-gray-500">{scheduledTotal} non-cancelled bookings this month. Tap a date for details.</p>
+        </div>
+        <Input
+          aria-label="Calendar month"
+          type="month"
+          className="w-44"
+          value={month}
+          onChange={(event) => setMonth(event.target.value)}
+        />
+      </div>
+      {calendar.isLoading && <p className="py-6 text-center text-sm text-gray-500">Loading calendar…</p>}
+      {calendar.isError && <p className="py-6 text-center text-sm text-red-700">The booking calendar could not be loaded.</p>}
+      {!calendar.isLoading && !calendar.isError && (
+        <>
+          <div className="grid grid-cols-7 border-l border-t text-center text-[10px] font-bold uppercase text-gray-500 sm:text-xs">
+            {["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"].map((label) => (
+              <div key={label} className="border-b border-r bg-gray-50 py-2">{label}</div>
+            ))}
+            {Array.from({ length: mondayOffset }).map((_, index) => (
+              <div key={`empty-${index}`} className="min-h-20 border-b border-r bg-gray-50/50 sm:min-h-24" />
+            ))}
+            {Array.from({ length: daysInMonth }, (_, index) => {
+              const dayNumber = index + 1;
+              const date = `${month}-${String(dayNumber).padStart(2, "0")}`;
+              const count = byDate.get(date);
+              const scheduled = (count?.booked ?? 0)
+                + (count?.checked_in ?? 0)
+                + (count?.completed ?? 0)
+                + (count?.no_show ?? 0);
+              return (
+                <button
+                  key={date}
+                  type="button"
+                  onClick={() => onSelectDate(date)}
+                  className={`min-h-20 border-b border-r p-1.5 text-left transition-colors hover:bg-purple-50 sm:min-h-24 sm:p-2 ${
+                    date === selectedDate ? "bg-purple-50 ring-2 ring-inset ring-cuci-primary" : "bg-white"
+                  }`}
+                  data-testid={`button-refresh-calendar-${date}`}
+                >
+                  <span className="text-xs font-bold text-gray-600 sm:text-sm">{dayNumber}</span>
+                  {count && (
+                    <div className="mt-1">
+                      <p className="text-lg font-black leading-none text-cuci-primary sm:text-2xl">{scheduled}</p>
+                      <p className="text-[9px] font-bold uppercase text-gray-500 sm:text-[10px]">bookings</p>
+                      {(count.cancelled > 0 || count.no_show > 0) && (
+                        <p className="mt-1 text-[9px] text-gray-500 sm:text-[10px]">
+                          {count.cancelled > 0 ? `${count.cancelled} cancelled` : ""}
+                          {count.cancelled > 0 && count.no_show > 0 ? " · " : ""}
+                          {count.no_show > 0 ? `${count.no_show} no-show` : ""}
+                        </p>
+                      )}
+                    </div>
+                  )}
+                </button>
+              );
+            })}
+          </div>
+          <div className="mt-3 flex flex-wrap gap-x-4 gap-y-1 text-xs text-gray-500">
+            <span><strong className="text-cuci-primary">Bookings</strong> excludes cancellations.</span>
+            <span>No-shows remain counted because the time slot was reserved.</span>
+          </div>
+        </>
+      )}
+    </div>
   );
 }
