@@ -300,10 +300,15 @@ export function registerInteriorRefreshRoutes(app: Express) {
       if (!staffCanUseTungku(req, Number(c.branch_id))) return res.status(403).json({ error: "tungku_staff_only" });
       const bookings = (await db.execute(sql`
         SELECT b.*, c.license_plate, c.brand, c.model,
-          u.first_name, u.last_name, u.phone_number
+          u.first_name, u.last_name, u.phone_number,
+          e.period_start AS benefit_period_start,
+          e.period_end AS benefit_period_end,
+          e.status AS benefit_status,
+          s.plan_id
         FROM interior_refresh_bookings b
         JOIN cars c ON c.id=b.vehicle_id
         JOIN subscriptions s ON s.id=b.subscription_id
+        JOIN interior_refresh_entitlements e ON e.id=b.entitlement_id
         LEFT JOIN users u ON u.id=s.user_id
         WHERE b.branch_id=${c.branch_id}
           AND (b.slot_start AT TIME ZONE 'Asia/Brunei')::date=${date}::date
@@ -342,8 +347,24 @@ export function registerInteriorRefreshRoutes(app: Express) {
         GROUP BY (b.slot_start AT TIME ZONE 'Asia/Brunei')::date
         ORDER BY (b.slot_start AT TIME ZONE 'Asia/Brunei')::date
       `)).rows;
+      const heatmap = (await db.execute(sql`
+        SELECT
+          EXTRACT(ISODOW FROM b.slot_start AT TIME ZONE 'Asia/Brunei')::int AS day_of_week,
+          EXTRACT(HOUR FROM b.slot_start AT TIME ZONE 'Asia/Brunei')::int AS hour,
+          COUNT(*)::int AS bookings
+        FROM interior_refresh_bookings b
+        WHERE b.branch_id = ${c.branch_id}
+          AND b.status <> 'cancelled'
+          AND (b.slot_start AT TIME ZONE 'Asia/Brunei')::date >= (${month} || '-01')::date
+          AND (b.slot_start AT TIME ZONE 'Asia/Brunei')::date
+            < ((${month} || '-01')::date + INTERVAL '1 month')
+        GROUP BY
+          EXTRACT(ISODOW FROM b.slot_start AT TIME ZONE 'Asia/Brunei'),
+          EXTRACT(HOUR FROM b.slot_start AT TIME ZONE 'Asia/Brunei')
+        ORDER BY day_of_week, hour
+      `)).rows;
       res.set("Cache-Control", "no-store");
-      res.json({ month, timezone: INTERIOR_REFRESH.zone, days });
+      res.json({ month, timezone: INTERIOR_REFRESH.zone, days, heatmap });
     } catch (err) { dbError(res, "calendar", err); }
   });
 

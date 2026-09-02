@@ -64,6 +64,7 @@ import {
   Tag,
   Wallet,
   Stamp,
+  Sparkles,
   Car,
   FlaskConical,
 } from "lucide-react";
@@ -85,6 +86,7 @@ import PaymentSetupTab from "@/components/admin/PaymentSetupTab";
 import StaffTab from "@/components/admin/StaffTab";
 import LoyaltyStampTab from "@/components/admin/LoyaltyStampTab";
 import SubscriptionTestTab from "@/components/admin/SubscriptionTestTab";
+import { InteriorRefreshPanel } from "@/components/admin/InteriorRefreshPanel";
 import CategoriesSection from "@/components/admin/CategoriesSection";
 import { SendReceiptButton } from "@/components/admin/SendReceiptButton";
 import { CorrectPlateDialog } from "@/components/admin/CorrectPlateDialog";
@@ -428,6 +430,12 @@ export default function Admin() {
                 </TabsTrigger>
               )}
               {isOwner && (
+                <TabsTrigger value="interior-refresh" className="flex items-center gap-2" data-testid="tab-interior-refresh">
+                  <Sparkles className="w-4 h-4" />
+                  Interior Refresh
+                </TabsTrigger>
+              )}
+              {isOwner && (
                 <TabsTrigger value="subscription-test" className="flex items-center gap-2" data-testid="tab-subscription-test">
                   <FlaskConical className="w-4 h-4" />
                   Subscription Test
@@ -540,6 +548,12 @@ export default function Admin() {
             {isOwner && (
               <TabsContent value="loyalty" className="mt-6">
                 <LoyaltyStampTab />
+              </TabsContent>
+            )}
+
+            {isOwner && (
+              <TabsContent value="interior-refresh" className="mt-6">
+                <InteriorRefreshPanel role={role ?? "owner"} />
               </TabsContent>
             )}
 

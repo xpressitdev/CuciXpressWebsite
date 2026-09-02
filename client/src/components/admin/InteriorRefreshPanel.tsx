@@ -299,13 +299,7 @@ function DailySchedule() {
             <TabsTrigger value="day"><List className="mr-1.5 h-4 w-4" />Daily schedule</TabsTrigger>
           </TabsList>
           <TabsContent value="calendar" className="mt-4">
-            <BookingCalendar
-              selectedDate={date}
-              onSelectDate={(next) => {
-                setDate(next);
-                setView("day");
-              }}
-            />
+            <BookingHeatmap />
           </TabsContent>
           <TabsContent value="day" className="mt-4">
             <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
@@ -369,15 +363,15 @@ type CalendarDay = {
   no_show: number;
 };
 
-function BookingCalendar({
-  selectedDate,
-  onSelectDate,
-}: {
-  selectedDate: string;
-  onSelectDate: (date: string) => void;
-}) {
-  const [month, setMonth] = useState(selectedDate.slice(0, 7));
-  const calendar = useQuery<{ days: CalendarDay[] }>({
+type HeatmapCell = {
+  day_of_week: number;
+  hour: number;
+  bookings: number;
+};
+
+function BookingHeatmap() {
+  const [month, setMonth] = useState(todayInBrunei().slice(0, 7));
+  const calendar = useQuery<{ days: CalendarDay[]; heatmap: HeatmapCell[] }>({
     queryKey: ["/api/staff/interior-refresh/calendar", month],
     queryFn: async () => {
       const response = await fetch(
@@ -389,21 +383,28 @@ function BookingCalendar({
     },
   });
 
-  const [year, monthNumber] = month.split("-").map(Number);
-  const daysInMonth = new Date(Date.UTC(year, monthNumber, 0)).getUTCDate();
-  const mondayOffset = (new Date(Date.UTC(year, monthNumber - 1, 1)).getUTCDay() + 6) % 7;
-  const byDate = new Map((calendar.data?.days ?? []).map((day) => [day.date, day]));
   const scheduledTotal = (calendar.data?.days ?? []).reduce(
     (sum, day) => sum + day.booked + day.checked_in + day.completed + day.no_show,
     0,
   );
+  const hours = Array.from({ length: 11 }, (_, index) => index + 8);
+  const weekdays = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"];
+  const bySlot = new Map(
+    (calendar.data?.heatmap ?? []).map((cell) => [
+      `${cell.day_of_week}-${cell.hour}`,
+      Number(cell.bookings),
+    ]),
+  );
+  const busiest = Math.max(1, ...Array.from(bySlot.values()));
 
   return (
-    <div data-testid="interior-refresh-calendar">
-      <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
+    <div data-testid="interior-refresh-heatmap">
+      <div className="mb-3 flex flex-wrap items-center justify-between gap-3">
         <div>
-          <p className="font-bold text-gray-900">Monthly resource overview</p>
-          <p className="text-xs text-gray-500">{scheduledTotal} non-cancelled bookings this month. Tap a date for details.</p>
+          <p className="font-bold text-gray-900">Booking heatmap</p>
+          <p className="text-xs text-gray-500">
+            {scheduledTotal} non-cancelled bookings. Darker blocks show busier Tungku periods.
+          </p>
         </div>
         <Input
           aria-label="Calendar month"
@@ -417,52 +418,50 @@ function BookingCalendar({
       {calendar.isError && <p className="py-6 text-center text-sm text-red-700">The booking calendar could not be loaded.</p>}
       {!calendar.isLoading && !calendar.isError && (
         <>
-          <div className="grid grid-cols-7 border-l border-t text-center text-[10px] font-bold uppercase text-gray-500 sm:text-xs">
-            {["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"].map((label) => (
-              <div key={label} className="border-b border-r bg-gray-50 py-2">{label}</div>
-            ))}
-            {Array.from({ length: mondayOffset }).map((_, index) => (
-              <div key={`empty-${index}`} className="min-h-20 border-b border-r bg-gray-50/50 sm:min-h-24" />
-            ))}
-            {Array.from({ length: daysInMonth }, (_, index) => {
-              const dayNumber = index + 1;
-              const date = `${month}-${String(dayNumber).padStart(2, "0")}`;
-              const count = byDate.get(date);
-              const scheduled = (count?.booked ?? 0)
-                + (count?.checked_in ?? 0)
-                + (count?.completed ?? 0)
-                + (count?.no_show ?? 0);
-              return (
-                <button
-                  key={date}
-                  type="button"
-                  onClick={() => onSelectDate(date)}
-                  className={`min-h-20 border-b border-r p-1.5 text-left transition-colors hover:bg-purple-50 sm:min-h-24 sm:p-2 ${
-                    date === selectedDate ? "bg-purple-50 ring-2 ring-inset ring-cuci-primary" : "bg-white"
-                  }`}
-                  data-testid={`button-refresh-calendar-${date}`}
-                >
-                  <span className="text-xs font-bold text-gray-600 sm:text-sm">{dayNumber}</span>
-                  {count && (
-                    <div className="mt-1">
-                      <p className="text-lg font-black leading-none text-cuci-primary sm:text-2xl">{scheduled}</p>
-                      <p className="text-[9px] font-bold uppercase text-gray-500 sm:text-[10px]">bookings</p>
-                      {(count.cancelled > 0 || count.no_show > 0) && (
-                        <p className="mt-1 text-[9px] text-gray-500 sm:text-[10px]">
-                          {count.cancelled > 0 ? `${count.cancelled} cancelled` : ""}
-                          {count.cancelled > 0 && count.no_show > 0 ? " · " : ""}
-                          {count.no_show > 0 ? `${count.no_show} no-show` : ""}
-                        </p>
-                      )}
+          <div className="overflow-x-auto">
+            <div className="grid min-w-[540px] grid-cols-[42px_repeat(11,minmax(36px,1fr))] gap-1 text-center text-[10px]">
+              <div />
+              {hours.map((hour) => (
+                <div key={hour} className="pb-1 font-bold text-gray-500">
+                  {hour > 12 ? hour - 12 : hour}{hour >= 12 ? "p" : "a"}
+                </div>
+              ))}
+              {weekdays.flatMap((weekday, dayIndex) => [
+                <div key={`${weekday}-label`} className="flex items-center font-bold text-gray-600">
+                  {weekday}
+                </div>,
+                ...hours.map((hour) => {
+                  const bookings = bySlot.get(`${dayIndex + 1}-${hour}`) ?? 0;
+                  const intensity = bookings === 0 ? 0 : 0.18 + (bookings / busiest) * 0.72;
+                  return (
+                    <div
+                      key={`${weekday}-${hour}`}
+                      className="grid h-8 place-items-center rounded-sm border border-purple-100 font-bold"
+                      style={{
+                        backgroundColor: bookings === 0
+                          ? "rgb(249 250 251)"
+                          : `rgba(109, 40, 217, ${intensity})`,
+                        color: intensity > 0.55 ? "white" : "rgb(55 65 81)",
+                      }}
+                      title={`${weekday} ${hour}:00 — ${bookings} booking${bookings === 1 ? "" : "s"}`}
+                    >
+                      {bookings || ""}
                     </div>
-                  )}
-                </button>
-              );
-            })}
+                  );
+                }),
+              ])}
+            </div>
           </div>
-          <div className="mt-3 flex flex-wrap gap-x-4 gap-y-1 text-xs text-gray-500">
-            <span><strong className="text-cuci-primary">Bookings</strong> excludes cancellations.</span>
-            <span>No-shows remain counted because the time slot was reserved.</span>
+          <div className="mt-3 flex items-center gap-2 text-xs text-gray-500">
+            <span>Quiet</span>
+            {[0.2, 0.4, 0.6, 0.85].map((opacity) => (
+              <span
+                key={opacity}
+                className="h-3 w-6 rounded-sm"
+                style={{ backgroundColor: `rgba(109, 40, 217, ${opacity})` }}
+              />
+            ))}
+            <span>Busy</span>
           </div>
         </>
       )}
