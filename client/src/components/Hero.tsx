@@ -5,7 +5,7 @@ import LiveQueueWidget from "@/components/LiveQueueWidget";
 import GoogleReviewBadge from "@/components/GoogleReviewBadge";
 
 export default function Hero() {
-  const [location] = useLocation();
+  const [location, setLocation] = useLocation();
   const [expanded, setExpanded] = useState(false);
 
   const handleNavigation = (sectionId: string) => {
@@ -75,10 +75,11 @@ export default function Hero() {
                   scale: 0.95,
                   boxShadow: "2px 2px 0px 0px rgba(0,0,0,0.9)"
                 }}
-                onClick={() => handleNavigation("service-pricing")}
+                onClick={() => setLocation("/login")}
                 className="bg-cuci-secondary text-white px-8 py-4 rounded-lg text-lg font-black border-2 border-black shadow-[4px_4px_0px_0px_rgba(0,0,0,0.9)] transition-all duration-200"
+                data-testid="button-hero-customer-login"
               >
-                View Pricing →
+                Login or Register →
               </motion.button>
             </div>
             <GoogleReviewBadge />

@@ -131,11 +131,21 @@ export default function Navigation() {
             )}
           </div>
 
-          {/* Mobile menu button */}
-          <div className="md:hidden">
+          {/* Keep customer account access visible on mobile instead of hiding
+              the site's main returning-customer action inside the menu. */}
+          <div className="md:hidden flex items-center gap-2">
+            <Link
+              href={isLoggedIn ? "/dashboard" : "/login"}
+              className="cuci-cta inline-flex items-center gap-1.5 rounded-full border-2 border-black bg-cuci-secondary px-3 py-2 text-xs font-extrabold text-black shadow-[2px_2px_0_0_#000]"
+              data-testid={isLoggedIn ? "link-nav-dashboard-mobile-visible" : "link-nav-signin-mobile-visible"}
+            >
+              {isLoggedIn ? <User className="h-3.5 w-3.5" /> : <LogIn className="h-3.5 w-3.5" />}
+              {isLoggedIn ? "My account" : "Login"}
+            </Link>
             <button
               onClick={() => setIsMobileMenuOpen(!isMobileMenuOpen)}
-              className="text-gray-700 hover:text-cuci-primary focus:outline-none focus:text-cuci-primary transition-colors"
+              className="p-1 text-gray-700 hover:text-cuci-primary focus:outline-none focus:text-cuci-primary transition-colors"
+              aria-label={isMobileMenuOpen ? "Close navigation menu" : "Open navigation menu"}
               data-testid="button-nav-mobile-toggle"
             >
               {isMobileMenuOpen ? (
