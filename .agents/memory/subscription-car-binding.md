@@ -34,3 +34,16 @@ the one amount actually charged.
 The start route rejects (`409 plate_in_use`) a plate already owned by a different
 user/customer so a payer can't bind a membership to someone else's car. Unclaimed
 walk-in cars (user_id+customer_id NULL) are claimed on finalize.
+
+## Rule 3: renewal follows the explicit covered plate set
+Every billing, cancellation, and expiry transition must update all per-car
+memberships selected for the subscription, not only its primary membership.
+Never infer that set from every car owned by the customer.
+
+**Why:** Family has one subscription/payment but multiple vehicle entitlements;
+updating only the primary car leaves extra cars active after cancellation or
+expired after a successful renewal. Inferring all owned cars grants coverage that
+was never purchased.
+
+**How to apply:** persist the normalized selected plates on the subscription and
+use that explicit set plus the primary membership anchor for lifecycle updates.

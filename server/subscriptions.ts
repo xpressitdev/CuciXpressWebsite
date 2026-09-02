@@ -27,6 +27,7 @@ import {
 } from "./cybersource";
 import { getSubscriptionPlan } from "@shared/subscriptionPlans";
 import { processPocketPayPayment } from "./payment";
+import { registerInteriorRefreshRoutes } from "./interiorRefresh";
 
 // Renewal worker tuning.
 const POLL_INTERVAL_MS = 15 * 60_000; // every 15 minutes
@@ -54,6 +55,50 @@ function isUniqueViolation(err: any): boolean {
  */
 function normalizePlate(s: string): string {
   return s.toUpperCase().replace(/\s+/g, "");
+}
+
+/** Parse the selected covered cars. The stored representation is comma joined. */
+function coveredPlates(
+  carPlate: string,
+  plan: { maxVehicles: number },
+): string[] {
+  const plates = Array.from(
+    new Set(
+      carPlate
+        .split(",")
+        .map(normalizePlate)
+        .filter(Boolean),
+    ),
+  );
+  if (!plates.length) throw new Error("plate_required");
+  if (plates.length > plan.maxVehicles) throw new Error("too_many_plates");
+  return plates;
+}
+
+/**
+ * Refuse to attach a subscription to a car claimed by another account. This is
+ * deliberately checked before a card charge; resolveCarId repeats the ownership
+ * check while writing, so a concurrent claim cannot bypass it.
+ */
+async function assertPlatesAvailable(
+  executor: any,
+  opts: { plates: string[]; userId: number; customerId: number },
+): Promise<void> {
+  const platesSql = sql.join(opts.plates.map((p) => sql`${p}`), sql`, `);
+  const foreign = (await executor.execute(sql`
+    SELECT license_plate FROM cars
+     WHERE UPPER(REGEXP_REPLACE(license_plate, '\\s+', '', 'g')) IN (${platesSql})
+       AND (
+            (user_id IS NOT NULL AND user_id <> ${opts.userId})
+         OR (customer_id IS NOT NULL AND customer_id <> ${opts.customerId})
+       )
+     LIMIT 1
+  `)).rows[0] as any;
+  if (foreign) {
+    const error: any = new Error("plate_in_use");
+    error.plate = foreign.license_plate;
+    throw error;
+  }
 }
 
 /**
@@ -85,15 +130,26 @@ async function resolveCarId(
   `)).rows[0] as any;
   if (claimed) return Number(claimed.id);
 
-  // 2. Reuse a car this customer/user already owns.
+  // 2. Reuse a car this customer/user already owns. Both identifiers must be
+  // compatible when populated: matching only one must not let a stale or
+  // malicious request cross an account boundary.
   const owned = (await tx.execute(sql`
     SELECT id FROM cars
      WHERE UPPER(REGEXP_REPLACE(license_plate, '\\s+', '', 'g')) = ${plateNorm}
-       AND (customer_id = ${customerId}
-            ${userId !== null ? sql`OR user_id = ${userId}` : sql``})
+       AND (customer_id IS NULL OR customer_id = ${customerId})
+       AND (user_id IS NULL ${userId !== null ? sql`OR user_id = ${userId}` : sql``})
      LIMIT 1
   `)).rows[0] as any;
-  if (owned) return Number(owned.id);
+  if (owned) {
+    await tx.execute(sql`
+      UPDATE cars
+         SET user_id = COALESCE(user_id, ${userId}),
+             customer_id = COALESCE(customer_id, ${customerId}),
+             last_seen_at = now()
+       WHERE id = ${owned.id}
+    `);
+    return Number(owned.id);
+  }
 
   // 3. Insert a fresh car. A 23505 here means a concurrent writer created it
   //    between our checks; re-resolve deterministically.
@@ -107,13 +163,43 @@ async function resolveCarId(
   } catch (err: any) {
     if (!isUniqueViolation(err)) throw err;
     const again = (await tx.execute(sql`
-      SELECT id FROM cars
+      SELECT id, user_id, customer_id FROM cars
        WHERE UPPER(REGEXP_REPLACE(license_plate, '\\s+', '', 'g')) = ${plateNorm}
        LIMIT 1
     `)).rows[0] as any;
-    if (again) return Number(again.id);
+    if (again) {
+      if (
+        (again.user_id != null && Number(again.user_id) !== userId) ||
+        (again.customer_id != null && Number(again.customer_id) !== customerId)
+      ) {
+        throw new Error("plate_in_use");
+      }
+      return Number(again.id);
+    }
     throw err;
   }
+}
+
+/** All per-car memberships maintained by this subscription's selected plates. */
+function subscriptionMembershipsWhere(subId: string) {
+  return sql`
+    (
+      -- Legacy subscriptions only recorded the primary membership. Keep that
+      -- one renewable, but never infer coverage from every customer car.
+      id = (SELECT membership_id FROM subscriptions WHERE id = ${subId})
+      OR (
+        source = 'subscription'
+        AND vehicle_id IN (
+          SELECT c.id
+            FROM cars c
+            JOIN subscriptions s ON s.id = ${subId}
+           WHERE c.customer_id = s.customer_id
+             AND UPPER(REGEXP_REPLACE(c.license_plate, '\\s+', '', 'g'))
+                 = ANY(string_to_array(COALESCE(s.car_plate, ''), ','))
+        )
+      )
+    )
+  `;
 }
 
 /** Add one calendar month (clamps to month length, e.g. Jan 31 -> Feb 28). */
@@ -295,6 +381,7 @@ export async function activatePocketPaySubscription(
 // ---------------------------------------------------------------------------
 
 export function registerSubscriptionRoutes(app: Express) {
+  registerInteriorRefreshRoutes(app);
   // ---- POST /api/subscriptions/capture-context --------------------------
   // Returns the Unified Checkout capture-context JWT for the chosen plan.
   const captureSchema = z.object({ plan_id: z.string() });
@@ -349,6 +436,10 @@ export function registerSubscriptionRoutes(app: Express) {
     plan_id: z.string(),
     transientToken: z.string().min(10),
     phone: z.string().trim().min(3).max(40),
+    // Kept as the comma-separated form used by Pocket Pay for API
+    // compatibility. It is authoritative server-side, not inferred from all
+    // cars owned by the customer.
+    car_plate: z.string().trim().min(1).max(120),
   });
 
   app.post("/api/subscriptions/confirm", requireLuciaUser, async (req, res) => {
@@ -367,10 +458,35 @@ export function registerSubscriptionRoutes(app: Express) {
 
     const userId = Number(req.lucia!.user!.id);
     const phone = parsed.data.phone.replace(/\s+/g, "");
+    let plates: string[];
+    try {
+      plates = coveredPlates(parsed.data.car_plate, plan);
+    } catch (err: any) {
+      return res.status(400).json({
+        error: String(err?.message) === "too_many_plates" ? "too_many_plates" : "plate_required",
+        ...(String(err?.message) === "too_many_plates" ? { max: plan.maxVehicles } : {}),
+      });
+    }
+
+    // Resolve and validate before creating the charge claim. This is also what
+    // lets the post-charge transaction bind a real car to every membership.
+    let customerId: number;
+    try {
+      customerId = await resolveCustomerId(userId, phone);
+      await assertPlatesAvailable(db, { plates, userId, customerId });
+    } catch (err: any) {
+      if (String(err?.message) === "phone_belongs_to_other_customer") {
+        return res.status(409).json({ error: "phone_in_use" });
+      }
+      if (String(err?.message) === "plate_in_use") {
+        return res.status(409).json({ error: "plate_in_use", plate: err.plate });
+      }
+      console.error("[subscriptions.confirm] customer/car validation failed:", err?.message ?? err);
+      return res.status(500).json({ error: "customer_resolve_failed" });
+    }
 
     const now = new Date();
     const periodEnd = addOneMonth(now);
-    const membershipId = genId("mem");
     const subId = genId("sub");
 
     // 1. CLAIM a slot BEFORE charging. Insert an 'incomplete' subscription row;
@@ -387,11 +503,12 @@ export function registerSubscriptionRoutes(app: Express) {
       `);
       await db.execute(sql`
         INSERT INTO subscriptions (
-          id, user_id, plan_id, status, price_cents, currency,
+          id, user_id, customer_id, plan_id, status, price_cents, currency, car_plate,
           current_period_start, current_period_end, next_billing_at
         ) VALUES (
-          ${subId}, ${userId}, ${plan.id}, 'incomplete',
+          ${subId}, ${userId}, ${customerId}, ${plan.id}, 'incomplete',
           ${plan.priceCents}, ${plan.currency},
+          ${plates.join(",")},
           ${now.toISOString()}, ${now.toISOString()}, ${now.toISOString()}
         )
       `);
@@ -456,59 +573,30 @@ export function registerSubscriptionRoutes(app: Express) {
     // 3. Promote the claimed row to 'active' and persist everything atomically.
     try {
       await db.transaction(async (tx) => {
-        // Ensure a customers row exists for this user (claim-on-login pattern:
-        // adopt an unclaimed row with the same phone rather than colliding with
-        // the unique phone constraint).
-        let customerId: number | null = null;
-        const byUser = (await tx.execute(sql`
-          SELECT id FROM customers WHERE user_id = ${userId} LIMIT 1
-        `)).rows[0] as any;
-        if (byUser) {
-          customerId = Number(byUser.id);
-        } else {
-          const byPhone = (await tx.execute(sql`
-            SELECT id, user_id FROM customers WHERE phone = ${phone} LIMIT 1
-          `)).rows[0] as any;
-          if (byPhone && byPhone.user_id == null) {
-            await tx.execute(sql`
-              UPDATE customers SET user_id = ${userId}, updated_at = now()
-               WHERE id = ${byPhone.id}
-            `);
-            customerId = Number(byPhone.id);
-          } else if (byPhone && Number(byPhone.user_id) === userId) {
-            customerId = Number(byPhone.id);
-          } else if (byPhone) {
-            throw new Error("phone_belongs_to_other_customer");
-          } else {
-            const uname = (await tx.execute(sql`
-              SELECT COALESCE(NULLIF(TRIM(CONCAT_WS(' ', first_name, last_name)), ''),
-                              'Member') AS name
-                FROM users WHERE id = ${userId} LIMIT 1
-            `)).rows[0] as any;
-            const inserted = (await tx.execute(sql`
-              INSERT INTO customers (phone, name, user_id)
-              VALUES (${phone}, ${uname?.name ?? "Member"}, ${userId})
-              RETURNING id
-            `)).rows[0] as any;
-            customerId = Number(inserted.id);
-          }
+        // Repeat the ownership guard inside the write transaction, then create
+        // one vehicle-bound unlimited membership per explicitly selected car.
+        await assertPlatesAvailable(tx, { plates, userId, customerId });
+        let membershipId: string | null = null;
+        for (const plate of plates) {
+          const vehicleId = await resolveCarId(tx, { userId, customerId, plate });
+          const id = genId("mem");
+          await tx.execute(sql`
+            INSERT INTO memberships (
+              id, customer_id, vehicle_id, kind, total_washes, remaining_washes,
+              price_cents, status, source, expires_at, sold_by_staff_id, sold_at_branch_id
+            ) VALUES (
+              ${id}, ${customerId}, ${vehicleId}, 'unlimited', 0, 0,
+              ${membershipId === null ? plan.priceCents : 0}, 'active', 'subscription',
+              ${periodEnd.toISOString()}, NULL, NULL
+            )
+          `);
+          if (membershipId === null) membershipId = id;
         }
-
-        // The unlimited membership the subscription maintains.
-        await tx.execute(sql`
-          INSERT INTO memberships (
-            id, customer_id, vehicle_id, kind, total_washes, remaining_washes,
-            price_cents, status, source, expires_at, sold_by_staff_id, sold_at_branch_id
-          ) VALUES (
-            ${membershipId}, ${customerId}, NULL, 'unlimited', 0, 0,
-            ${plan.priceCents}, 'active', 'subscription', ${periodEnd.toISOString()}, NULL, NULL
-          )
-        `);
+        if (!membershipId) throw new Error("plate_required");
 
         // Promote the claimed 'incomplete' row to a live subscription.
         await tx.execute(sql`
           UPDATE subscriptions SET
-            customer_id = ${customerId},
             status = 'active',
             cybersource_customer_id = ${pay.customerId ?? null},
             cybersource_instrument_id = ${pay.instrumentId ?? null},
@@ -592,21 +680,13 @@ export function registerSubscriptionRoutes(app: Express) {
 
       // The membership is per-CAR. Split the (comma-separated) plates, normalise
       // them, and de-duplicate. Unlimited covers 1 car; Family up to maxVehicles.
-      const plates = Array.from(
-        new Set(
-          parsed.data.car_plate
-            .split(",")
-            .map((p) => normalizePlate(p))
-            .filter(Boolean),
-        ),
-      );
-      if (plates.length === 0) {
-        return res.status(400).json({ error: "plate_required" });
-      }
-      if (plates.length > plan.maxVehicles) {
+      let plates: string[];
+      try {
+        plates = coveredPlates(parsed.data.car_plate, plan);
+      } catch (err: any) {
         return res.status(400).json({
-          error: "too_many_plates",
-          max: plan.maxVehicles,
+          error: String(err?.message) === "too_many_plates" ? "too_many_plates" : "plate_required",
+          ...(String(err?.message) === "too_many_plates" ? { max: plan.maxVehicles } : {}),
         });
       }
 
@@ -637,20 +717,13 @@ export function registerSubscriptionRoutes(app: Express) {
       // Don't let a customer pay for a plate that already belongs to a DIFFERENT
       // account — the finalizer could not claim it, and binding a membership to
       // someone else's car would be wrong. Unclaimed and own-cars are fine.
-      const platesSql = sql.join(plates.map((p) => sql`${p}`), sql`, `);
-      const foreignPlate = (await db.execute(sql`
-        SELECT license_plate FROM cars
-         WHERE UPPER(REGEXP_REPLACE(license_plate, '\\s+', '', 'g')) IN (${platesSql})
-           AND (
-                (user_id IS NOT NULL AND user_id <> ${userId})
-             OR (customer_id IS NOT NULL AND customer_id <> ${customerId})
-           )
-         LIMIT 1
-      `)).rows[0] as any;
-      if (foreignPlate) {
+      try {
+        await assertPlatesAvailable(db, { plates, userId, customerId });
+      } catch (err: any) {
+        if (String(err?.message) !== "plate_in_use") throw err;
         return res.status(409).json({
           error: "plate_in_use",
-          plate: foreignPlate.license_plate,
+          plate: err.plate,
         });
       }
 
@@ -1126,12 +1199,10 @@ export async function renewDueOnce(): Promise<{ charged: number; failed: number 
           UPDATE subscriptions SET status = 'cancelled', updated_at = now()
            WHERE id = ${s.id}
         `);
-        if (s.membership_id) {
-          await db.execute(sql`
-            UPDATE memberships SET status = 'expired'
-             WHERE id = ${s.membership_id} AND status = 'active'
-          `);
-        }
+        await db.execute(sql`
+          UPDATE memberships SET status = 'expired'
+           WHERE status = 'active' AND ${subscriptionMembershipsWhere(String(s.id))}
+        `);
         continue;
       }
 
@@ -1140,6 +1211,10 @@ export async function renewDueOnce(): Promise<{ charged: number; failed: number 
         await db.execute(sql`
           UPDATE subscriptions SET status = 'cancelled', updated_at = now()
            WHERE id = ${s.id}
+        `);
+        await db.execute(sql`
+          UPDATE memberships SET status = 'expired'
+           WHERE status = 'active' AND ${subscriptionMembershipsWhere(String(s.id))}
         `);
         continue;
       }
@@ -1206,13 +1281,11 @@ export async function renewDueOnce(): Promise<{ charged: number; failed: number 
                    updated_at = now()
              WHERE id = ${s.id}
           `);
-          if (s.membership_id) {
-            await tx.execute(sql`
-              UPDATE memberships
-                 SET status = 'active', expires_at = ${periodEnd.toISOString()}
-               WHERE id = ${s.membership_id}
-            `);
-          }
+          await tx.execute(sql`
+            UPDATE memberships
+               SET status = 'active', expires_at = ${periodEnd.toISOString()}
+             WHERE ${subscriptionMembershipsWhere(String(s.id))}
+          `);
         });
         charged++;
       } else {
@@ -1235,10 +1308,10 @@ export async function renewDueOnce(): Promise<{ charged: number; failed: number 
                    updated_at = now()
              WHERE id = ${s.id}
           `);
-          if (giveUp && s.membership_id) {
+          if (giveUp) {
             await tx.execute(sql`
               UPDATE memberships SET status = 'expired'
-               WHERE id = ${s.membership_id} AND status = 'active'
+               WHERE status = 'active' AND ${subscriptionMembershipsWhere(String(s.id))}
             `);
           }
         });

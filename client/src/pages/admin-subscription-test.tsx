@@ -23,6 +23,7 @@ export default function AdminSubscriptionTest() {
   const { isAuthenticated: isStaff, isLoading: staffLoading } = useStaffAuth();
   const [planId, setPlanId] = useState("unlimited");
   const [phone, setPhone] = useState("");
+  const [carPlate, setCarPlate] = useState("");
   const [showCheckout, setShowCheckout] = useState(false);
 
   const { data: me, isLoading: meLoading } = useQuery<CustomerMe>({
@@ -118,6 +119,18 @@ export default function AdminSubscriptionTest() {
                   data-testid="input-test-phone"
                 />
               </div>
+              <div className="space-y-1.5">
+                <Label htmlFor="covered-plates">
+                  Covered {planId === "family" ? "plates (comma-separated, up to 3)" : "plate"}
+                </Label>
+                <Input
+                  id="covered-plates"
+                  value={carPlate}
+                  onChange={(e) => setCarPlate(e.target.value)}
+                  placeholder={planId === "family" ? "BAA1234, BBB5678" : "BAA1234"}
+                  data-testid="input-test-covered-plates"
+                />
+              </div>
               <Button
                 className="w-full bg-cuci-primary text-white"
                 onClick={() => {
@@ -125,6 +138,14 @@ export default function AdminSubscriptionTest() {
                     toast({
                       title: "Phone required",
                       description: "Enter a phone number for the test charge.",
+                      variant: "destructive",
+                    });
+                    return;
+                  }
+                  if (!carPlate.trim()) {
+                    toast({
+                      title: "Vehicle plate required",
+                      description: "Enter the vehicle covered by this subscription.",
                       variant: "destructive",
                     });
                     return;
@@ -146,6 +167,7 @@ export default function AdminSubscriptionTest() {
               <SubscriptionCheckout
                 planId={planId}
                 phone={phone.trim()}
+                carPlate={carPlate.trim()}
                 onSuccess={() => {
                   toast({
                     title: "Test subscription active 🎉",

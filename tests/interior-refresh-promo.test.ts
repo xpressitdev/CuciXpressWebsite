@@ -1,0 +1,294 @@
+import { afterAll, beforeAll, describe, expect, it } from "vitest";
+import request from "supertest";
+import { Pool, neonConfig } from "@neondatabase/serverless";
+import ws from "ws";
+import type { Express } from "express";
+import { readFile } from "node:fs/promises";
+import { createTestApp } from "./helpers/app";
+import { addCalendarDays, bruneiDate, bruneiSlotInstant } from "../server/interiorRefreshRules";
+
+neonConfig.webSocketConstructor = ws as any;
+
+// This is deliberately a staging-DB integration suite.  It tests the trigger
+// and exclusion constraint as well as the authenticated HTTP handlers.
+const DB_URL = process.env.DATABASE_URL ?? "";
+const rid = () => Math.random().toString(36).slice(2, 10);
+
+describe("Task 34: subscriber Interior Refresh", () => {
+  let pool: Pool;
+  let app: Express;
+  const suffix = rid();
+  const ids = {
+    user: [] as number[], customer: [] as number[], car: [] as number[],
+    sub: [] as string[], invoice: [] as string[], staff: [`ir_staff_${suffix}`],
+    sessions: [] as string[], booking: [] as string[],
+  };
+  let branchId: number;
+  let originalPromotion: any;
+  let userId: number, carId: number, subId: string, entitlementId: string;
+  const customerSession = `ir_customer_${suffix}`;
+  const staffSession = `ir_staff_session_${suffix}`;
+  const otherBranchStaffSession = `ir_other_staff_session_${suffix}`;
+  const customerCookie = `cx_session=${customerSession}`;
+  const staffCookie = `cx_staff_session=${staffSession}`;
+
+  const futureDate = () => addCalendarDays(bruneiDate(), 2);
+  const periodStart = () => new Date(Date.now() - 3_600_000).toISOString();
+  const periodEnd = () => new Date(Date.now() + 20 * 86400_000).toISOString();
+
+  async function seedAccount(plan = "unlimited", isTest = false) {
+    const n = ids.user.length;
+    const u = await pool.query(
+      `INSERT INTO users (first_name,last_name,email,password) VALUES ('IR','Test',$1,'x') RETURNING id`,
+      [`ir_${suffix}_${n}@test.local`],
+    );
+    const uid = Number(u.rows[0].id); ids.user.push(uid);
+    const c = await pool.query(
+      `INSERT INTO customers (phone,name,user_id) VALUES ($1,$2,$3) RETURNING id`,
+      [`+673ir${suffix}${n}`, `IR ${suffix}`, uid],
+    );
+    ids.customer.push(Number(c.rows[0].id));
+    const car = await pool.query(
+      `INSERT INTO cars (license_plate,customer_id,user_id,last_seen_at) VALUES ($1,$2,$3,now()) RETURNING id`,
+      [`IR${suffix.slice(0, 5).toUpperCase()}${n}`, c.rows[0].id, uid],
+    );
+    const vehicle = Number(car.rows[0].id); ids.car.push(vehicle);
+    const sub = `ir_sub_${suffix}_${n}`; ids.sub.push(sub);
+    await pool.query(
+      `INSERT INTO subscriptions
+       (id,user_id,customer_id,plan_id,status,price_cents,current_period_start,current_period_end,next_billing_at,car_plate,is_test)
+       VALUES ($1,$2,$3,$4,'active',1000,now()-interval '1 hour',now()+interval '30 days',now()+interval '30 days',$5,$6)`,
+      [sub, uid, c.rows[0].id, plan, (await pool.query(`SELECT license_plate FROM cars WHERE id=$1`, [vehicle])).rows[0].license_plate, isTest],
+    );
+    return { uid, vehicle, sub };
+  }
+
+  async function paidInvoice(subscriptionId: string, tag: string) {
+    const id = `ir_inv_${suffix}_${tag}`; ids.invoice.push(id);
+    await pool.query(
+      `INSERT INTO subscription_invoices (id,subscription_id,amount_cents,status,period_start,period_end)
+       VALUES ($1,$2,1000,'paid',$3,$4)`,
+      [id, subscriptionId, periodStart(), periodEnd()],
+    );
+    return id;
+  }
+
+  async function entitlementFor(invoiceId: string) {
+    const r = await pool.query(`SELECT id FROM interior_refresh_entitlements WHERE invoice_id=$1`, [invoiceId]);
+    expect(r.rows).toHaveLength(1);
+    return r.rows[0].id as string;
+  }
+
+  async function insertBooking(entitlement: string, subscription: string, vehicle: number,
+    start: Date, status = "booked") {
+    const id = `irb_${suffix}_${rid()}`; ids.booking.push(id);
+    await pool.query(
+      `INSERT INTO interior_refresh_bookings
+       (id,entitlement_id,subscription_id,vehicle_id,branch_id,slot_start,slot_end,booked_by_user_id,status)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9)`,
+      [id, entitlement, subscription, vehicle, branchId, start.toISOString(),
+        new Date(start.getTime() + 45 * 60_000).toISOString(), userId, status],
+    );
+    return id;
+  }
+
+  beforeAll(async () => {
+    if (!DB_URL) throw new Error("STAGING_DATABASE_URL is not set — refusing to run DB tests without a staging DB.");
+    pool = new Pool({ connectionString: DB_URL });
+    app = await createTestApp();
+    const promotion = await pool.query(`SELECT * FROM interior_refresh_promotion WHERE id='subscriber-interior-refresh'`);
+    originalPromotion = promotion.rows[0];
+    branchId = Number(originalPromotion?.branch_id ??
+      (await pool.query(`SELECT id FROM branches ORDER BY id LIMIT 1`)).rows[0]?.id);
+    if (!branchId) throw new Error("A branch is required for Interior Refresh tests");
+    await pool.query(`UPDATE interior_refresh_promotion SET enabled=true, starts_on=NULL, ends_on=NULL, branch_id=$1 WHERE id='subscriber-interior-refresh'`, [branchId]);
+    await pool.query(`INSERT INTO staff (id,email,name,role,branch_id,is_active,password_hash) VALUES ($1,$2,'IR Staff','manager',$3,true,'x')`,
+      [ids.staff[0], `ir_staff_${suffix}@test.local`, branchId]);
+    const otherBranch = (await pool.query(`SELECT id FROM branches WHERE id <> $1 ORDER BY id LIMIT 1`, [branchId])).rows[0];
+    if (!otherBranch) throw new Error("A second branch is required for branch-authorization tests");
+    const otherStaffId = `ir_other_staff_${suffix}`;
+    ids.staff.push(otherStaffId);
+    await pool.query(`INSERT INTO staff (id,email,name,role,branch_id,is_active,password_hash) VALUES ($1,$2,'Other Branch Manager','manager',$3,true,'x')`,
+      [otherStaffId, `ir_other_staff_${suffix}@test.local`, otherBranch.id]);
+    const main = await seedAccount("family");
+    userId = main.uid; carId = main.vehicle; subId = main.sub;
+    const invoice = await paidInvoice(subId, "main");
+    entitlementId = await entitlementFor(invoice);
+    await pool.query(`INSERT INTO auth_sessions (id,user_id,user_type,expires_at) VALUES ($1,$2,'customer',now()+interval '1 day'),($3,$4,'staff',now()+interval '1 day'),($5,$6,'staff',now()+interval '1 day')`,
+      [customerSession, String(userId), staffSession, ids.staff[0], otherBranchStaffSession, otherStaffId]);
+    ids.sessions.push(customerSession, staffSession, otherBranchStaffSession);
+  });
+
+  afterAll(async () => {
+    if (!pool) return;
+    try {
+      await pool.query(`DELETE FROM interior_refresh_bookings WHERE id = ANY($1)`, [ids.booking]);
+      await pool.query(`DELETE FROM service_history WHERE payment_reference LIKE $1`, [`INTERIOR_REFRESH:irb_${suffix}%`]);
+      await pool.query(`DELETE FROM interior_refresh_entitlements WHERE subscription_id = ANY($1)`, [ids.sub]);
+      await pool.query(`DELETE FROM subscription_invoices WHERE id = ANY($1)`, [ids.invoice]);
+      await pool.query(`DELETE FROM auth_sessions WHERE id = ANY($1)`, [ids.sessions]);
+      await pool.query(`DELETE FROM subscriptions WHERE id = ANY($1)`, [ids.sub]);
+      await pool.query(`DELETE FROM cars WHERE id = ANY($1)`, [ids.car]);
+      await pool.query(`DELETE FROM customers WHERE id = ANY($1)`, [ids.customer]);
+      await pool.query(`DELETE FROM users WHERE id = ANY($1)`, [ids.user]);
+      await pool.query(`DELETE FROM staff WHERE id = ANY($1)`, [ids.staff]);
+      if (originalPromotion) await pool.query(
+        `UPDATE interior_refresh_promotion SET enabled=$1,starts_on=$2,ends_on=$3,branch_id=$4,updated_by_staff_id=$5 WHERE id='subscriber-interior-refresh'`,
+        [originalPromotion.enabled, originalPromotion.starts_on, originalPromotion.ends_on, originalPromotion.branch_id, originalPromotion.updated_by_staff_id],
+      );
+    } finally { await pool.end(); }
+  });
+
+  it("creates exactly one entitlement for a paid invoice, including retries", async () => {
+    const n = await pool.query(`SELECT count(*)::int n FROM interior_refresh_entitlements WHERE invoice_id=$1`,
+      [ids.invoice[0]]);
+    expect(n.rows[0].n).toBe(1);
+    await pool.query(`UPDATE subscription_invoices SET status='paid', period_start=period_start, period_end=period_end WHERE id=$1`, [ids.invoice[0]]);
+    const again = await pool.query(`SELECT count(*)::int n FROM interior_refresh_entitlements WHERE invoice_id=$1`, [ids.invoice[0]]);
+    expect(again.rows[0].n).toBe(1);
+  });
+
+  it("seeds new installations with the promotion enabled", async () => {
+    const migration = await readFile(
+      "migrations/manual/2026-08-30_01_interior_refresh_promo.sql",
+      "utf8",
+    );
+    expect(migration).toMatch(
+      /INSERT INTO interior_refresh_promotion\(id,enabled,branch_id\)[\s\S]*SELECT 'subscriber-interior-refresh',true,id/,
+    );
+  });
+
+  it("denies schedule data and status changes to managers from other branches", async () => {
+    const otherCookie = `cx_staff_session=${otherBranchStaffSession}`;
+    const access = await request(app)
+      .get("/api/staff/interior-refresh/access")
+      .set("Cookie", otherCookie);
+    expect(access.status).toBe(200);
+    expect(access.body.can_manage).toBe(false);
+
+    const schedule = await request(app)
+      .get(`/api/staff/interior-refresh/schedule?date=${futureDate()}`)
+      .set("Cookie", otherCookie);
+    expect(schedule.status).toBe(403);
+
+    const status = await request(app)
+      .patch("/api/staff/interior-refresh/bookings/not-a-booking/status")
+      .set("Cookie", otherCookie)
+      .send({ status: "checked_in" });
+    expect(status.status).toBe(403);
+  });
+
+  it("does not create entitlements for pending, failed, or test subscription invoices", async () => {
+    const normal = await seedAccount();
+    const test = await seedAccount("unlimited", true);
+    for (const [status, sub] of [["pending", normal.sub], ["failed", normal.sub], ["paid", test.sub]] as const) {
+      const id = `ir_inv_${suffix}_${status}_${rid()}`; ids.invoice.push(id);
+      await pool.query(`INSERT INTO subscription_invoices (id,subscription_id,amount_cents,status,period_start,period_end) VALUES ($1,$2,1,$3,$4,$5)`,
+        [id, sub, status, periodStart(), periodEnd()]);
+      expect((await pool.query(`SELECT count(*)::int n FROM interior_refresh_entitlements WHERE invoice_id=$1`, [id])).rows[0].n).toBe(0);
+    }
+  });
+
+  it("gives a Family invoice one entitlement total", async () => {
+    const r = await pool.query(`SELECT count(*)::int n FROM interior_refresh_entitlements WHERE subscription_id=$1`, [subId]);
+    expect(r.rows[0].n).toBe(1);
+  });
+
+  it("rejects overlapping live slots at the database boundary", async () => {
+    const start = bruneiSlotInstant(futureDate(), "08:00")!;
+    const b = await insertBooking(entitlementId, subId, carId, start);
+    // A different entitlement proves this is the range exclusion constraint,
+    // not merely the one-live-booking-per-entitlement unique index.
+    const other = await seedAccount();
+    const otherInvoice = await paidInvoice(other.sub, `overlap_${rid()}`);
+    const otherEntitlement = await entitlementFor(otherInvoice);
+    await expect(insertBooking(otherEntitlement, other.sub, other.vehicle,
+      new Date(start.getTime() + 15 * 60_000))).rejects.toMatchObject({ code: "23P01" });
+    await pool.query(`UPDATE interior_refresh_bookings SET status='cancelled' WHERE id=$1`, [b]);
+  });
+
+  it("cancellation restores the entitlement and allows another booking", async () => {
+    const date = futureDate();
+    const first = await request(app).post("/api/subscriptions/interior-refresh/bookings").set("Cookie", customerCookie).send({ vehicle_id: carId, date, start_time: "08:00" });
+    expect(first.status).toBe(201);
+    ids.booking.push(first.body.booking.id);
+    const cancelled = await request(app).delete(`/api/subscriptions/interior-refresh/bookings/${first.body.booking.id}`).set("Cookie", customerCookie);
+    expect(cancelled.status).toBe(200);
+    expect((await pool.query(`SELECT status FROM interior_refresh_entitlements WHERE id=$1`, [entitlementId])).rows[0].status).toBe("available");
+    const replacement = await request(app).post("/api/subscriptions/interior-refresh/bookings").set("Cookie", customerCookie).send({ vehicle_id: carId, date, start_time: "08:45" });
+    expect(replacement.status).toBe(201);
+    ids.booking.push(replacement.body.booking.id);
+  });
+
+  it("allows only one concurrent booking for the available entitlement", async () => {
+    // Release the replacement booking from the cancellation test, then race two
+    // claims for the same entitlement and slot.
+    const existing = (await pool.query(
+      `SELECT id FROM interior_refresh_bookings WHERE entitlement_id=$1 AND status='booked' ORDER BY created_at DESC LIMIT 1`,
+      [entitlementId],
+    )).rows[0].id;
+    await pool.query(`UPDATE interior_refresh_bookings SET status='cancelled' WHERE id=$1`, [existing]);
+    await pool.query(`UPDATE interior_refresh_entitlements SET status='available' WHERE id=$1`, [entitlementId]);
+    const [a, b] = await Promise.all([
+      request(app).post("/api/subscriptions/interior-refresh/bookings").set("Cookie", customerCookie).send({ vehicle_id: carId, date: futureDate(), start_time: "09:30" }),
+      request(app).post("/api/subscriptions/interior-refresh/bookings").set("Cookie", customerCookie).send({ vehicle_id: carId, date: futureDate(), start_time: "09:30" }),
+    ]);
+    expect([a.status, b.status].filter((x) => x === 201)).toHaveLength(1);
+    expect([a.status, b.status].filter((x) => x === 409)).toHaveLength(1);
+    const winner = [a, b].find((r) => r.status === 201)!;
+    ids.booking.push(winner.body.booking.id);
+    await pool.query(`UPDATE interior_refresh_bookings SET status='cancelled' WHERE id=$1`, [winner.body.booking.id]);
+    await pool.query(`UPDATE interior_refresh_entitlements SET status='available' WHERE id=$1`, [entitlementId]);
+  });
+
+  it("no-show consumes, and duplicate staff transitions cannot create service records twice", async () => {
+    // A historical direct fixture is needed because no-show is deliberately
+    // prohibited before the appointment has ended.
+    await pool.query(`UPDATE interior_refresh_entitlements SET status='booked' WHERE id=$1`, [entitlementId]);
+    const past = new Date(Date.now() - 2 * 3600_000);
+    const booking = await insertBooking(entitlementId, subId, carId, past);
+    const [one, two] = await Promise.all([
+      request(app).patch(`/api/staff/interior-refresh/bookings/${booking}/status`).set("Cookie", staffCookie).send({ status: "no_show" }),
+      request(app).patch(`/api/staff/interior-refresh/bookings/${booking}/status`).set("Cookie", staffCookie).send({ status: "no_show" }),
+    ]);
+    expect([one.status, two.status].filter((x) => x === 200)).toHaveLength(1);
+    expect((await pool.query(`SELECT status FROM interior_refresh_entitlements WHERE id=$1`, [entitlementId])).rows[0].status).toBe("used");
+    expect((await pool.query(`SELECT count(*)::int n FROM service_history WHERE payment_reference=$1`, [`INTERIOR_REFRESH:${booking}`])).rows[0].n).toBe(0);
+  });
+
+  it("serializes check-in against customer cancellation and creates one service record", async () => {
+    const invoice = await paidInvoice(subId, "checkin");
+    const e = await entitlementFor(invoice);
+    await pool.query(`UPDATE interior_refresh_entitlements SET status='booked' WHERE id=$1`, [e]);
+    // The status endpoint permits same-day check-in from 15 minutes before the
+    // slot; a one-minute-old fixture also makes customer cancellation illegal.
+    const booking = await insertBooking(e, subId, carId, new Date(Date.now() - 60_000));
+    const [checkin, cancel] = await Promise.all([
+      request(app).patch(`/api/staff/interior-refresh/bookings/${booking}/status`).set("Cookie", staffCookie).send({ status: "checked_in" }),
+      request(app).delete(`/api/subscriptions/interior-refresh/bookings/${booking}`).set("Cookie", customerCookie),
+    ]);
+    expect(checkin.status).toBe(200);
+    expect(cancel.status).toBe(409);
+    const service = await pool.query(`SELECT count(*)::int n FROM service_history WHERE payment_reference=$1`, [`INTERIOR_REFRESH:${booking}`]);
+    expect(service.rows[0].n).toBe(1);
+    const duplicate = await request(app).patch(`/api/staff/interior-refresh/bookings/${booking}/status`).set("Cookie", staffCookie).send({ status: "checked_in" });
+    expect(duplicate.status).toBe(409);
+    expect((await pool.query(`SELECT count(*)::int n FROM service_history WHERE payment_reference=$1`, [`INTERIOR_REFRESH:${booking}`])).rows[0].n).toBe(1);
+  });
+
+  it("does not book past period end and disabling promotion preserves schedule/history", async () => {
+    const invoice = await paidInvoice(subId, "short");
+    const e = await entitlementFor(invoice);
+    await pool.query(`UPDATE interior_refresh_entitlements SET period_end=now()+interval '1 hour' WHERE id=$1`, [e]);
+    const tooLate = await request(app).post("/api/subscriptions/interior-refresh/bookings").set("Cookie", customerCookie)
+      .send({ vehicle_id: carId, date: futureDate(), start_time: "08:00" });
+    expect(tooLate.status).toBe(409);
+    await pool.query(`UPDATE interior_refresh_promotion SET enabled=false WHERE id='subscriber-interior-refresh'`);
+    const blocked = await request(app).post("/api/subscriptions/interior-refresh/bookings").set("Cookie", customerCookie)
+      .send({ vehicle_id: carId, date: futureDate(), start_time: "08:00" });
+    expect(blocked.status).toBe(409);
+    const summary = await request(app).get("/api/subscriptions/interior-refresh").set("Cookie", customerCookie);
+    expect(summary.status).toBe(200);
+    expect(summary.body.bookings.some((b: any) => b.id)).toBe(true);
+  });
+});

@@ -7,6 +7,7 @@ import {
   formatBND,
   formatBNDFull,
 } from "./types";
+import { InteriorRefreshBenefit } from "./InteriorRefreshBenefit";
 
 interface Props {
   memberships: MembershipRow[];
@@ -63,6 +64,8 @@ export function SubscriptionTab({
 
         <UpsellCard cars={cars} hasActive={!!active} />
       </div>
+
+      {active && subscription && <InteriorRefreshBenefit cars={cars} />}
 
       {past.length > 0 && (
         <section className="bg-white rounded-2xl border border-gray-200 p-5">

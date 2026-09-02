@@ -13,6 +13,8 @@ declare global {
 type Props = {
   planId: string;
   phone: string;
+  /** Comma-separated covered plates; the server normalises and validates them. */
+  carPlate: string;
   onSuccess: (result: any) => void;
 };
 
@@ -46,7 +48,12 @@ function loadCheckoutLibrary(src: string, integrity?: string): Promise<void> {
   });
 }
 
-export function SubscriptionCheckout({ planId, phone, onSuccess }: Props) {
+export function SubscriptionCheckout({
+  planId,
+  phone,
+  carPlate,
+  onSuccess,
+}: Props) {
   const [status, setStatus] = useState<
     "loading" | "ready" | "processing" | "error"
   >("loading");
@@ -94,7 +101,12 @@ export function SubscriptionCheckout({ planId, phone, onSuccess }: Props) {
         const confirmRes = await apiRequest(
           "POST",
           "/api/subscriptions/confirm",
-          { plan_id: planId, transientToken, phone },
+          {
+            plan_id: planId,
+            transientToken,
+            phone,
+            car_plate: carPlate,
+          },
         );
         const result = await confirmRes.json();
         onSuccess(result);
@@ -108,7 +120,7 @@ export function SubscriptionCheckout({ planId, phone, onSuccess }: Props) {
         setMessage(friendly || "Payment could not be completed.");
       }
     })();
-  }, [planId, phone, onSuccess]);
+  }, [planId, phone, carPlate, onSuccess]);
 
   return (
     <div className="space-y-4" data-testid="subscription-checkout">

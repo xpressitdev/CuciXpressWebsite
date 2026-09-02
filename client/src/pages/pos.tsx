@@ -59,6 +59,7 @@ import ShiftBar from "@/components/ShiftBar";
 import DailyReport from "@/components/DailyReport";
 import ScanInTab from "@/components/admin/ScanInTab";
 import LoyaltyStampTab from "@/components/admin/LoyaltyStampTab";
+import { InteriorRefreshPanel } from "@/components/admin/InteriorRefreshPanel";
 import {
   Dialog,
   DialogContent,
@@ -1592,6 +1593,10 @@ export default function POS() {
                 remembered on this device.
               </CardContent>
             </Card>
+          )}
+
+          {staff && (
+            <InteriorRefreshPanel role={staff.role} />
           )}
 
           <div className="grid lg:grid-cols-3 gap-6">

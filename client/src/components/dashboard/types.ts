@@ -99,6 +99,55 @@ export interface CarRow {
   total_washes: number;
 }
 
+export type InteriorRefreshStatus =
+  | "available"
+  | "booked"
+  | "checked_in"
+  | "used"
+  | "completed"
+  | "cancelled"
+  | "expired"
+  | "no_show"
+  | "unavailable";
+
+export interface InteriorRefreshAppointment {
+  id: string;
+  status: Exclude<InteriorRefreshStatus, "available" | "expired" | "unavailable">;
+  starts_at: string;
+  ends_at: string;
+  branch_name: string;
+  vehicle_id: number;
+  vehicle_plate: string;
+  vehicle_label?: string | null;
+  customer_name?: string | null;
+  customer_phone?: string | null;
+  checked_in_at?: string | null;
+  completed_at?: string | null;
+}
+
+export interface InteriorRefreshBenefit {
+  promotion: {
+    enabled: boolean;
+    starts_on: string | null;
+    ends_on: string | null;
+    branch_name: string;
+    duration_minutes: number;
+  };
+  covered_vehicle_ids: number[];
+  entitlement: {
+    status: InteriorRefreshStatus;
+    period_start: string;
+    period_end: string;
+    bookable_through: string | null;
+  } | null;
+  appointment: InteriorRefreshAppointment | null;
+}
+
+export interface InteriorRefreshSlot {
+  starts_at: string;
+  ends_at: string;
+}
+
 export interface QueueBranch {
   id: number;
   name: string;

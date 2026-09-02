@@ -816,6 +816,64 @@ export const subscriptionInvoices = pgTable("subscription_invoices", {
 });
 export type SubscriptionInvoice = typeof subscriptionInvoices.$inferSelect;
 
+// --- Subscriber Interior Refresh promotion (Task #34) -------
+// Dates in the config are Brunei calendar dates. Appointment instants are
+// timestamptz; the server is the only component allowed to construct them.
+export const interiorRefreshPromotion = pgTable("interior_refresh_promotion", {
+  id: text("id").primaryKey(),
+  enabled: boolean("enabled").default(false).notNull(),
+  starts_on: date("starts_on"),
+  ends_on: date("ends_on"),
+  branch_id: integer("branch_id").references(() => branches.id),
+  duration_minutes: integer("duration_minutes").default(45).notNull(),
+  capacity: integer("capacity").default(1).notNull(),
+  opens_at: text("opens_at").default("08:00").notNull(),
+  final_start_at: text("final_start_at").default("18:15").notNull(),
+  updated_by_staff_id: text("updated_by_staff_id").references(() => staff.id),
+  updated_at: timestamp("updated_at", { withTimezone: true }).defaultNow().notNull(),
+});
+export type InteriorRefreshPromotion = typeof interiorRefreshPromotion.$inferSelect;
+
+export const interiorRefreshEntitlements = pgTable("interior_refresh_entitlements", {
+  id: text("id").primaryKey(),
+  subscription_id: text("subscription_id").references(() => subscriptions.id).notNull(),
+  invoice_id: text("invoice_id").references(() => subscriptionInvoices.id).notNull(),
+  period_start: timestamp("period_start", { withTimezone: true }).notNull(),
+  period_end: timestamp("period_end", { withTimezone: true }).notNull(),
+  status: text("status").default("available").notNull(), // available | booked | used
+  consumed_at: timestamp("consumed_at", { withTimezone: true }),
+  created_at: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
+}, (t) => [
+  uniqueIndex("interior_refresh_entitlements_invoice_uq").on(t.invoice_id),
+  uniqueIndex("interior_refresh_entitlements_period_uq").on(
+    t.subscription_id,
+    t.period_start,
+    t.period_end,
+  ),
+]);
+export type InteriorRefreshEntitlement = typeof interiorRefreshEntitlements.$inferSelect;
+
+export const interiorRefreshBookings = pgTable("interior_refresh_bookings", {
+  id: text("id").primaryKey(),
+  entitlement_id: text("entitlement_id").references(() => interiorRefreshEntitlements.id).notNull(),
+  subscription_id: text("subscription_id").references(() => subscriptions.id).notNull(),
+  vehicle_id: integer("vehicle_id").references(() => cars.id).notNull(),
+  branch_id: integer("branch_id").references(() => branches.id).notNull(),
+  slot_start: timestamp("slot_start", { withTimezone: true }).notNull(),
+  slot_end: timestamp("slot_end", { withTimezone: true }).notNull(),
+  status: text("status").default("booked").notNull(), // booked | checked_in | completed | cancelled | no_show
+  booked_by_user_id: integer("booked_by_user_id").references(() => users.id).notNull(),
+  cancelled_at: timestamp("cancelled_at", { withTimezone: true }),
+  checked_in_at: timestamp("checked_in_at", { withTimezone: true }),
+  completed_at: timestamp("completed_at", { withTimezone: true }),
+  no_show_at: timestamp("no_show_at", { withTimezone: true }),
+  updated_by_staff_id: text("updated_by_staff_id").references(() => staff.id),
+  service_history_id: integer("service_history_id").references(() => serviceHistory.id),
+  created_at: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
+  updated_at: timestamp("updated_at", { withTimezone: true }).defaultNow().notNull(),
+});
+export type InteriorRefreshBooking = typeof interiorRefreshBookings.$inferSelect;
+
 // --- Loyalty redemptions (Phase 12f) ------------------------
 // One row per "collect 4 × B$12 receipts → free B$12 wash"
 // redemption. Voucher orders are real `orders` rows with
