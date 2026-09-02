@@ -1,4 +1,4 @@
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { CalendarDays, CheckCircle2, Clock3, Sparkles, XCircle } from "lucide-react";
 import { apiRequest } from "@/lib/queryClient";
@@ -34,6 +34,8 @@ interface BenefitResponse {
     id: string;
     status: string;
     display_status: InteriorRefreshStatus;
+    vehicle_id: number;
+    plan_id: string;
     period_start: string;
     period_end: string;
     // Supported by newer API versions; it is the server-calculated last
@@ -108,11 +110,11 @@ export function InteriorRefreshBenefit({ cars }: { cars: CarRow[] }) {
     queryKey: BENEFIT_KEY,
   });
 
-  // The endpoint returns history as well as the current period. Select the
-  // entitlement that is live now rather than assuming database sort order,
-  // then only show a booking belonging to that entitlement.
-  const entitlement = useMemo(() => {
-    if (!data) return null;
+  // Family subscriptions have one entitlement per enrolled vehicle. Keep all
+  // entitlements from the current paid period, then show the selected car's
+  // booking and availability without sharing state across its siblings.
+  const currentEntitlements = useMemo(() => {
+    if (!data) return [];
     const now = Date.now();
     const active = data.entitlements
       .filter((item) => {
@@ -121,23 +123,43 @@ export function InteriorRefreshBenefit({ cars }: { cars: CarRow[] }) {
         return start <= now && now < end;
       })
       .sort((a, b) => new Date(b.period_end).getTime() - new Date(a.period_end).getTime());
-    if (active.length) return active.find((item) => item.display_status !== "expired") ?? active[0];
-    // When there is no live cycle, deliberately select the most recently
-    // ended one so expired/no-show history remains intelligible.
-    return [...data.entitlements].sort(
+    if (active.length) return active;
+    const latest = [...data.entitlements].sort(
       (a, b) => new Date(b.period_end).getTime() - new Date(a.period_end).getTime(),
-    )[0] ?? null;
+    )[0];
+    return latest
+      ? data.entitlements.filter((item) =>
+          item.period_start === latest.period_start && item.period_end === latest.period_end)
+      : [];
   }, [data]);
+  const coveredCars = useMemo(() => {
+    const coveredIds = new Set(data?.vehicles.map((vehicle) => vehicle.id) ?? []);
+    return cars.filter((car) => coveredIds.has(car.id));
+  }, [cars, data?.vehicles]);
+
+  useEffect(() => {
+    if (coveredCars.length === 0) return;
+    const selectedStillCovered = coveredCars.some((car) => String(car.id) === vehicleId);
+    if (selectedStillCovered) return;
+    const firstAvailable = currentEntitlements.find((item) => item.display_status === "available");
+    setVehicleId(String(firstAvailable?.vehicle_id ?? coveredCars[0].id));
+    setDate("");
+    setSlot("");
+  }, [coveredCars, currentEntitlements, vehicleId]);
+
+  const entitlement = currentEntitlements.find(
+    (item) => item.vehicle_id === Number(vehicleId),
+  ) ?? currentEntitlements[0] ?? null;
   const promotion = data?.promotion ?? null;
   const canChoose = entitlement?.display_status === "available" && promotion?.enabled === true;
   const { data: slotData, isFetching: loadingSlots, isError: slotsFailed } = useQuery<{
     slots: Array<InteriorRefreshSlot & { start_time: string; available: boolean }>;
   }>({
-    queryKey: ["/api/subscriptions/interior-refresh/availability", date],
-    enabled: canChoose && !!date,
+    queryKey: ["/api/subscriptions/interior-refresh/availability", date, vehicleId],
+    enabled: canChoose && !!date && !!vehicleId,
     queryFn: async () => {
       const response = await fetch(
-        `/api/subscriptions/interior-refresh/availability?date=${encodeURIComponent(date)}`,
+        `/api/subscriptions/interior-refresh/availability?date=${encodeURIComponent(date)}&vehicle_id=${encodeURIComponent(vehicleId)}`,
         { credentials: "include" },
       );
       if (!response.ok) throw new Error(await response.text());
@@ -244,10 +266,10 @@ export function InteriorRefreshBenefit({ cars }: { cars: CarRow[] }) {
     : status === "available" || status === "booked"
       ? "Available"
       : "Not available";
-  const coveredIds = data.vehicles
-    .filter((vehicle) => !vehicle.entitlement_id || vehicle.entitlement_id === entitlement?.id)
-    .map((vehicle) => vehicle.id);
-  const coveredCars = cars.filter((car) => coveredIds.includes(car.id));
+  const availableCount = currentEntitlements.filter(
+    (item) => item.display_status === "available",
+  ).length;
+  const selectedCar = coveredCars.find((car) => car.id === Number(vehicleId));
 
   return (
     <section className="rounded-2xl border-2 border-purple-200 bg-gradient-to-br from-purple-50 to-orange-50 p-5 md:p-6" data-testid="card-interior-refresh">
@@ -257,12 +279,56 @@ export function InteriorRefreshBenefit({ cars }: { cars: CarRow[] }) {
             <Sparkles className="h-5 w-5 text-purple-600" />
             <h2 className="text-xl font-black text-gray-900">Complimentary Interior Refresh</h2>
           </div>
-          <p className="mt-1 text-sm text-gray-600">One {promotion?.duration_minutes ?? 45}-minute visit per paid billing cycle · {promotion?.branch?.name ?? "Tungku Link"} only</p>
+          <p className="mt-1 text-sm text-gray-600">
+            One {promotion?.duration_minutes ?? 45}-minute visit per enrolled vehicle, per paid billing cycle · {promotion?.branch?.name ?? "Tungku Link"} only
+          </p>
         </div>
         <span className="rounded-full bg-white px-3 py-1 text-xs font-extrabold uppercase text-purple-700 shadow-sm">
-          {simpleStatus}
+          {currentEntitlements.length > 1
+            ? `${availableCount} of ${currentEntitlements.length} available`
+            : simpleStatus}
         </span>
       </div>
+
+      {coveredCars.length > 0 && (
+        <div className="mt-5 max-w-sm">
+          <Label htmlFor="refresh-vehicle">Vehicle benefit</Label>
+          <Select
+            value={vehicleId}
+            onValueChange={(value) => {
+              setVehicleId(value);
+              setDate("");
+              setSlot("");
+            }}
+          >
+            <SelectTrigger id="refresh-vehicle" className="mt-1 bg-white">
+              <SelectValue placeholder="Choose vehicle" />
+            </SelectTrigger>
+            <SelectContent>
+              {coveredCars.map((car) => {
+                const carBenefit = currentEntitlements.find((item) => item.vehicle_id === car.id);
+                const carBooking = carBenefit
+                  ? data.bookings.find((item) =>
+                      item.entitlement_id === carBenefit.id && item.status !== "cancelled")
+                  : null;
+                const claimed = carBenefit?.display_status === "used"
+                  || ["checked_in", "completed", "no_show"].includes(carBooking?.status ?? "");
+                return (
+                  <SelectItem key={car.id} value={String(car.id)}>
+                    {car.license_plate}{car.brand ? ` · ${car.brand} ${car.model ?? ""}` : ""}
+                    {` · ${claimed ? "Claimed" : "Available"}`}
+                  </SelectItem>
+                );
+              })}
+            </SelectContent>
+          </Select>
+          {selectedCar && (
+            <p className="mt-1 text-xs font-semibold text-purple-700">
+              {selectedCar.license_plate}: {simpleStatus}
+            </p>
+          )}
+        </div>
+      )}
 
       {appointment && ["booked", "checked_in"].includes(appointment.status) && (
         <div className="mt-5 rounded-xl border border-purple-200 bg-white p-4">
@@ -317,21 +383,7 @@ export function InteriorRefreshBenefit({ cars }: { cars: CarRow[] }) {
       )}
 
       {canChoose && (
-        <div className="mt-5 grid gap-4 md:grid-cols-3">
-          <div>
-            <Label htmlFor="refresh-vehicle">Covered vehicle</Label>
-            <Select value={vehicleId} onValueChange={setVehicleId}>
-              <SelectTrigger id="refresh-vehicle" className="mt-1 bg-white"><SelectValue placeholder="Choose vehicle" /></SelectTrigger>
-              <SelectContent>
-                {coveredCars.map((car) => (
-                  <SelectItem key={car.id} value={String(car.id)}>
-                    {car.license_plate}{car.brand ? ` · ${car.brand} ${car.model ?? ""}` : ""}
-                  </SelectItem>
-                ))}
-                {coveredCars.length === 0 && <SelectItem value="none" disabled>No covered vehicles</SelectItem>}
-              </SelectContent>
-            </Select>
-          </div>
+        <div className="mt-5 grid gap-4 md:grid-cols-2">
           <div>
             <Label htmlFor="refresh-date">Appointment date</Label>
             <Input
@@ -365,7 +417,7 @@ export function InteriorRefreshBenefit({ cars }: { cars: CarRow[] }) {
             </Select>
             {slotsFailed && <p className="mt-1 text-xs text-red-700">Availability could not be loaded. Check the date and try again.</p>}
           </div>
-          <div className="md:col-span-3 flex flex-wrap items-center justify-between gap-3">
+          <div className="md:col-span-2 flex flex-wrap items-center justify-between gap-3">
             <div>
               <label className="flex items-center gap-2 text-sm font-semibold text-gray-700">
                 <input

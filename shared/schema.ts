@@ -838,17 +838,24 @@ export const interiorRefreshEntitlements = pgTable("interior_refresh_entitlement
   id: text("id").primaryKey(),
   subscription_id: text("subscription_id").references(() => subscriptions.id).notNull(),
   invoice_id: text("invoice_id").references(() => subscriptionInvoices.id).notNull(),
+  // One paid billing cycle grants one benefit for each explicitly covered car.
+  // Nullable only for an unresolvable legacy row left by the safe backfill.
+  vehicle_id: integer("vehicle_id").references(() => cars.id),
   period_start: timestamp("period_start", { withTimezone: true }).notNull(),
   period_end: timestamp("period_end", { withTimezone: true }).notNull(),
   status: text("status").default("available").notNull(), // available | booked | used
   consumed_at: timestamp("consumed_at", { withTimezone: true }),
   created_at: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
 }, (t) => [
-  uniqueIndex("interior_refresh_entitlements_invoice_uq").on(t.invoice_id),
-  uniqueIndex("interior_refresh_entitlements_period_uq").on(
+  uniqueIndex("interior_refresh_entitlements_invoice_vehicle_uq").on(
+    t.invoice_id,
+    t.vehicle_id,
+  ),
+  uniqueIndex("interior_refresh_entitlements_period_vehicle_uq").on(
     t.subscription_id,
     t.period_start,
     t.period_end,
+    t.vehicle_id,
   ),
 ]);
 export type InteriorRefreshEntitlement = typeof interiorRefreshEntitlements.$inferSelect;
@@ -864,6 +871,9 @@ export const interiorRefreshBookings = pgTable("interior_refresh_bookings", {
   status: text("status").default("booked").notNull(), // booked | checked_in | completed | cancelled | no_show
   reminder_opt_in: boolean("reminder_opt_in").default(false).notNull(),
   reminder_sent_at: timestamp("reminder_sent_at", { withTimezone: true }),
+  benefit_period_start: timestamp("benefit_period_start", { withTimezone: true }).notNull(),
+  benefit_period_end: timestamp("benefit_period_end", { withTimezone: true }).notNull(),
+  claim_guard_exempt: boolean("claim_guard_exempt").default(false).notNull(),
   booked_by_user_id: integer("booked_by_user_id").references(() => users.id).notNull(),
   cancelled_at: timestamp("cancelled_at", { withTimezone: true }),
   checked_in_at: timestamp("checked_in_at", { withTimezone: true }),

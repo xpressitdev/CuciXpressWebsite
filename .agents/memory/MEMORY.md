@@ -57,3 +57,4 @@
 - [Vitest UI component tests](vitest-ui-component-tests.md) — .test.tsx needs jsdom pragma + oxc.jsx in vitest.config (rolldown-vite ignores esbuild.jsx); one known pre-existing POS test failure.
 - [Lucia multi-instance typing](lucia-multi-instance-typing.md) — Lucia v3 has one global Register; distinct runtime user shapes need explicit local types at adapter boundaries.
 - [Vehicle/order lock ordering](vehicle-order-lock-ordering.md) — flows touching vehicle-attributed orders lock all cars in sorted ID order before orders, matching loyalty redemption and avoiding deadlocks.
+- [Entitlement granularity guards](entitlement-granularity-guards.md) — when benefits change from per-subscription to per-vehicle, every uniqueness and claim guard must adopt the vehicle key together.

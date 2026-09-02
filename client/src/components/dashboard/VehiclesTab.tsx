@@ -173,8 +173,15 @@ export function VehiclesTab({ cars, memberships }: Props) {
     unlimitedVehicleIds.has(c.id) || unlimitedPlates.has(normPlate(c.license_plate));
 
   const { data: interiorData } = useQuery<{
+    entitlements: Array<{
+      id: string;
+      vehicle_id: number | null;
+      period_start: string;
+      period_end: string;
+    }>;
     bookings: Array<{
       id: string;
+      entitlement_id: string;
       vehicle_id: number;
       status: "booked" | "checked_in" | "completed" | "cancelled" | "no_show";
       claimed?: boolean;
@@ -183,11 +190,27 @@ export function VehiclesTab({ cars, memberships }: Props) {
     queryKey: ["/api/subscriptions/interior-refresh"],
     refetchInterval: 15_000,
   });
-  const interiorByVehicle = new Map(
-    (interiorData?.bookings ?? [])
-      .filter((booking) => booking.status !== "cancelled")
-      .map((booking) => [booking.vehicle_id, booking]),
+  const now = Date.now();
+  const activeEntitlementIds = new Set(
+    (interiorData?.entitlements ?? [])
+      .filter((entitlement) =>
+        new Date(entitlement.period_start).getTime() <= now
+        && now < new Date(entitlement.period_end).getTime())
+      .map((entitlement) => entitlement.id),
   );
+  const interiorByVehicle = new Map<
+    number,
+    NonNullable<typeof interiorData>["bookings"][number]
+  >();
+  for (const booking of interiorData?.bookings ?? []) {
+    if (
+      booking.status !== "cancelled"
+      && activeEntitlementIds.has(booking.entitlement_id)
+      && !interiorByVehicle.has(booking.vehicle_id)
+    ) {
+      interiorByVehicle.set(booking.vehicle_id, booking);
+    }
+  }
 
   // Generate the free Unlimited wash QR (same flow as the Overview tab):
   // the server resolves the customer's active Unlimited membership and

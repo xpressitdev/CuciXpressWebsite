@@ -26,6 +26,7 @@ describe("Task 34: subscriber Interior Refresh", () => {
   let branchId: number;
   let originalPromotion: any;
   let userId: number, carId: number, subId: string, entitlementId: string;
+  let familyCarIds: number[] = [];
   const customerSession = `ir_customer_${suffix}`;
   const staffSession = `ir_staff_session_${suffix}`;
   const otherBranchStaffSession = `ir_other_staff_session_${suffix}`;
@@ -36,7 +37,7 @@ describe("Task 34: subscriber Interior Refresh", () => {
   const periodStart = () => new Date(Date.now() - 3_600_000).toISOString();
   const periodEnd = () => new Date(Date.now() + 20 * 86400_000).toISOString();
 
-  async function seedAccount(plan = "unlimited", isTest = false) {
+  async function seedAccount(plan = "unlimited", isTest = false, vehicleCount = 1) {
     const n = ids.user.length;
     const u = await pool.query(
       `INSERT INTO users (first_name,last_name,email,password) VALUES ('IR','Test',$1,'x') RETURNING id`,
@@ -48,19 +49,27 @@ describe("Task 34: subscriber Interior Refresh", () => {
       [`+673ir${suffix}${n}`, `IR ${suffix}`, uid],
     );
     ids.customer.push(Number(c.rows[0].id));
-    const car = await pool.query(
-      `INSERT INTO cars (license_plate,customer_id,user_id,last_seen_at) VALUES ($1,$2,$3,now()) RETURNING id`,
-      [`IR${suffix.slice(0, 5).toUpperCase()}${n}`, c.rows[0].id, uid],
-    );
-    const vehicle = Number(car.rows[0].id); ids.car.push(vehicle);
+    const vehicles: number[] = [];
+    const plates: string[] = [];
+    for (let index = 0; index < vehicleCount; index++) {
+      const plate = `IR${suffix.slice(0, 5).toUpperCase()}${n}${index}`;
+      const car = await pool.query(
+        `INSERT INTO cars (license_plate,customer_id,user_id,last_seen_at) VALUES ($1,$2,$3,now()) RETURNING id`,
+        [plate, c.rows[0].id, uid],
+      );
+      vehicles.push(Number(car.rows[0].id));
+      plates.push(plate);
+      ids.car.push(Number(car.rows[0].id));
+    }
+    const vehicle = vehicles[0];
     const sub = `ir_sub_${suffix}_${n}`; ids.sub.push(sub);
     await pool.query(
       `INSERT INTO subscriptions
        (id,user_id,customer_id,plan_id,status,price_cents,current_period_start,current_period_end,next_billing_at,car_plate,is_test)
        VALUES ($1,$2,$3,$4,'active',1000,now()-interval '1 hour',now()+interval '30 days',now()+interval '30 days',$5,$6)`,
-      [sub, uid, c.rows[0].id, plan, (await pool.query(`SELECT license_plate FROM cars WHERE id=$1`, [vehicle])).rows[0].license_plate, isTest],
+      [sub, uid, c.rows[0].id, plan, plates.join(","), isTest],
     );
-    return { uid, vehicle, sub };
+    return { uid, vehicle, vehicles, sub };
   }
 
   async function paidInvoice(subscriptionId: string, tag: string) {
@@ -73,21 +82,28 @@ describe("Task 34: subscriber Interior Refresh", () => {
     return id;
   }
 
-  async function entitlementFor(invoiceId: string) {
-    const r = await pool.query(`SELECT id FROM interior_refresh_entitlements WHERE invoice_id=$1`, [invoiceId]);
+  async function entitlementFor(invoiceId: string, vehicleId?: number) {
+    const r = await pool.query(
+      `SELECT id FROM interior_refresh_entitlements
+       WHERE invoice_id=$1 AND ($2::int IS NULL OR vehicle_id=$2)
+       ORDER BY vehicle_id LIMIT 1`,
+      [invoiceId, vehicleId ?? null],
+    );
     expect(r.rows).toHaveLength(1);
     return r.rows[0].id as string;
   }
 
   async function insertBooking(entitlement: string, subscription: string, vehicle: number,
-    start: Date, status = "booked") {
+    start: Date, status = "booked", claimGuardExempt = true) {
     const id = `irb_${suffix}_${rid()}`; ids.booking.push(id);
     await pool.query(
       `INSERT INTO interior_refresh_bookings
-       (id,entitlement_id,subscription_id,vehicle_id,branch_id,slot_start,slot_end,booked_by_user_id,status)
-       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9)`,
+       (id,entitlement_id,subscription_id,vehicle_id,branch_id,slot_start,slot_end,
+        booked_by_user_id,status,benefit_period_start,benefit_period_end,claim_guard_exempt)
+       SELECT $1,$2,$3,$4,$5,$6,$7,$8,$9,e.period_start,e.period_end,$10
+       FROM interior_refresh_entitlements e WHERE e.id=$2`,
       [id, entitlement, subscription, vehicle, branchId, start.toISOString(),
-        new Date(start.getTime() + 45 * 60_000).toISOString(), userId, status],
+        new Date(start.getTime() + 45 * 60_000).toISOString(), userId, status, claimGuardExempt],
     );
     return id;
   }
@@ -110,10 +126,11 @@ describe("Task 34: subscriber Interior Refresh", () => {
     ids.staff.push(otherStaffId);
     await pool.query(`INSERT INTO staff (id,email,name,role,branch_id,is_active,password_hash) VALUES ($1,$2,'Other Branch Manager','manager',$3,true,'x')`,
       [otherStaffId, `ir_other_staff_${suffix}@test.local`, otherBranch.id]);
-    const main = await seedAccount("family");
+    const main = await seedAccount("family", false, 3);
     userId = main.uid; carId = main.vehicle; subId = main.sub;
+    familyCarIds = main.vehicles;
     const invoice = await paidInvoice(subId, "main");
-    entitlementId = await entitlementFor(invoice);
+    entitlementId = await entitlementFor(invoice, carId);
     await pool.query(`INSERT INTO auth_sessions (id,user_id,user_type,expires_at) VALUES ($1,$2,'customer',now()+interval '1 day'),($3,$4,'staff',now()+interval '1 day'),($5,$6,'staff',now()+interval '1 day')`,
       [customerSession, String(userId), staffSession, ids.staff[0], otherBranchStaffSession, otherStaffId]);
     ids.sessions.push(customerSession, staffSession, otherBranchStaffSession);
@@ -140,13 +157,17 @@ describe("Task 34: subscriber Interior Refresh", () => {
     } finally { await pool.end(); }
   });
 
-  it("creates exactly one entitlement for a paid invoice, including retries", async () => {
+  it("creates exactly one entitlement per covered Family car, including retries", async () => {
     const n = await pool.query(`SELECT count(*)::int n FROM interior_refresh_entitlements WHERE invoice_id=$1`,
       [ids.invoice[0]]);
-    expect(n.rows[0].n).toBe(1);
+    expect(n.rows[0].n).toBe(3);
     await pool.query(`UPDATE subscription_invoices SET status='paid', period_start=period_start, period_end=period_end WHERE id=$1`, [ids.invoice[0]]);
     const again = await pool.query(`SELECT count(*)::int n FROM interior_refresh_entitlements WHERE invoice_id=$1`, [ids.invoice[0]]);
-    expect(again.rows[0].n).toBe(1);
+    expect(again.rows[0].n).toBe(3);
+    expect((await pool.query(
+      `SELECT count(DISTINCT vehicle_id)::int n FROM interior_refresh_entitlements WHERE invoice_id=$1`,
+      [ids.invoice[0]],
+    )).rows[0].n).toBe(3);
   });
 
   it("seeds new installations with the promotion enabled", async () => {
@@ -190,9 +211,153 @@ describe("Task 34: subscriber Interior Refresh", () => {
     }
   });
 
-  it("gives a Family invoice one entitlement total", async () => {
+  it("lets each covered Family car claim once in the same billing cycle", async () => {
     const r = await pool.query(`SELECT count(*)::int n FROM interior_refresh_entitlements WHERE subscription_id=$1`, [subId]);
-    expect(r.rows[0].n).toBe(1);
+    expect(r.rows[0].n).toBe(3);
+    const starts = ["13:00", "13:45", "14:30"];
+    const bookings = [];
+    for (let i = 0; i < familyCarIds.length; i++) {
+      const booked = await request(app)
+        .post("/api/subscriptions/interior-refresh/bookings")
+        .set("Cookie", customerCookie)
+        .send({ vehicle_id: familyCarIds[i], date: futureDate(), start_time: starts[i] });
+      expect(booked.status).toBe(201);
+      ids.booking.push(booked.body.booking.id);
+      bookings.push(booked.body.booking.id);
+    }
+    const claimed = await pool.query(
+      `SELECT vehicle_id, status FROM interior_refresh_entitlements
+       WHERE invoice_id=$1 ORDER BY vehicle_id`,
+      [ids.invoice[0]],
+    );
+    expect(claimed.rows).toHaveLength(3);
+    expect(claimed.rows.map((row: any) => Number(row.vehicle_id)).sort((a: number, b: number) => a - b))
+      .toEqual([...familyCarIds].sort((a, b) => a - b));
+    expect(claimed.rows.every((row: any) => row.status === "booked")).toBe(true);
+    for (let i = 0; i < familyCarIds.length; i++) {
+      const duplicate = await request(app)
+        .post("/api/subscriptions/interior-refresh/bookings")
+        .set("Cookie", customerCookie)
+        .send({ vehicle_id: familyCarIds[i], date: futureDate(), start_time: ["15:15", "16:00", "16:45"][i] });
+      expect(duplicate.status).toBe(409);
+      expect(duplicate.body.error).toBe("no_available_entitlement");
+    }
+    for (const id of bookings) {
+      expect((await request(app)
+        .delete(`/api/subscriptions/interior-refresh/bookings/${id}`)
+        .set("Cookie", customerCookie)).status).toBe(200);
+    }
+  });
+
+  it("blocks a second same-car claim in an overlapping billing period", async () => {
+    const guarded = await seedAccount();
+    const firstInvoice = await paidInvoice(guarded.sub, `same_car_guard_first_${rid()}`);
+    const firstEntitlement = await entitlementFor(firstInvoice, guarded.vehicle);
+    const first = await insertBooking(
+      firstEntitlement,
+      guarded.sub,
+      guarded.vehicle,
+      bruneiSlotInstant(futureDate(), "17:30")!,
+      "completed",
+      false,
+    );
+    const overlappingInvoice = await paidInvoice(guarded.sub, `same_car_guard_second_${rid()}`);
+    const overlappingEntitlement = await entitlementFor(overlappingInvoice, guarded.vehicle);
+    await expect(insertBooking(
+      overlappingEntitlement,
+      guarded.sub,
+      guarded.vehicle,
+      bruneiSlotInstant(futureDate(), "18:15")!,
+      "completed",
+      false,
+    )).rejects.toMatchObject({ code: "23P01" });
+    await pool.query(`UPDATE interior_refresh_bookings SET status='cancelled' WHERE id=$1`, [first]);
+  });
+
+  it("denies booking after the entitled car is transferred away", async () => {
+    const other = await seedAccount();
+    const booked = await request(app)
+      .post("/api/subscriptions/interior-refresh/bookings")
+      .set("Cookie", customerCookie)
+      .send({ vehicle_id: familyCarIds[1], date: futureDate(), start_time: "16:45" });
+    expect(booked.status).toBe(201);
+    ids.booking.push(booked.body.booking.id);
+    await pool.query(`UPDATE cars SET user_id=$1 WHERE id = ANY($2)`, [other.uid, [carId, familyCarIds[1]]]);
+    try {
+      const summary = await request(app)
+        .get("/api/subscriptions/interior-refresh")
+        .set("Cookie", customerCookie);
+      expect(summary.status).toBe(200);
+      expect(summary.body.vehicles.some((vehicle: any) =>
+        [carId, familyCarIds[1]].includes(Number(vehicle.id)))).toBe(false);
+      expect(summary.body.entitlements.some((entitlement: any) =>
+        [carId, familyCarIds[1]].includes(Number(entitlement.vehicle_id)))).toBe(false);
+      expect(summary.body.bookings.some((row: any) =>
+        Number(row.vehicle_id) === familyCarIds[1])).toBe(false);
+
+      const availability = await request(app)
+        .get(`/api/subscriptions/interior-refresh/availability?date=${futureDate()}&vehicle_id=${carId}`)
+        .set("Cookie", customerCookie);
+      expect(availability.status).toBe(403);
+      const booking = await request(app)
+        .post("/api/subscriptions/interior-refresh/bookings")
+        .set("Cookie", customerCookie)
+        .send({ vehicle_id: carId, date: futureDate(), start_time: "17:30" });
+      expect(booking.status).toBe(409);
+      expect(booking.body.error).toBe("no_available_entitlement");
+
+      const qr = await request(app)
+        .post(`/api/subscriptions/interior-refresh/bookings/${booked.body.booking.id}/qr`)
+        .set("Cookie", customerCookie)
+        .send({});
+      expect(qr.status).toBe(404);
+      const cancellation = await request(app)
+        .delete(`/api/subscriptions/interior-refresh/bookings/${booked.body.booking.id}`)
+        .set("Cookie", customerCookie);
+      expect(cancellation.status).toBe(404);
+
+      const renewalInvoice = await paidInvoice(subId, `after_transfer_${rid()}`);
+      const renewalEntitlements = await pool.query(
+        `SELECT vehicle_id FROM interior_refresh_entitlements WHERE invoice_id=$1`,
+        [renewalInvoice],
+      );
+      expect(renewalEntitlements.rows.some((row: any) =>
+        [carId, familyCarIds[1]].includes(Number(row.vehicle_id)))).toBe(false);
+    } finally {
+      await pool.query(`UPDATE cars SET user_id=$1 WHERE id = ANY($2)`, [userId, [carId, familyCarIds[1]]]);
+      await request(app)
+        .delete(`/api/subscriptions/interior-refresh/bookings/${booked.body.booking.id}`)
+        .set("Cookie", customerCookie);
+    }
+  });
+
+  it("does not present a live-period benefit from an ineligible subscription", async () => {
+    await pool.query(`UPDATE subscriptions SET status='cancelled' WHERE id=$1`, [subId]);
+    try {
+      const summary = await request(app)
+        .get("/api/subscriptions/interior-refresh")
+        .set("Cookie", customerCookie);
+      expect(summary.status).toBe(200);
+      expect(summary.body.entitlements).toHaveLength(0);
+      expect(summary.body.vehicles).toHaveLength(0);
+    } finally {
+      await pool.query(`UPDATE subscriptions SET status='active' WHERE id=$1`, [subId]);
+    }
+  });
+
+  it("does not count an unresolved legacy entitlement as available", async () => {
+    const legacyId = `ire_legacy_unresolved_${suffix}`;
+    await pool.query(
+      `INSERT INTO interior_refresh_entitlements
+       (id,subscription_id,invoice_id,vehicle_id,period_start,period_end,status)
+       VALUES ($1,$2,$3,NULL,$4,$5,'available')`,
+      [legacyId, subId, ids.invoice[0], periodStart(), periodEnd()],
+    );
+    const summary = await request(app)
+      .get("/api/subscriptions/interior-refresh")
+      .set("Cookie", customerCookie);
+    expect(summary.status).toBe(200);
+    expect(summary.body.entitlements.some((row: any) => row.id === legacyId)).toBe(false);
   });
 
   it("rejects overlapping live slots at the database boundary", async () => {
@@ -202,7 +367,7 @@ describe("Task 34: subscriber Interior Refresh", () => {
     // not merely the one-live-booking-per-entitlement unique index.
     const other = await seedAccount();
     const otherInvoice = await paidInvoice(other.sub, `overlap_${rid()}`);
-    const otherEntitlement = await entitlementFor(otherInvoice);
+    const otherEntitlement = await entitlementFor(otherInvoice, other.vehicle);
     await expect(insertBooking(otherEntitlement, other.sub, other.vehicle,
       new Date(start.getTime() + 15 * 60_000))).rejects.toMatchObject({ code: "23P01" });
     await pool.query(`UPDATE interior_refresh_bookings SET status='cancelled' WHERE id=$1`, [b]);
@@ -259,7 +424,7 @@ describe("Task 34: subscriber Interior Refresh", () => {
 
   it("claims a booked QR once, creates one B$0 voucher order, and beats cancellation", async () => {
     const invoice = await paidInvoice(subId, "checkin");
-    const e = await entitlementFor(invoice);
+    const e = await entitlementFor(invoice, carId);
     await pool.query(`UPDATE interior_refresh_entitlements SET status='booked' WHERE id=$1`, [e]);
     // The status endpoint permits same-day check-in from 15 minutes before the
     // slot; a one-minute-old fixture also makes customer cancellation illegal.
@@ -326,7 +491,7 @@ describe("Task 34: subscriber Interior Refresh", () => {
 
   it("does not book past period end and disabling promotion preserves schedule/history", async () => {
     const invoice = await paidInvoice(subId, "short");
-    const e = await entitlementFor(invoice);
+    const e = await entitlementFor(invoice, carId);
     await pool.query(`UPDATE interior_refresh_entitlements SET period_end=now()+interval '1 hour' WHERE id=$1`, [e]);
     const tooLate = await request(app).post("/api/subscriptions/interior-refresh/bookings").set("Cookie", customerCookie)
       .send({ vehicle_id: carId, date: futureDate(), start_time: "08:00" });

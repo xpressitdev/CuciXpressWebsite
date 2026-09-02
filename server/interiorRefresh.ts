@@ -34,16 +34,6 @@ function configOpen(c: any, date: string): boolean {
     && (!c.ends_on || date <= String(c.ends_on));
 }
 
-// A customer-owned car is not automatically covered. Coverage is the
-// subscription's explicit normalized plate list or its maintaining membership.
-function coveredVehiclePredicate(vehicleId: number, userId: number, membershipId: string | null, plates: string | null, maxVehicles: number) {
-  return sql`
-    c.id = ${vehicleId} AND c.user_id = ${userId}
-    AND (m.id = ${membershipId} OR
-      UPPER(REGEXP_REPLACE(c.license_plate, '\\s+', '', 'g'))
-        = ANY((string_to_array(COALESCE(${plates},''), ','))[1:${maxVehicles}]))`;
-}
-
 function dbError(res: Response, label: string, err: any) {
   console.error(`[interior-refresh.${label}]`, err?.message ?? err);
   return res.status(500).json({ error: "internal_error" });
@@ -234,12 +224,15 @@ export function registerInteriorRefreshRoutes(app: Express) {
     try {
       const c = await config();
       const entitlements = (await db.execute(sql`
-        SELECT e.*, s.plan_id,
+        SELECT e.*, s.plan_id, c.license_plate, c.brand, c.model,
           CASE WHEN e.status = 'available' AND e.period_end <= now() THEN 'expired'
                ELSE e.status END AS display_status
         FROM interior_refresh_entitlements e
         JOIN subscriptions s ON s.id = e.subscription_id
+        JOIN cars c ON c.id = e.vehicle_id
         WHERE s.user_id = ${userId}
+          AND s.status IN ('active','past_due')
+          AND c.user_id = ${userId}
         ORDER BY (s.status IN ('active','past_due') AND now() >= e.period_start AND now() < e.period_end) DESC,
                  e.period_end DESC
       `)).rows;
@@ -247,13 +240,10 @@ export function registerInteriorRefreshRoutes(app: Express) {
         SELECT DISTINCT c.id, c.license_plate, c.brand, c.model, e.id AS entitlement_id
         FROM interior_refresh_entitlements e
         JOIN subscriptions s ON s.id = e.subscription_id
-        JOIN cars c ON c.user_id = s.user_id
-        LEFT JOIN memberships m ON m.vehicle_id = c.id
+        JOIN cars c ON c.id = e.vehicle_id
         WHERE s.user_id = ${userId}
+          AND c.user_id = ${userId}
           AND s.status IN ('active','past_due') AND now() >= e.period_start AND now() < e.period_end
-          AND (m.id = s.membership_id OR
-               UPPER(REGEXP_REPLACE(c.license_plate, '\\s+', '', 'g'))
-                 = ANY((string_to_array(COALESCE(s.car_plate,''), ','))[1:(CASE WHEN s.plan_id='family' THEN 3 ELSE 1 END)]))
       `)).rows;
       const bookings = (await db.execute(sql`
         SELECT b.*, c.license_plate, br.name AS branch_name,
@@ -263,6 +253,7 @@ export function registerInteriorRefreshRoutes(app: Express) {
         JOIN cars c ON c.id = b.vehicle_id
         JOIN branches br ON br.id = b.branch_id
         WHERE s.user_id = ${userId}
+          AND c.user_id = ${userId}
         ORDER BY b.slot_start DESC
       `)).rows;
       res.set("Cache-Control", "no-store");
@@ -280,7 +271,11 @@ export function registerInteriorRefreshRoutes(app: Express) {
 
   app.get("/api/subscriptions/interior-refresh/availability", requireLuciaUser, async (req, res) => {
     const date = String(req.query.date ?? "");
+    const vehicleId = Number(req.query.vehicle_id);
     if (!isCalendarDate(date)) return res.status(400).json({ error: "invalid_date" });
+    if (!Number.isInteger(vehicleId) || vehicleId <= 0) {
+      return res.status(400).json({ error: "invalid_vehicle" });
+    }
     const today = bruneiDate();
     if (date <= today) return res.status(400).json({ error: "previous_day_booking_required" });
     if (date > addCalendarDays(today, 30)) return res.status(400).json({ error: "too_far_ahead" });
@@ -290,9 +285,13 @@ export function registerInteriorRefreshRoutes(app: Express) {
       if (!configOpen(c, date)) return res.status(409).json({ error: "promotion_unavailable" });
       const entitlement = (await db.execute(sql`
         SELECT e.id, e.period_start, e.period_end
-        FROM interior_refresh_entitlements e JOIN subscriptions s ON s.id=e.subscription_id
+        FROM interior_refresh_entitlements e
+        JOIN subscriptions s ON s.id=e.subscription_id
+        JOIN cars owned_car ON owned_car.id=e.vehicle_id
         WHERE s.user_id=${Number(req.lucia!.user!.id)}
+          AND owned_car.user_id=${Number(req.lucia!.user!.id)}
           AND s.status IN ('active','past_due') AND e.status='available'
+          AND e.vehicle_id=${vehicleId}
           AND now() >= e.period_start AND now() < e.period_end
         ORDER BY e.period_end DESC LIMIT 1
       `)).rows[0] as any;
@@ -342,13 +341,16 @@ export function registerInteriorRefreshRoutes(app: Express) {
         if (!c?.branch_id) throw new Error("tungku_not_configured");
         if (!configOpen(c, date)) throw new Error("promotion_unavailable");
         const entitlement = (await tx.execute(sql`
-          SELECT e.*, s.id AS sub_id, s.plan_id, s.car_plate, s.membership_id
+          SELECT e.*, s.id AS sub_id
           FROM interior_refresh_entitlements e
           JOIN subscriptions s ON s.id = e.subscription_id
+          JOIN cars owned_car ON owned_car.id = e.vehicle_id
           WHERE s.user_id = ${userId}
+            AND owned_car.user_id = ${userId}
             AND s.plan_id IN ('unlimited','family')
             AND s.status IN ('active','past_due')
             AND e.status = 'available'
+            AND e.vehicle_id = ${vehicle_id}
             AND now() >= e.period_start AND now() < e.period_end
             AND ${start.toISOString()}::timestamptz >= e.period_start
             AND ${end.toISOString()}::timestamptz <= e.period_end
@@ -356,13 +358,6 @@ export function registerInteriorRefreshRoutes(app: Express) {
           FOR UPDATE OF e
         `)).rows[0] as any;
         if (!entitlement) throw new Error("no_available_entitlement");
-        const covered = (await tx.execute(sql`
-          SELECT 1 FROM cars c LEFT JOIN memberships m ON m.vehicle_id = c.id
-          WHERE ${coveredVehiclePredicate(vehicle_id, userId, entitlement.membership_id, entitlement.car_plate,
-            entitlement.plan_id === "family" ? 3 : 1)}
-          LIMIT 1
-        `)).rows[0];
-        if (!covered) throw new Error("vehicle_not_covered");
         const collision = (await tx.execute(sql`
           SELECT 1 FROM interior_refresh_bookings
           WHERE branch_id = ${c.branch_id} AND status IN ('booked','checked_in')
@@ -375,10 +370,11 @@ export function registerInteriorRefreshRoutes(app: Express) {
         const row = (await tx.execute(sql`
           INSERT INTO interior_refresh_bookings
             (id, entitlement_id, subscription_id, vehicle_id, branch_id,
-             slot_start, slot_end, booked_by_user_id, reminder_opt_in)
+             slot_start, slot_end, booked_by_user_id, reminder_opt_in,
+             benefit_period_start, benefit_period_end)
           VALUES (${id}, ${entitlement.id}, ${entitlement.sub_id}, ${vehicle_id},
             ${c.branch_id}, ${start.toISOString()}, ${end.toISOString()}, ${userId},
-            ${reminder_opt_in})
+            ${reminder_opt_in}, ${entitlement.period_start}, ${entitlement.period_end})
           RETURNING *
         `)).rows[0];
         const claimed = (await tx.execute(sql`
@@ -415,6 +411,7 @@ export function registerInteriorRefreshRoutes(app: Express) {
         JOIN cars c ON c.id=b.vehicle_id
         JOIN branches br ON br.id=b.branch_id
         WHERE b.id=${req.params.id} AND s.user_id=${Number(req.lucia!.user!.id)}
+          AND c.user_id=${Number(req.lucia!.user!.id)}
           AND b.status IN ('booked','checked_in','completed','no_show')
         LIMIT 1
       `)).rows[0] as any;
@@ -442,7 +439,9 @@ export function registerInteriorRefreshRoutes(app: Express) {
         const b = (await tx.execute(sql`
           SELECT b.* FROM interior_refresh_bookings b
           JOIN subscriptions s ON s.id = b.subscription_id
+          JOIN cars c ON c.id = b.vehicle_id
           WHERE b.id = ${req.params.id} AND s.user_id = ${userId}
+            AND c.user_id = ${userId}
           FOR UPDATE OF b
         `)).rows[0] as any;
         if (!b) throw new Error("not_found");
