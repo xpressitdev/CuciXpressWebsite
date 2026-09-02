@@ -60,6 +60,7 @@ const serviceOptions: ServiceOption[] = [
     icon: <Shield className="w-6 h-6" />,
     features: [
       "Unlimited exterior washes",
+      "Limited-time promo: 1 complimentary Interior Refresh each active billing cycle",
       "Founding price: BND 39/mo (was 45)",
       "Locked in for life while subscribed",
       "Rain re-wash guarantee",

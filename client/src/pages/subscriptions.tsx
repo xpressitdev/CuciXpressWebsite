@@ -51,6 +51,7 @@ const PLANS: Plan[] = [
       "Base car + up to 2 more (B$39 + B$30/car)",
       "1 wash per day per vehicle",
       "Unlimited monthly washes",
+      "Limited-time: 1 complimentary Interior Refresh per active billing cycle",
       "Shared plan management",
       "Rain re-wash guarantee",
     ],
@@ -67,6 +68,7 @@ const PLANS: Plan[] = [
     features: [
       "Founding member price — locked in while subscribed",
       "Unlimited exterior washes",
+      "Limited-time: 1 complimentary Interior Refresh per active billing cycle",
       "1 registered vehicle",
       "Rain re-wash guarantee",
       "All 5 branches included",
@@ -325,6 +327,20 @@ export default function Subscriptions() {
               <p className="text-sm text-gray-500">
                 Pay-as-you-go average is <span className="font-bold">BND 12</span> per wash. Most members break even after 4 visits.
               </p>
+              <div className="mt-6 mx-auto max-w-3xl rounded-2xl border-2 border-black bg-[#FFE89E] px-5 py-4 text-left shadow-[5px_5px_0_0_#000]">
+                <div className="flex items-start gap-3">
+                  <Sparkles className="mt-0.5 h-5 w-5 flex-shrink-0 text-cuci-primary" />
+                  <div>
+                    <p className="font-extrabold text-gray-900">
+                      Limited-time subscriber perk: 1 complimentary Interior Refresh
+                    </p>
+                    <p className="mt-1 text-sm leading-relaxed text-gray-700">
+                      Available once per active paid billing cycle by advance appointment at
+                      Tungku Link. One benefit per subscription, including Family plans.
+                    </p>
+                  </div>
+                </div>
+              </div>
             </motion.div>
           </div>
         </section>
