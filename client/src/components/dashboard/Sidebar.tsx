@@ -577,6 +577,7 @@ export function DashMobileHeader({
   profile?: EditableProfile;
 }) {
   const initials = initialsOf(fullName);
+  const [editOpen, setEditOpen] = useState(false);
   return (
     <header className="md:hidden sticky top-0 z-30 cuci-dash-nav border-b border-black/10 h-14 px-4 flex items-center justify-between">
       <Link
@@ -592,24 +593,45 @@ export function DashMobileHeader({
         </span>
       </Link>
 
-      <AccountMenu
-        fullName={fullName}
-        onLogout={onLogout}
-        loggingOut={loggingOut}
-        profile={profile}
-        side="bottom"
-        align="end"
-        trigger={
+      <div className="flex items-center gap-1.5">
+        {profile && (
           <button
-            className="flex items-center gap-2 rounded-full pl-1 pr-1 py-1 hover:bg-white/70"
-            data-testid="button-dash-account-mobile"
+            type="button"
+            onClick={() => setEditOpen(true)}
+            className="inline-flex items-center gap-1 rounded-full border border-cuci-primary/30 bg-white/80 px-2.5 py-1.5 text-xs font-bold text-cuci-primary shadow-sm"
+            data-testid="button-dash-edit-profile-mobile-visible"
           >
-            <div className="w-9 h-9 rounded-full bg-gradient-to-br from-cuci-primary to-cuci-secondary text-white grid place-items-center font-bold text-xs shrink-0">
-              {initials || "?"}
-            </div>
+            <Pencil className="h-3.5 w-3.5" />
+            Edit profile
           </button>
-        }
-      />
+        )}
+        <AccountMenu
+          fullName={fullName}
+          onLogout={onLogout}
+          loggingOut={loggingOut}
+          profile={profile}
+          side="bottom"
+          align="end"
+          trigger={
+            <button
+              className="flex items-center gap-2 rounded-full p-1 hover:bg-white/70"
+              aria-label="Open account menu"
+              data-testid="button-dash-account-mobile"
+            >
+              <div className="w-9 h-9 rounded-full bg-gradient-to-br from-cuci-primary to-cuci-secondary text-white grid place-items-center font-bold text-xs shrink-0">
+                {initials || "?"}
+              </div>
+            </button>
+          }
+        />
+        {profile && (
+          <EditProfileDialog
+            open={editOpen}
+            onOpenChange={setEditOpen}
+            profile={profile}
+          />
+        )}
+      </div>
     </header>
   );
 }
