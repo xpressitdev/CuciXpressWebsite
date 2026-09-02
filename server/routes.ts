@@ -22,6 +22,7 @@ import { lucia } from "./auth/lucia";
 import { staffLucia } from "./auth/staffLucia";
 import { requireLuciaUser, requireStaff, requireStaffRole, requireStaffOrPlateOwner } from "./auth/middleware";
 import { registerSubscriptionRoutes, activatePocketPaySubscription } from "./subscriptions";
+import { verifyInteriorRefreshQr } from "./interiorRefresh";
 import { getSubscriptionPlan } from "@shared/subscriptionPlans";
 import { sendOtp, verifyOtp, OTP_CONSTANTS } from "./auth/otp";
 import { loginStaff, createStaff, hashStaffPassword, STAFF_ROLES, MIN_PASSWORD_LENGTH } from "./auth/staff";
@@ -278,6 +279,12 @@ export async function registerRoutes(app: Express): Promise<Server> {
   const excludeSubscriptionSales = (prefix: '' | 'o.' = '') =>
     sql.raw(`AND COALESCE(${prefix}order_type, '') <> 'counter_subscription'`);
 
+  // Interior Refresh is a subscriber promotional appointment, not a car wash
+  // sale. Its zero-value order stays in POS/history and the live queue, but
+  // must not influence wash, sales, loyalty, or service metrics.
+  const excludeInteriorRefreshMetrics = (prefix: '' | 'o.' = '') =>
+    sql.raw(`AND COALESCE(${prefix}order_type, '') <> 'interior_refresh_promo'`);
+
   // Gross sales = money actually collected from completed sales. Refund
   // handling differs by data lineage, so this SUM must too:
   //  - LIVE refund: the ORIGINAL order is flipped to status='refunded' (one
@@ -343,6 +350,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
         SELECT branch_id, COUNT(*)::int AS done_count
         FROM orders
         WHERE status = 'done'
+          ${excludeInteriorRefreshMetrics()}
           AND date(${bizDay()} AT TIME ZONE 'Asia/Brunei')
             = (now() AT TIME ZONE 'Asia/Brunei')::date
         GROUP BY branch_id
@@ -357,6 +365,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
                ROUND(AVG(EXTRACT(EPOCH FROM (completed_at - created_at)) / 60.0))::int AS avg_min
         FROM orders
         WHERE status = 'done'
+          ${excludeInteriorRefreshMetrics()}
           AND completed_at IS NOT NULL
           AND completed_at > created_at
           AND completed_at >= now() - INTERVAL '7 days'
@@ -914,7 +923,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
           SELECT *
             FROM orders
            WHERE date(${bizDay()} AT TIME ZONE 'Asia/Brunei') = ${targetDate}::date
-             ${branchFilter} ${realOrders()} ${excludeSubscriptionSales()}
+             ${branchFilter} ${realOrders()} ${excludeSubscriptionSales()} ${excludeInteriorRefreshMetrics()}
         ),
         paid AS (SELECT * FROM day_orders WHERE status <> 'refunded'),
         ref  AS (SELECT * FROM day_orders WHERE status =  'refunded')
@@ -936,7 +945,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
                COALESCE(SUM(CASE WHEN status =  'refunded' THEN total_cents ELSE 0 END), 0)::bigint AS refund_cents
           FROM orders
          WHERE date(${bizDay()} AT TIME ZONE 'Asia/Brunei') = ${targetDate}::date
-           ${branchFilter} ${realOrders()} ${excludeSubscriptionSales()}
+           ${branchFilter} ${realOrders()} ${excludeSubscriptionSales()} ${excludeInteriorRefreshMetrics()}
          GROUP BY 1
          ORDER BY 1
       `)).rows as Array<{ hour: number; sales_cents: string | number; refund_cents: string | number }>;
@@ -962,7 +971,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
                COALESCE(SUM(CASE WHEN status =  'refunded' THEN total_cents ELSE 0 END),0)::int AS refund_cents
           FROM orders
          WHERE date(${bizDay()} AT TIME ZONE 'Asia/Brunei') = ${targetDate}::date
-           ${branchFilter} ${realOrders()} ${excludeSubscriptionSales()}
+           ${branchFilter} ${realOrders()} ${excludeSubscriptionSales()} ${excludeInteriorRefreshMetrics()}
          GROUP BY payment_method, qr_provider
       `)).rows as Array<{ payment_method: string; qr_provider: string | null; sales_cents: number; refund_cents: number }>;
       const rateMap = await loadMdrRateMap(db);
@@ -1062,7 +1071,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
           COALESCE(SUM(CASE WHEN o.status <> 'refunded' THEN 1 + COALESCE(jsonb_array_length(o.addons),0) ELSE 0 END),0)::int AS items_sold
           FROM orders o
          WHERE date(${bizDay('o.')} AT TIME ZONE 'Asia/Brunei') BETWEEN ${from}::date AND ${to}::date
-           ${branchFilter} ${pmFilter} ${staffFilter} ${searchFilter} ${realOrders('o.')} ${excludeSubscriptionSales('o.')}
+           ${branchFilter} ${pmFilter} ${staffFilter} ${searchFilter} ${realOrders('o.')} ${excludeSubscriptionSales('o.')} ${excludeInteriorRefreshMetrics('o.')}
       `)).rows[0] as any;
 
       const countRow = (await db.execute(sql`
@@ -1102,7 +1111,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
                ${grossSalesCents('o.')}::int AS sales_cents
           FROM orders o
          WHERE date(${bizDay('o.')} AT TIME ZONE 'Asia/Brunei') BETWEEN ${from}::date AND ${to}::date
-           ${branchFilter} ${pmFilter} ${staffFilter} ${searchFilter} ${realOrders('o.')} ${excludeSubscriptionSales('o.')}
+           ${branchFilter} ${pmFilter} ${staffFilter} ${searchFilter} ${realOrders('o.')} ${excludeSubscriptionSales('o.')} ${excludeInteriorRefreshMetrics('o.')}
          GROUP BY o.payment_method, o.qr_provider
       `)).rows as Array<{ payment_method: string; qr_provider: string | null; sales_cents: number }>;
       const rateMap = await loadMdrRateMap(db);
@@ -1822,7 +1831,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
           COALESCE(SUM(CASE WHEN o.status =  'refunded' THEN o.total_cents ELSE 0 END),0)::bigint  AS refund_cents
           FROM orders o
          WHERE date(${bizDay('o.')} AT TIME ZONE 'Asia/Brunei') BETWEEN ${from}::date AND ${to}::date
-           ${branchFilter} ${realOrders('o.')}
+           ${branchFilter} ${realOrders('o.')} ${excludeInteriorRefreshMetrics('o.')}
          GROUP BY 1, 2
          ORDER BY sales_cents DESC
       `)).rows as Array<any>;
@@ -1911,7 +1920,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
             FROM orders
            WHERE status <> 'refunded'
              AND date(${bizDay()} AT TIME ZONE 'Asia/Brunei') BETWEEN ${from}::date AND ${to}::date
-             ${branchFilter} ${realOrders()} ${excludeSubscriptionSales()}
+             ${branchFilter} ${realOrders()} ${excludeSubscriptionSales()} ${excludeInteriorRefreshMetrics()}
         ),
         pkg_items AS (
           SELECT
@@ -1955,7 +1964,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
           FROM orders
          WHERE status <> 'refunded'
            AND date(${bizDay()} AT TIME ZONE 'Asia/Brunei') BETWEEN ${from}::date AND ${to}::date
-           ${branchFilter} ${realOrders()} ${excludeSubscriptionSales()}
+           ${branchFilter} ${realOrders()} ${excludeSubscriptionSales()} ${excludeInteriorRefreshMetrics()}
       `)).rows[0] as { items_sold: number; revenue_cents: number };
 
       const totalQty     = Number(totalsRow.items_sold ?? 0);
@@ -2034,7 +2043,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
           FROM days
           LEFT JOIN orders o
             ON date(${bizDay('o.')} AT TIME ZONE 'Asia/Brunei') = d
-            ${branchFilter} ${realOrders('o.')} ${excludeSubscriptionSales('o.')}
+            ${branchFilter} ${realOrders('o.')} ${excludeSubscriptionSales('o.')} ${excludeInteriorRefreshMetrics('o.')}
          GROUP BY d
          ORDER BY d
       `)).rows as Array<{ date: string; sales_cents: string | number; refund_cents: string | number; transactions: number }>;
@@ -2049,7 +2058,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
           LEFT JOIN orders o
             ON o.branch_id = b.id
            AND date(${bizDay('o.')} AT TIME ZONE 'Asia/Brunei') BETWEEN ${from}::date AND ${to}::date
-           ${realOrders('o.')} ${excludeSubscriptionSales('o.')}
+           ${realOrders('o.')} ${excludeSubscriptionSales('o.')} ${excludeInteriorRefreshMetrics('o.')}
          ${branchId !== null ? sql`WHERE b.id = ${branchId}` : sql``}
          GROUP BY b.id, b.name
          ORDER BY sales_cents DESC, b.name
@@ -2064,7 +2073,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
           FROM orders o
          WHERE date(${bizDay('o.')} AT TIME ZONE 'Asia/Brunei') BETWEEN ${from}::date AND ${to}::date
            AND o.status <> 'refunded'
-           ${branchFilter} ${realOrders('o.')} ${excludeSubscriptionSales('o.')}
+           ${branchFilter} ${realOrders('o.')} ${excludeSubscriptionSales('o.')} ${excludeInteriorRefreshMetrics('o.')}
          GROUP BY 1, 2
          ORDER BY 1, 2
       `)).rows as Array<{ dow: number; hour: number; transactions: number; sales_cents: string | number }>;
@@ -2077,7 +2086,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
                COUNT(*) FILTER (WHERE o.status =  'refunded')::int AS refund_count
           FROM orders o
          WHERE date(${bizDay('o.')} AT TIME ZONE 'Asia/Brunei') BETWEEN ${from}::date AND ${to}::date
-           ${branchFilter} ${realOrders('o.')} ${excludeSubscriptionSales('o.')}
+           ${branchFilter} ${realOrders('o.')} ${excludeSubscriptionSales('o.')} ${excludeInteriorRefreshMetrics('o.')}
       `)).rows[0] as any;
 
       const sales = Number(totalsRow.sales_cents ?? 0);
@@ -2287,20 +2296,20 @@ export async function registerRoutes(app: Express): Promise<Server> {
         (c.user_id IS NOT NULL)                                                                 AS has_account,
         (SELECT COUNT(*)::int FROM cars car WHERE car.customer_id = c.id)                       AS vehicle_count,
         (SELECT COUNT(*)::int FROM orders o JOIN cars car ON car.id = o.vehicle_id
-          WHERE car.customer_id = c.id AND o.status <> 'refunded')                              AS visits,
+          WHERE car.customer_id = c.id AND o.status <> 'refunded' AND COALESCE(o.order_type, '') <> 'interior_refresh_promo') AS visits,
         (SELECT COALESCE(SUM(o.total_cents),0)::bigint FROM orders o JOIN cars car ON car.id = o.vehicle_id
-          WHERE car.customer_id = c.id AND o.status <> 'refunded')                              AS total_spent_cents,
+          WHERE car.customer_id = c.id AND o.status <> 'refunded' AND COALESCE(o.order_type, '') <> 'interior_refresh_promo') AS total_spent_cents,
         (SELECT MAX(o.created_at) FROM orders o JOIN cars car ON car.id = o.vehicle_id
-          WHERE car.customer_id = c.id)                                                         AS last_visit_at,
+          WHERE car.customer_id = c.id AND COALESCE(o.order_type, '') <> 'interior_refresh_promo') AS last_visit_at,
         (SELECT car.vip_tier FROM cars car
           WHERE car.customer_id = c.id AND car.vip_tier IS NOT NULL
           ORDER BY CASE car.vip_tier WHEN 'gold' THEN 1 WHEN 'silver' THEN 2 WHEN 'bronze' THEN 3 ELSE 9 END
           LIMIT 1)                                                                              AS vip_tier,
         (SELECT b.name FROM orders o JOIN cars car ON car.id = o.vehicle_id JOIN branches b ON b.id = o.branch_id
-          WHERE car.customer_id = c.id AND o.status <> 'refunded'
+          WHERE car.customer_id = c.id AND o.status <> 'refunded' AND COALESCE(o.order_type, '') <> 'interior_refresh_promo'
           GROUP BY b.id, b.name ORDER BY COUNT(*) DESC, MAX(o.created_at) DESC LIMIT 1)         AS favourite_branch,
         (SELECT COUNT(DISTINCT o.branch_id)::int FROM orders o JOIN cars car ON car.id = o.vehicle_id
-          WHERE car.customer_id = c.id AND o.status <> 'refunded')                              AS branches_visited,
+          WHERE car.customer_id = c.id AND o.status <> 'refunded' AND COALESCE(o.order_type, '') <> 'interior_refresh_promo') AS branches_visited,
         EXISTS (SELECT 1 FROM orders o JOIN cars car ON car.id = o.vehicle_id
                  WHERE car.customer_id = c.id AND o.legacy_source IS NOT NULL)                  AS has_legacy,
         EXISTS (SELECT 1 FROM orders o JOIN cars car ON car.id = o.vehicle_id
@@ -2308,7 +2317,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
         (SELECT STRING_AGG(car.license_plate, '; ' ORDER BY car.id)
            FROM cars car WHERE car.customer_id = c.id)                                          AS plates,
         (SELECT ARRAY_AGG(DISTINCT o.branch_id) FROM orders o JOIN cars car ON car.id = o.vehicle_id
-          WHERE car.customer_id = c.id AND o.branch_id IS NOT NULL)                             AS branch_ids
+          WHERE car.customer_id = c.id AND o.branch_id IS NOT NULL AND COALESCE(o.order_type, '') <> 'interior_refresh_promo') AS branch_ids
       FROM customers c
 
       UNION ALL
@@ -2326,27 +2335,27 @@ export async function registerRoutes(app: Express): Promise<Server> {
         COALESCE(car.last_seen_at, '2020-01-01'::timestamptz)                                   AS created_at,
         FALSE                                                                                    AS has_account,
         1                                                                                        AS vehicle_count,
-        (SELECT COUNT(*)::int FROM orders o WHERE o.vehicle_id = car.id AND o.status <> 'refunded')        AS visits,
+        (SELECT COUNT(*)::int FROM orders o WHERE o.vehicle_id = car.id AND o.status <> 'refunded' AND COALESCE(o.order_type, '') <> 'interior_refresh_promo') AS visits,
         GREATEST(
           car.total_spent_cents,
-          COALESCE((SELECT SUM(o.total_cents)::bigint FROM orders o WHERE o.vehicle_id = car.id AND o.status <> 'refunded'), 0)
+          COALESCE((SELECT SUM(o.total_cents)::bigint FROM orders o WHERE o.vehicle_id = car.id AND o.status <> 'refunded' AND COALESCE(o.order_type, '') <> 'interior_refresh_promo'), 0)
         )                                                                                        AS total_spent_cents,
         COALESCE(
-          (SELECT MAX(o.created_at) FROM orders o WHERE o.vehicle_id = car.id),
+          (SELECT MAX(o.created_at) FROM orders o WHERE o.vehicle_id = car.id AND COALESCE(o.order_type, '') <> 'interior_refresh_promo'),
           car.last_seen_at
         )                                                                                        AS last_visit_at,
         car.vip_tier                                                                             AS vip_tier,
         (SELECT b.name FROM orders o JOIN branches b ON b.id = o.branch_id
-          WHERE o.vehicle_id = car.id AND o.status <> 'refunded'
+          WHERE o.vehicle_id = car.id AND o.status <> 'refunded' AND COALESCE(o.order_type, '') <> 'interior_refresh_promo'
           GROUP BY b.id, b.name ORDER BY COUNT(*) DESC, MAX(o.created_at) DESC LIMIT 1)          AS favourite_branch,
         (SELECT COUNT(DISTINCT o.branch_id)::int FROM orders o
-          WHERE o.vehicle_id = car.id AND o.status <> 'refunded')                                AS branches_visited,
+          WHERE o.vehicle_id = car.id AND o.status <> 'refunded' AND COALESCE(o.order_type, '') <> 'interior_refresh_promo') AS branches_visited,
         (car.vip_tier IS NOT NULL OR EXISTS (
           SELECT 1 FROM orders o WHERE o.vehicle_id = car.id AND o.legacy_source IS NOT NULL))   AS has_legacy,
         EXISTS (SELECT 1 FROM orders o WHERE o.vehicle_id = car.id AND o.qr_provider = 'pocket_pay')        AS is_online,
         car.license_plate                                                                        AS plates,
         (SELECT ARRAY_AGG(DISTINCT o.branch_id) FROM orders o
-          WHERE o.vehicle_id = car.id AND o.branch_id IS NOT NULL)                               AS branch_ids
+          WHERE o.vehicle_id = car.id AND o.branch_id IS NOT NULL AND COALESCE(o.order_type, '') <> 'interior_refresh_promo') AS branch_ids
       FROM cars car
       WHERE car.customer_id IS NULL
         AND car.user_id IS NULL
@@ -2371,10 +2380,10 @@ export async function registerRoutes(app: Express): Promise<Server> {
         COALESCE(car.last_seen_at, u.created_at, '2020-01-01'::timestamptz)                    AS created_at,
         TRUE                                                                                     AS has_account,
         1                                                                                        AS vehicle_count,
-        (SELECT COUNT(*)::int FROM orders o WHERE o.vehicle_id = car.id AND o.status <> 'refunded')       AS visits,
+        (SELECT COUNT(*)::int FROM orders o WHERE o.vehicle_id = car.id AND o.status <> 'refunded' AND COALESCE(o.order_type, '') <> 'interior_refresh_promo') AS visits,
         GREATEST(
           car.total_spent_cents,
-          COALESCE((SELECT SUM(o.total_cents)::bigint FROM orders o WHERE o.vehicle_id = car.id AND o.status <> 'refunded'), 0)
+          COALESCE((SELECT SUM(o.total_cents)::bigint FROM orders o WHERE o.vehicle_id = car.id AND o.status <> 'refunded' AND COALESCE(o.order_type, '') <> 'interior_refresh_promo'), 0)
         )                                                                                        AS total_spent_cents,
         COALESCE(
           (SELECT MAX(o.created_at) FROM orders o WHERE o.vehicle_id = car.id),
@@ -2787,8 +2796,8 @@ export async function registerRoutes(app: Express): Promise<Server> {
                u.phone_number AS holder_user_phone,
                c.name         AS holder_customer_name,
                c.phone        AS holder_customer_phone,
-               (SELECT COUNT(*)::int FROM orders o WHERE o.vehicle_id = car.id AND o.status <> 'refunded') AS wash_count,
-               (SELECT MAX(o.created_at) FROM orders o WHERE o.vehicle_id = car.id AND o.status <> 'refunded') AS last_visit_at
+               (SELECT COUNT(*)::int FROM orders o WHERE o.vehicle_id = car.id AND o.status <> 'refunded' AND COALESCE(o.order_type, '') <> 'interior_refresh_promo') AS wash_count,
+               (SELECT MAX(o.created_at) FROM orders o WHERE o.vehicle_id = car.id AND o.status <> 'refunded' AND COALESCE(o.order_type, '') <> 'interior_refresh_promo') AS last_visit_at
           FROM cars car
           LEFT JOIN users u     ON u.id = car.user_id
           LEFT JOIN customers c ON c.id = car.customer_id
@@ -3040,8 +3049,8 @@ export async function registerRoutes(app: Express): Promise<Server> {
       const vehicles = (await db.execute(sql`
         SELECT id, license_plate, brand, model, color, "type", last_seen_at,
                vip_tier, vip_rank, total_visits AS cached_total_visits,
-               (SELECT COUNT(*)::int FROM orders o WHERE o.vehicle_id = cars.id AND o.status <> 'refunded') AS visit_count,
-               (SELECT COALESCE(SUM(o.total_cents),0)::bigint FROM orders o WHERE o.vehicle_id = cars.id AND o.status <> 'refunded') AS spent_cents
+               (SELECT COUNT(*)::int FROM orders o WHERE o.vehicle_id = cars.id AND o.status <> 'refunded' AND COALESCE(o.order_type, '') <> 'interior_refresh_promo') AS visit_count,
+               (SELECT COALESCE(SUM(o.total_cents),0)::bigint FROM orders o WHERE o.vehicle_id = cars.id AND o.status <> 'refunded' AND COALESCE(o.order_type, '') <> 'interior_refresh_promo') AS spent_cents
           FROM cars
          WHERE customer_id = ${id}
          ORDER BY
@@ -3073,6 +3082,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
                COUNT(*) FILTER (WHERE o.legacy_source IS NULL AND o.status <> 'refunded')::int AS native_visits
           FROM orders o
          WHERE o.vehicle_id IN (SELECT id FROM cars WHERE customer_id = ${id})
+           AND COALESCE(o.order_type, '') <> 'interior_refresh_promo'
       `)).rows[0] as any;
 
       // Favourite branch (most paid visits, ties broken by recency).
@@ -3082,6 +3092,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
           JOIN branches b ON b.id = o.branch_id
          WHERE o.vehicle_id IN (SELECT id FROM cars WHERE customer_id = ${id})
            AND o.status <> 'refunded'
+           AND COALESCE(o.order_type, '') <> 'interior_refresh_promo'
          GROUP BY b.id, b.name
          ORDER BY COUNT(*) DESC, MAX(o.created_at) DESC
          LIMIT 1
@@ -3095,6 +3106,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
           FROM orders o
           JOIN branches b ON b.id = o.branch_id
          WHERE o.vehicle_id IN (SELECT id FROM cars WHERE customer_id = ${id})
+           AND COALESCE(o.order_type, '') <> 'interior_refresh_promo'
          GROUP BY b.id, b.name
          ORDER BY visits DESC, b.name
       `)).rows.map((r: any) => ({ ...r, spent_cents: Number(r.spent_cents ?? 0) }));
@@ -3384,7 +3396,9 @@ export async function registerRoutes(app: Express): Promise<Server> {
         SELECT b.id, b.name, b.location, b.google_maps_url, b.google_maps_embed_url,
                b.review_url, b.is_open, b.status, b.status_note, b.queue_count, b.last_queue_update,
                (SELECT COUNT(*)::int FROM staff  s WHERE s.branch_id  = b.id AND s.is_active = true) AS staff_count,
-               (SELECT COUNT(*)::int FROM orders o WHERE o.branch_id = b.id) AS order_count
+               (SELECT COUNT(*)::int FROM orders o
+                 WHERE o.branch_id = b.id
+                   AND COALESCE(o.order_type, '') <> 'interior_refresh_promo') AS order_count
           FROM branches b
          ORDER BY b.name
       `)).rows;
@@ -5370,6 +5384,25 @@ export async function registerRoutes(app: Express): Promise<Server> {
     } catch {
       return res.status(400).json({ success: false, message: 'Invalid QR code format' });
     }
+    // Subscription routes are registered after this generic endpoint, so the
+    // Interior Refresh branch must be dispatched here rather than registered
+    // as another identical Express route later.
+    if (paymentData?.type === 'INTERIOR_REFRESH') {
+      try {
+        const staffUser = req.staff!.user as any;
+        const result = await db.transaction((tx) =>
+          verifyInteriorRefreshQr(tx, paymentData, scanBranchId, {
+            id: String(staffUser.id),
+            role: String(staffUser.role),
+            branchId: staffUser.branchId == null ? null : Number(staffUser.branchId),
+          }),
+        );
+        return res.status(result.http).json(result.body);
+      } catch (error) {
+        console.error('[verify-qr.interior-refresh] failed:', error);
+        return res.status(500).json({ success: false, message: 'Verification system error' });
+      }
+    }
     if (paymentData?.type !== 'CUCI_XPRESS_PAYMENT' || !paymentData?.order_id) {
       return res.status(400).json({ success: false, message: 'Invalid Cuci Xpress payment QR code' });
     }
@@ -5508,6 +5541,12 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
         // 4. Allocate next T-NNN for this branch + today (UTC). Same algorithm
         //    as /api/pos/orders so prepaid + walk-in tickets share one stream.
+        await tx.execute(sql`
+          SELECT pg_advisory_xact_lock(
+            ${order.branch_id},
+            ((now() AT TIME ZONE 'UTC')::date - DATE '2000-01-01')::int
+          )
+        `);
         const seqRow = (await tx.execute(sql`
           SELECT COALESCE(
             MAX( NULLIF(regexp_replace(ticket_code, '\\D', '', 'g'), '')::int ),
@@ -6823,24 +6862,29 @@ export async function registerRoutes(app: Express): Promise<Server> {
     const statsPromise = db.execute(sql`
       SELECT
         (SELECT COUNT(*)::int FROM orders
-           WHERE customer_id = ${userId} AND status = 'done') AS total_done,
+           WHERE customer_id = ${userId} AND status = 'done'
+             AND COALESCE(order_type, '') <> 'interior_refresh_promo') AS total_done,
         (SELECT COALESCE(SUM(total_cents),0)::int FROM orders
-           WHERE customer_id = ${userId} AND status IN ('done','paid','washing','queued')) AS total_spent_cents,
+           WHERE customer_id = ${userId} AND status IN ('done','paid','washing','queued')
+             AND COALESCE(order_type, '') <> 'interior_refresh_promo') AS total_spent_cents,
         (SELECT COALESCE(SUM(remaining_washes),0)::int FROM memberships m
            JOIN customers cu ON cu.id = m.customer_id
            WHERE cu.user_id = ${userId} AND m.status = 'active') AS remaining_washes,
         (SELECT COUNT(*)::int FROM orders
            WHERE customer_id = ${userId}
              AND status = 'done'
+              AND COALESCE(order_type, '') <> 'interior_refresh_promo'
              AND date_trunc('month', created_at AT TIME ZONE 'Asia/Brunei')
                  = date_trunc('month', (now() AT TIME ZONE 'Asia/Brunei'))) AS washes_this_month,
         (SELECT COUNT(*)::int FROM orders
            WHERE customer_id = ${userId}
              AND status = 'done'
+              AND COALESCE(order_type, '') <> 'interior_refresh_promo'
              AND date_trunc('month', created_at AT TIME ZONE 'Asia/Brunei')
                  = date_trunc('month', (now() AT TIME ZONE 'Asia/Brunei') - interval '1 month')) AS washes_last_month,
         (SELECT MIN(created_at) FROM orders
-           WHERE customer_id = ${userId}) AS member_since,
+           WHERE customer_id = ${userId}
+             AND COALESCE(order_type, '') <> 'interior_refresh_promo') AS member_since,
         (SELECT COALESCE(SUM(price_cents),0)::int FROM memberships m
            JOIN customers cu ON cu.id = m.customer_id
            WHERE cu.user_id = ${userId} AND m.status = 'active') AS active_membership_cost_cents
@@ -7031,6 +7075,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
              o.package_price_cents, o.addons, o.subtotal_cents, o.discount_cents,
              o.promo_discount_cents, o.total_cents, o.paid_amount_cents,
              o.change_cents, o.item_notes, o.ticket_code, o.payment_method,
+             o.order_type,
              CASE WHEN o.payment_method = 'qr_code' THEN o.qr_provider ELSE NULL END AS qr_provider,
              CASE WHEN o.qr_provider = 'pocket_pay' THEN o.payment_ref ELSE NULL END AS payment_ref,
              s.name AS cashier_name,
@@ -7077,6 +7122,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
         SELECT plate, COUNT(*)::int AS total_washes
         FROM orders
         WHERE customer_id = ${userId} AND status = 'done'
+          AND COALESCE(order_type, '') <> 'interior_refresh_promo'
         GROUP BY plate
       ) o ON o.plate = c.license_plate
       WHERE c.user_id = ${userId}
@@ -7118,6 +7164,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
             FROM user_plates up
             JOIN orders o
               ON o.status = 'done'
+             AND COALESCE(o.order_type, '') <> 'interior_refresh_promo'
              AND (
                   o.customer_id = up.user_id
                OR (up.car_id IS NOT NULL AND o.vehicle_id = up.car_id)
@@ -8711,6 +8758,12 @@ export async function registerRoutes(app: Express): Promise<Server> {
         const subtotal = pkg.price_cents + addonsTotal;
 
         // 4. Allocate the next ticket code for this branch + day.
+        await tx.execute(sql`
+          SELECT pg_advisory_xact_lock(
+            ${effectiveBranchId},
+            ((now() AT TIME ZONE 'UTC')::date - DATE '2000-01-01')::int
+          )
+        `);
         const seqRow = (await tx.execute(sql`
           SELECT COALESCE(
             MAX( NULLIF(regexp_replace(ticket_code, '\\D', '', 'g'), '')::int ),
@@ -10003,6 +10056,12 @@ export async function registerRoutes(app: Express): Promise<Server> {
     // /api/verify-qr and /api/pos/orders so prepaid + walk-in tickets share one
     // stream.
     const allocateTicket = async (tx: any, brId: number) => {
+      await tx.execute(sql`
+        SELECT pg_advisory_xact_lock(
+          ${brId},
+          ((now() AT TIME ZONE 'UTC')::date - DATE '2000-01-01')::int
+        )
+      `);
       const seqRow = (await tx.execute(sql`
         SELECT COALESCE(
           MAX( NULLIF(regexp_replace(ticket_code, '\\D', '', 'g'), '')::int ),
@@ -10358,7 +10417,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
              COALESCE(SUM(CASE WHEN status =  'refunded' THEN 1 ELSE 0 END), 0)::int          AS refund_count
         FROM orders
        WHERE branch_id = ${branchId}
-         AND ${dayFilter} ${realOrders()}
+         AND ${dayFilter} ${realOrders()} ${excludeInteriorRefreshMetrics()}
        GROUP BY payment_method, qr_provider
        ORDER BY payment_method, qr_provider
     `)).rows as Array<{
@@ -10717,6 +10776,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
          WHERE vehicle_id IN (
            SELECT id FROM cars WHERE customer_id = ${customer.id}
          )
+           AND COALESCE(order_type, '') <> 'interior_refresh_promo'
       `)).rows[0] as any;
       res.json({
         customer,
@@ -11019,11 +11079,15 @@ export async function registerRoutes(app: Express): Promise<Server> {
       const stats = (await db.execute(sql`
         SELECT COUNT(*)::int AS visits,
                COALESCE(SUM(total_cents), 0)::int AS spent_cents
-          FROM orders WHERE vehicle_id = ${id}
+          FROM orders
+         WHERE vehicle_id = ${id}
+           AND COALESCE(order_type, '') <> 'interior_refresh_promo'
       `)).rows[0] as any;
       const fav = (await db.execute(sql`
         SELECT branch_id, COUNT(*)::int AS n
-          FROM orders WHERE vehicle_id = ${id}
+          FROM orders
+         WHERE vehicle_id = ${id}
+           AND COALESCE(order_type, '') <> 'interior_refresh_promo'
          GROUP BY branch_id ORDER BY n DESC LIMIT 1
       `)).rows[0] as any;
       res.json({

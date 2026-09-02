@@ -67,8 +67,8 @@ function appointmentTime(iso: string) {
 }
 
 function allowedActions(status: InteriorRefreshAppointment["status"]) {
-  if (status === "booked") return ["checked_in", "cancelled", "no_show"] as const;
-  if (status === "checked_in") return ["completed", "cancelled"] as const;
+  if (status === "booked") return ["cancelled", "no_show"] as const;
+  if (status === "checked_in") return ["completed"] as const;
   return [] as const;
 }
 
@@ -328,7 +328,7 @@ function DailySchedule() {
                       <Button
                         key={status}
                         size="sm"
-                        variant={status === "checked_in" || status === "completed" ? "default" : "outline"}
+                        variant={status === "completed" ? "default" : "outline"}
                         disabled={update.isPending}
                         onClick={() => {
                           const destructive = status === "cancelled" || status === "no_show";
@@ -345,7 +345,7 @@ function DailySchedule() {
                 </div>
               ))}
             </div>
-            <p className="mt-3 flex items-center gap-1 text-xs text-gray-500"><Sparkles className="h-3 w-3" />Check-in and no-show permanently consume the cycle benefit. Cancellation releases it unless already checked in.</p>
+            <p className="mt-3 flex items-center gap-1 text-xs text-gray-500"><Sparkles className="h-3 w-3" />Customer QR scan checks in and claims the benefit. No-show also consumes it; cancellation before check-in releases it.</p>
           </TabsContent>
         </Tabs>
       </CardContent>

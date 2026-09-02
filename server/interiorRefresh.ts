@@ -49,6 +49,162 @@ function dbError(res: Response, label: string, err: any) {
   return res.status(500).json({ error: "internal_error" });
 }
 
+function ticketOrderBody(order: any, newlyAllocated: boolean, message: string) {
+  return {
+    success: true,
+    message,
+    newly_allocated: newlyAllocated,
+    order: {
+      id: order.id,
+      ticket_code: order.ticket_code,
+      plate: order.plate,
+      package_name: order.package_name,
+      total_cents: Number(order.total_cents ?? 0),
+      branch_id: order.branch_id,
+      branch_name: order.branch_name,
+      status: order.status,
+      customer: order.customer_name
+        ? { name: order.customer_name, phone: order.customer_phone ?? null }
+        : null,
+      is_prepaid: true,
+    },
+  };
+}
+
+/**
+ * Claim an Interior Refresh appointment from the shared lane QR endpoint.
+ * The caller owns the transaction so locking the booking and entitlement is
+ * inseparable from creating the zero-value POS order.
+ */
+export async function verifyInteriorRefreshQr(
+  tx: any,
+  payload: any,
+  scanBranchId: number | null,
+  staff: { id: string; role: string; branchId: number | null },
+) {
+  if (typeof payload?.booking_id !== "string" || payload.booking_id.length === 0) {
+    return { http: 400, body: { success: false, code: "invalid_interior_refresh_qr", message: "Invalid Interior Refresh QR code" } };
+  }
+
+  const c = await config(tx);
+  if (!c?.branch_id) {
+    return { http: 503, body: { success: false, code: "tungku_not_configured", message: "Interior Refresh Tungku branch is not configured" } };
+  }
+  if (scanBranchId === null || Number(c.branch_id) !== scanBranchId) {
+    return { http: 403, body: { success: false, code: "tungku_branch_required", message: "Interior Refresh appointments may only be scanned at the configured Tungku branch" } };
+  }
+  if (staff.role !== "owner" && Number(staff.branchId) !== Number(c.branch_id)) {
+    return { http: 403, body: { success: false, code: "tungku_staff_only", message: "Only Tungku staff may scan Interior Refresh appointments" } };
+  }
+
+  const booking = (await tx.execute(sql`
+    SELECT b.*, e.status AS entitlement_status, c.license_plate,
+      br.name AS branch_name, s.user_id,
+      u.first_name, u.last_name, u.phone_number
+    FROM interior_refresh_bookings b
+    JOIN interior_refresh_entitlements e ON e.id = b.entitlement_id
+    JOIN subscriptions s ON s.id = b.subscription_id
+    JOIN cars c ON c.id = b.vehicle_id
+    JOIN branches br ON br.id = b.branch_id
+    LEFT JOIN users u ON u.id = s.user_id
+    WHERE b.id = ${payload.booking_id} AND b.branch_id = ${c.branch_id}
+    FOR UPDATE OF b, e
+  `)).rows[0] as any;
+  if (!booking) {
+    return { http: 404, body: { success: false, code: "booking_not_found", message: "Interior Refresh booking was not found at this branch" } };
+  }
+
+  // The day comparison deliberately happens in PostgreSQL's Brunei timezone,
+  // rather than using the server's local timezone.
+  const timing = (await tx.execute(sql`
+    SELECT
+      ((${booking.slot_start}::timestamptz AT TIME ZONE 'Asia/Brunei')::date
+        = (now() AT TIME ZONE 'Asia/Brunei')::date) AS correct_day,
+      now() >= ${booking.slot_start}::timestamptz - interval '15 minutes' AS check_in_open
+  `)).rows[0] as any;
+  if (!timing?.correct_day || !timing?.check_in_open) {
+    return { http: 409, body: { success: false, code: "check_in_wrong_day", message: "This appointment can only be checked in on its Brunei booking day, from 15 minutes before its slot" } };
+  }
+
+  const paymentRef = `INTERIOR_REFRESH:${booking.id}`;
+  const existing = (await tx.execute(sql`
+    SELECT o.*, br.name AS branch_name
+    FROM orders o
+    LEFT JOIN branches br ON br.id = o.branch_id
+    WHERE o.payment_ref = ${paymentRef} AND o.qr_provider = 'interior_refresh'
+    LIMIT 1
+    FOR UPDATE OF o
+  `)).rows[0] as any;
+  if (existing) {
+    existing.customer_name = [booking.first_name, booking.last_name].filter(Boolean).join(" ") || null;
+    existing.customer_phone = booking.phone_number;
+    return { http: 200, body: ticketOrderBody(existing, false, "Already in queue") };
+  }
+  if (booking.status !== "booked" || booking.entitlement_status !== "booked") {
+    return { http: 409, body: { success: false, code: "booking_not_checkin_ready", message: "This Interior Refresh booking is no longer available for check-in" } };
+  }
+
+  const serviceId = booking.service_history_id || (await tx.execute(sql`
+    INSERT INTO service_history
+      (user_id, car_plate, service_type, branch, amount, status,
+       check_in_time, payment_reference, notes)
+    VALUES (${booking.user_id}, ${booking.license_plate}, 'interior_refresh_promo',
+      ${booking.branch_name}, 0, 'checked_in', now(), ${paymentRef},
+      'Subscriber Interior Refresh promotional benefit; excluded from wash, loyalty and sales reporting')
+    RETURNING id
+  `)).rows[0]?.id;
+
+  const consumed = (await tx.execute(sql`
+    UPDATE interior_refresh_entitlements SET status='used', consumed_at=now()
+    WHERE id=${booking.entitlement_id} AND status='booked' RETURNING id
+  `)).rows;
+  if (!consumed.length) {
+    throw new Error("interior_refresh_entitlement_invariant_failed");
+  }
+  const checkedIn = (await tx.execute(sql`
+    UPDATE interior_refresh_bookings
+    SET status='checked_in', checked_in_at=now(), updated_by_staff_id=${staff.id},
+      service_history_id=${serviceId ?? null}, updated_at=now()
+    WHERE id=${booking.id} AND status='booked'
+    RETURNING id
+  `)).rows;
+  if (!checkedIn.length) {
+    throw new Error("interior_refresh_booking_invariant_failed");
+  }
+
+  await tx.execute(sql`
+    SELECT pg_advisory_xact_lock(
+      ${Number(c.branch_id)},
+      ((now() AT TIME ZONE 'UTC')::date - DATE '2000-01-01')::int
+    )
+  `);
+  const seqRow = (await tx.execute(sql`
+    SELECT COALESCE(MAX(NULLIF(regexp_replace(ticket_code, '\\D', '', 'g'), '')::int), 0) + 1 AS next_seq
+    FROM orders
+    WHERE branch_id=${c.branch_id} AND ticket_day=(now() AT TIME ZONE 'UTC')::date
+  `)).rows[0] as any;
+  const ticketCode = `T-${String(seqRow?.next_seq ?? 1).padStart(3, "0")}`;
+  const order = (await tx.execute(sql`
+    INSERT INTO orders (
+      id, branch_id, plate, vehicle_id, customer_id,
+      package_name, package_price_cents, addons, subtotal_cents, total_cents,
+      payment_method, payment_ref, qr_provider, order_type, status,
+      ticket_code, ticket_day, claimed_at
+    ) VALUES (
+      ${`ord_ir_${randomUUID()}`}, ${c.branch_id}, ${booking.license_plate},
+      ${booking.vehicle_id}, ${booking.user_id},
+      'Interior Refresh', 0, '[]'::jsonb, 0, 0,
+      'voucher', ${paymentRef}, 'interior_refresh', 'interior_refresh_promo', 'queued',
+      ${ticketCode}, (now() AT TIME ZONE 'UTC')::date, now()
+    )
+    RETURNING *
+  `)).rows[0] as any;
+  order.branch_name = booking.branch_name;
+  order.customer_name = [booking.first_name, booking.last_name].filter(Boolean).join(" ") || null;
+  order.customer_phone = booking.phone_number;
+  return { http: 200, body: ticketOrderBody(order, true, "Ticket allocated") };
+}
+
 const bookingSchema = z.object({
   vehicle_id: z.coerce.number().int().positive(),
   date: z.string(),
@@ -100,7 +256,8 @@ export function registerInteriorRefreshRoutes(app: Express) {
                  = ANY((string_to_array(COALESCE(s.car_plate,''), ','))[1:(CASE WHEN s.plan_id='family' THEN 3 ELSE 1 END)]))
       `)).rows;
       const bookings = (await db.execute(sql`
-        SELECT b.*, c.license_plate, br.name AS branch_name
+        SELECT b.*, c.license_plate, br.name AS branch_name,
+          (b.status IN ('checked_in','completed','no_show')) AS claimed
         FROM interior_refresh_bookings b
         JOIN subscriptions s ON s.id = b.subscription_id
         JOIN cars c ON c.id = b.vehicle_id
@@ -244,6 +401,40 @@ export function registerInteriorRefreshRoutes(app: Express) {
     }
   });
 
+  // The QR deliberately contains only an opaque booking identifier. It is
+  // issued only for a customer-owned appointment; all authority checks occur
+  // again when staff scans it.
+  app.post("/api/subscriptions/interior-refresh/bookings/:id/qr", requireLuciaUser, async (req, res) => {
+    try {
+      const booking = (await db.execute(sql`
+        SELECT b.id, b.status, b.slot_start, c.license_plate, br.name AS branch_name,
+          e.period_end
+        FROM interior_refresh_bookings b
+        JOIN subscriptions s ON s.id=b.subscription_id
+        JOIN interior_refresh_entitlements e ON e.id=b.entitlement_id
+        JOIN cars c ON c.id=b.vehicle_id
+        JOIN branches br ON br.id=b.branch_id
+        WHERE b.id=${req.params.id} AND s.user_id=${Number(req.lucia!.user!.id)}
+          AND b.status IN ('booked','checked_in','completed','no_show')
+        LIMIT 1
+      `)).rows[0] as any;
+      if (!booking) return res.status(404).json({ error: "booking_not_found" });
+      res.set("Cache-Control", "no-store");
+      res.json({
+        ok: true,
+        voucher: {
+          booking_id: booking.id,
+          plate: booking.license_plate,
+          appointment_at: booking.slot_start,
+          branch_name: booking.branch_name,
+          period_end: booking.period_end,
+          claimed: booking.status !== "booked",
+          qr_payload: JSON.stringify({ type: "INTERIOR_REFRESH", booking_id: booking.id }),
+        },
+      });
+    } catch (err) { dbError(res, "booking-qr", err); }
+  });
+
   app.delete("/api/subscriptions/interior-refresh/bookings/:id", requireLuciaUser, async (req, res) => {
     const userId = Number(req.lucia!.user!.id);
     try {
@@ -379,6 +570,7 @@ export function registerInteriorRefreshRoutes(app: Express) {
         const c = await config(tx);
         if (!c?.branch_id) throw new Error("tungku_not_configured");
         if (!staffCanUseTungku(req, Number(c.branch_id))) throw new Error("tungku_staff_only");
+        if (next === "checked_in") throw new Error("qr_scan_required");
         const b = (await tx.execute(sql`
           SELECT b.*, c.license_plate, s.user_id, br.name AS branch_name
           FROM interior_refresh_bookings b
@@ -389,20 +581,15 @@ export function registerInteriorRefreshRoutes(app: Express) {
         `)).rows[0] as any;
         if (!b) throw new Error("not_found");
         const allowed =
-          (b.status === "booked" && ["checked_in", "cancelled", "no_show"].includes(next)) ||
-          (b.status === "checked_in" && ["completed", "cancelled"].includes(next));
+          (b.status === "booked" && ["cancelled", "no_show"].includes(next)) ||
+          (b.status === "checked_in" && next === "completed");
         if (!allowed) throw new Error("invalid_transition");
-        const slotStart = new Date(b.slot_start);
         const slotEnd = new Date(b.slot_end);
-        if (next === "checked_in" && (bruneiDate(slotStart) !== bruneiDate()
-          || new Date().getTime() < slotStart.getTime() - 15 * 60_000)) {
-          throw new Error("check_in_wrong_day");
-        }
         if (next === "no_show" && slotEnd > new Date()) {
           throw new Error("no_show_too_early");
         }
 
-        if (next === "checked_in" || next === "no_show") {
+        if (next === "no_show") {
           const consumed = (await tx.execute(sql`
             UPDATE interior_refresh_entitlements
             SET status='used', consumed_at=now()
@@ -417,20 +604,7 @@ export function registerInteriorRefreshRoutes(app: Express) {
         }
 
         let serviceId = b.service_history_id;
-        if (next === "checked_in" && !serviceId) {
-          // Deliberately stored outside orders/membership_redemptions: this B$0
-          // promo visit cannot count as a wash, sale, loyalty stamp or wash KPI.
-          serviceId = (await tx.execute(sql`
-            INSERT INTO service_history
-              (user_id, car_plate, service_type, branch, amount, status,
-               check_in_time, payment_reference, notes)
-            VALUES (${b.user_id}, ${b.license_plate}, 'interior_refresh_promo',
-              ${b.branch_name}, 0, 'checked_in', now(),
-              ${"INTERIOR_REFRESH:" + b.id},
-              'Subscriber Interior Refresh promotional benefit; excluded from wash, loyalty and sales reporting')
-            RETURNING id
-          `)).rows[0]?.id;
-        } else if (serviceId && next === "completed") {
+        if (serviceId && next === "completed") {
           await tx.execute(sql`
             UPDATE service_history SET status='completed', completed_time=now()
             WHERE id=${serviceId}
@@ -441,8 +615,7 @@ export function registerInteriorRefreshRoutes(app: Express) {
             WHERE id=${serviceId}
           `);
         }
-        const timeColumn = next === "checked_in" ? sql`checked_in_at`
-          : next === "completed" ? sql`completed_at`
+        const timeColumn = next === "completed" ? sql`completed_at`
           : next === "cancelled" ? sql`cancelled_at` : sql`no_show_at`;
         return (await tx.execute(sql`
           UPDATE interior_refresh_bookings SET status=${next}, ${timeColumn}=now(),
@@ -454,7 +627,14 @@ export function registerInteriorRefreshRoutes(app: Express) {
     } catch (err: any) {
       const code = String(err?.message);
       if (code === "not_found") return res.status(404).json({ error: code });
-      if (["invalid_transition", "benefit_already_consumed", "check_in_wrong_day", "no_show_too_early"].includes(code)) return res.status(409).json({ error: code });
+      if (["invalid_transition", "benefit_already_consumed", "qr_scan_required", "no_show_too_early"].includes(code)) {
+        return res.status(409).json({
+          error: code,
+          ...(code === "qr_scan_required"
+            ? { message: "Scan the customer's Interior Refresh QR to check in" }
+            : {}),
+        });
+      }
       if (code === "tungku_staff_only") return res.status(403).json({ error: code });
       if (code === "tungku_not_configured") return res.status(503).json({ error: code });
       dbError(res, "status", err);

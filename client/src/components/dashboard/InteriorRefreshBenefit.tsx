@@ -235,6 +235,15 @@ export function InteriorRefreshBenefit({ cars }: { cars: CarRow[] }) {
       }
     : null;
   const isUpcoming = appointment?.status === "booked";
+  const isClaimed = status === "used"
+    || appointment?.status === "checked_in"
+    || appointment?.status === "completed"
+    || appointment?.status === "no_show";
+  const simpleStatus = isClaimed
+    ? "Claimed"
+    : status === "available" || status === "booked"
+      ? "Available"
+      : "Not available";
   const coveredIds = data.vehicles
     .filter((vehicle) => !vehicle.entitlement_id || vehicle.entitlement_id === entitlement?.id)
     .map((vehicle) => vehicle.id);
@@ -251,7 +260,7 @@ export function InteriorRefreshBenefit({ cars }: { cars: CarRow[] }) {
           <p className="mt-1 text-sm text-gray-600">One {promotion?.duration_minutes ?? 45}-minute visit per paid billing cycle · {promotion?.branch?.name ?? "Tungku Link"} only</p>
         </div>
         <span className="rounded-full bg-white px-3 py-1 text-xs font-extrabold uppercase text-purple-700 shadow-sm">
-          {status.replace("_", " ")}
+          {simpleStatus}
         </span>
       </div>
 
@@ -267,38 +276,42 @@ export function InteriorRefreshBenefit({ cars }: { cars: CarRow[] }) {
             </p>
           )}
           {isUpcoming && (
-            <Button
-              variant="outline"
-              size="sm"
-              className="mt-4"
-              disabled={cancellation.isPending}
-              onClick={() => {
-                if (window.confirm("Cancel this appointment and release the slot?")) cancellation.mutate(appointment.id);
-              }}
-              data-testid="button-cancel-interior-refresh"
-            >
-              <XCircle className="mr-2 h-4 w-4" />
-              {cancellation.isPending ? "Cancelling…" : "Cancel appointment"}
-            </Button>
+            <div className="mt-4 flex flex-wrap items-center justify-between gap-3">
+              <p className="text-xs font-semibold text-purple-700">
+                Your one-time QR is ready in My vehicles.
+              </p>
+              <Button
+                variant="outline"
+                size="sm"
+                disabled={cancellation.isPending}
+                onClick={() => {
+                  if (window.confirm("Cancel this appointment and release the slot?")) cancellation.mutate(appointment.id);
+                }}
+                data-testid="button-cancel-interior-refresh"
+              >
+                <XCircle className="mr-2 h-4 w-4" />
+                {cancellation.isPending ? "Cancelling…" : "Cancel appointment"}
+              </Button>
+            </div>
           )}
-          {appointment.status === "checked_in" && <p className="mt-3 text-sm font-semibold text-green-700">Checked in — your cycle benefit is now used.</p>}
+          {appointment.status === "checked_in" && <p className="mt-3 text-sm font-semibold text-green-700">Claimed — enjoy your Interior Refresh.</p>}
         </div>
       )}
 
       {appointment && ["completed", "cancelled", "no_show"].includes(appointment.status) && (
         <div className="mt-5 rounded-xl border border-gray-200 bg-white p-4">
           <p className="font-extrabold text-gray-900">
-            {appointment.status === "completed" && "Interior Refresh completed"}
+            {appointment.status === "completed" && "Interior Refresh claimed"}
             {appointment.status === "cancelled" && "Appointment cancelled"}
-            {appointment.status === "no_show" && "Appointment marked no-show"}
+            {appointment.status === "no_show" && "Interior Refresh claimed"}
           </p>
           <p className="mt-1 text-sm text-gray-600">
             {displayAppointment(appointment.starts_at)} · {appointment.vehicle_plate}
           </p>
           <p className="mt-2 text-xs text-gray-500">
             {appointment.status === "cancelled"
-              ? "A cancellation before check-in restores the benefit while bookings are open."
-              : "This billing cycle's benefit has been consumed."}
+              ? "Your complimentary Interior Refresh is available to book again."
+              : "This billing cycle's complimentary Interior Refresh has been claimed."}
           </p>
         </div>
       )}

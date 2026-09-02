@@ -1,9 +1,6 @@
-import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { useQuery } from "@tanstack/react-query";
 import { CalendarCheck2, CheckCircle2, Clock, Sparkles } from "lucide-react";
-import { apiRequest } from "@/lib/queryClient";
-import { useToast } from "@/hooks/use-toast";
 import { Badge } from "@/components/ui/badge";
-import { Button } from "@/components/ui/button";
 import {
   Dialog,
   DialogContent,
@@ -89,12 +86,6 @@ function periodLabel(start: string, end: string) {
   return `${format(start)}–${format(end)}`;
 }
 
-function allowedActions(status: BookingStatus) {
-  if (status === "booked") return ["checked_in", "cancelled", "no_show"] as const;
-  if (status === "checked_in") return ["completed", "cancelled"] as const;
-  return [] as const;
-}
-
 export function InteriorRefreshTodayReminder() {
   const { canManage, bookings, isLoading } = useInteriorToday();
   const current = bookings.filter((booking) =>
@@ -117,35 +108,11 @@ export function InteriorRefreshTodayReminder() {
 
 export function InteriorRefreshPosButton() {
   const [open, setOpen] = useState(false);
-  const qc = useQueryClient();
-  const { toast } = useToast();
-  const { canManage, branchName, date, bookings, isLoading, isError } = useInteriorToday();
-
-  const update = useMutation({
-    mutationFn: async ({ id, status }: { id: string; status: Exclude<BookingStatus, "booked"> }) => {
-      const response = await apiRequest(
-        "PATCH",
-        `/api/staff/interior-refresh/bookings/${id}/status`,
-        { status },
-      );
-      return response.json();
-    },
-    onSuccess: () => {
-      qc.invalidateQueries({ queryKey: ["/api/staff/interior-refresh/schedule", date] });
-      qc.invalidateQueries({ queryKey: ["/api/staff/interior-refresh/calendar"] });
-      qc.invalidateQueries({ queryKey: ["/api/admin/interior-refresh/report"] });
-      toast({ title: "Interior Refresh appointment updated" });
-    },
-    onError: () => toast({
-      title: "Could not update appointment",
-      description: "Refresh the list and check that its status has not changed.",
-      variant: "destructive",
-    }),
-  });
+  const { canManage, branchName, bookings, isLoading, isError } = useInteriorToday();
 
   if (!canManage) return null;
-  const activeCount = bookings.filter((booking) =>
-    booking.status === "booked" || booking.status === "checked_in").length;
+  const visibleBookings = bookings.filter((booking) => booking.status !== "cancelled");
+  const activeCount = visibleBookings.filter((booking) => booking.status === "booked").length;
 
   return (
     <>
@@ -174,19 +141,19 @@ export function InteriorRefreshPosButton() {
 
           {isLoading && <p className="py-6 text-center text-sm text-gray-500">Loading bookings…</p>}
           {isError && <p className="py-6 text-center text-sm text-red-700">Today's bookings could not be loaded.</p>}
-          {!isLoading && !isError && bookings.length === 0 && (
+          {!isLoading && !isError && visibleBookings.length === 0 && (
             <div className="rounded-lg bg-gray-50 p-6 text-center text-sm text-gray-500">
               No Interior Refresh bookings today.
             </div>
           )}
           <div className="space-y-3">
-            {bookings.map((booking) => {
-              const cancelled = booking.status === "cancelled";
+            {visibleBookings.map((booking) => {
+              const claimed = booking.status !== "booked";
               const name = [booking.first_name, booking.last_name].filter(Boolean).join(" ") || "Subscriber";
               return (
                 <div
                   key={booking.id}
-                  className={`rounded-xl border p-4 ${cancelled ? "border-gray-200 bg-gray-50 opacity-70" : "border-purple-200 bg-white"}`}
+                  className="rounded-xl border border-purple-200 bg-white p-4"
                 >
                   <div className="flex flex-wrap items-start justify-between gap-3">
                     <div>
@@ -203,44 +170,22 @@ export function InteriorRefreshPosButton() {
                         {booking.phone_number ? ` · ${booking.phone_number}` : ""}
                       </p>
                     </div>
-                    <Badge variant="outline" className="capitalize">
-                      {booking.status.replace("_", " ")}
+                    <Badge
+                      variant="outline"
+                      className={claimed ? "border-green-300 bg-green-50 text-green-700" : "border-amber-300 bg-amber-50 text-amber-700"}
+                    >
+                      {claimed ? "Claimed" : "Waiting"}
                     </Badge>
                   </div>
 
-                  {!cancelled ? (
-                    <div className="mt-3 rounded-lg border border-emerald-200 bg-emerald-50 p-3 text-sm text-emerald-900">
-                      <p className="flex items-center gap-1.5 font-bold">
-                        <CheckCircle2 className="h-4 w-4" />
-                        Plate and monthly benefit verified
-                      </p>
-                      <p className="mt-1 text-xs">
-                        Single complimentary Interior Refresh for billing period {periodLabel(booking.benefit_period_start, booking.benefit_period_end)}.
-                      </p>
-                    </div>
-                  ) : (
-                    <p className="mt-3 text-xs text-gray-500">
-                      Cancelled — this booking cannot be checked in and its benefit was released.
+                  <div className="mt-3 rounded-lg border border-emerald-200 bg-emerald-50 p-3 text-sm text-emerald-900">
+                    <p className="flex items-center gap-1.5 font-bold">
+                      <CheckCircle2 className="h-4 w-4" />
+                      {claimed ? "One-time QR has been claimed" : "Scan the customer's one-time QR to claim"}
                     </p>
-                  )}
-
-                  <div className="mt-3 flex flex-wrap gap-2">
-                    {allowedActions(booking.status).map((status) => (
-                      <Button
-                        key={status}
-                        size="sm"
-                        variant={status === "checked_in" || status === "completed" ? "default" : "outline"}
-                        disabled={update.isPending}
-                        onClick={() => {
-                          const destructive = status === "cancelled" || status === "no_show";
-                          if (!destructive || window.confirm(`Mark this appointment ${status.replace("_", " ")}?`)) {
-                            update.mutate({ id: booking.id, status });
-                          }
-                        }}
-                      >
-                        {status === "checked_in" ? "Check in" : status.replace("_", " ")}
-                      </Button>
-                    ))}
+                    <p className="mt-1 text-xs">
+                      Complimentary benefit for billing period {periodLabel(booking.benefit_period_start, booking.benefit_period_end)}.
+                    </p>
                   </div>
                 </div>
               );

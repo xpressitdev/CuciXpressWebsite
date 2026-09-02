@@ -1,5 +1,5 @@
 import { useRef, useState } from "react";
-import { useMutation, useQueryClient } from "@tanstack/react-query";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { motion } from "framer-motion";
 import {
   Pencil,
@@ -14,6 +14,8 @@ import {
   Droplet,
   AlertCircle,
   Trash2,
+  QrCode,
+  CheckCircle2,
 } from "lucide-react";
 import { Link } from "wouter";
 import { Button } from "@/components/ui/button";
@@ -41,6 +43,10 @@ import { apiRequest } from "@/lib/queryClient";
 import { useToast } from "@/hooks/use-toast";
 import { CarRow, MembershipRow } from "./types";
 import { MembershipWashQrDialog, type MembershipVoucher } from "./MembershipWashQrDialog";
+import {
+  InteriorRefreshQrDialog,
+  type InteriorRefreshVoucher,
+} from "./InteriorRefreshQrDialog";
 
 interface Props {
   cars: CarRow[];
@@ -149,6 +155,7 @@ export function VehiclesTab({ cars, memberships }: Props) {
   const [claimPhone, setClaimPhone] = useState("");
   const [claimPhoneError, setClaimPhoneError] = useState(false);
   const [qrVoucher, setQrVoucher] = useState<MembershipVoucher | null>(null);
+  const [interiorVoucher, setInteriorVoucher] = useState<InteriorRefreshVoucher | null>(null);
   const fileRef = useRef<HTMLInputElement>(null);
 
   // Active Unlimited memberships, indexed by the vehicle they cover (by id
@@ -164,6 +171,23 @@ export function VehiclesTab({ cars, memberships }: Props) {
   }
   const isUnlimitedCar = (c: CarRow): boolean =>
     unlimitedVehicleIds.has(c.id) || unlimitedPlates.has(normPlate(c.license_plate));
+
+  const { data: interiorData } = useQuery<{
+    bookings: Array<{
+      id: string;
+      vehicle_id: number;
+      status: "booked" | "checked_in" | "completed" | "cancelled" | "no_show";
+      claimed?: boolean;
+    }>;
+  }>({
+    queryKey: ["/api/subscriptions/interior-refresh"],
+    refetchInterval: 15_000,
+  });
+  const interiorByVehicle = new Map(
+    (interiorData?.bookings ?? [])
+      .filter((booking) => booking.status !== "cancelled")
+      .map((booking) => [booking.vehicle_id, booking]),
+  );
 
   // Generate the free Unlimited wash QR (same flow as the Overview tab):
   // the server resolves the customer's active Unlimited membership and
@@ -188,6 +212,25 @@ export function VehiclesTab({ cars, memberships }: Props) {
         variant: "destructive",
       });
     },
+  });
+
+  const interiorQr = useMutation({
+    mutationFn: async (bookingId: string) => {
+      const response = await apiRequest(
+        "POST",
+        `/api/subscriptions/interior-refresh/bookings/${bookingId}/qr`,
+        {},
+      );
+      const body = await response.json();
+      if (!response.ok) throw new Error(body.error ?? "qr_failed");
+      return body as { ok: true; voucher: InteriorRefreshVoucher };
+    },
+    onSuccess: (data) => setInteriorVoucher(data.voucher),
+    onError: () => toast({
+      title: "Could not create Interior Refresh QR",
+      description: "Check that the appointment is still active, then try again.",
+      variant: "destructive",
+    }),
   });
 
   const reset = () => {
@@ -467,6 +510,9 @@ export function VehiclesTab({ cars, memberships }: Props) {
             const isFav = c.id === favoriteId && c.total_washes > 0;
             const due = needsWash(c);
             const unlimited = isUnlimitedCar(c);
+            const interiorBooking = interiorByVehicle.get(c.id);
+            const interiorClaimed = interiorBooking?.claimed === true
+              || ["checked_in", "completed", "no_show"].includes(interiorBooking?.status ?? "");
             const ageDays = daysSince(c.last_seen_at);
             return (
               <motion.article
@@ -580,20 +626,46 @@ export function VehiclesTab({ cars, memberships }: Props) {
                     shows, since their wash is covered any time. Everyone else
                     only sees "Pay & Queue Now" once the car is overdue. */}
                 {unlimited ? (
-                  <button
-                    type="button"
-                    onClick={() => checkin.mutate(c.id)}
-                    disabled={checkin.isPending}
-                    className="w-full flex items-center justify-center gap-1.5 py-2.5 bg-gradient-to-r from-emerald-500 to-green-600 text-white text-sm font-black border-t-2 border-black hover:translate-y-[-1px] transition-transform disabled:opacity-60"
-                    data-testid={`button-card-free-wash-${c.id}`}
-                  >
-                    {checkin.isPending ? (
-                      <Loader2 className="w-4 h-4 animate-spin" />
-                    ) : (
-                      <Sparkles className="w-4 h-4" />
+                  <div className={`grid border-t-2 border-black ${interiorBooking ? "grid-cols-[1fr_auto]" : "grid-cols-1"}`}>
+                    <button
+                      type="button"
+                      onClick={() => checkin.mutate(c.id)}
+                      disabled={checkin.isPending}
+                      className="flex items-center justify-center gap-1.5 bg-gradient-to-r from-emerald-500 to-green-600 px-3 py-2.5 text-sm font-black text-white transition-transform hover:translate-y-[-1px] disabled:opacity-60"
+                      data-testid={`button-card-free-wash-${c.id}`}
+                    >
+                      {checkin.isPending ? (
+                        <Loader2 className="w-4 h-4 animate-spin" />
+                      ) : (
+                        <Sparkles className="w-4 h-4" />
+                      )}
+                      Free wash
+                    </button>
+                    {interiorBooking && (
+                      <button
+                        type="button"
+                        onClick={() => {
+                          if (!interiorClaimed) interiorQr.mutate(interiorBooking.id);
+                        }}
+                        disabled={interiorClaimed || interiorQr.isPending}
+                        className={`flex items-center justify-center gap-1.5 border-l-2 border-black px-3 py-2 text-xs font-black ${
+                          interiorClaimed
+                            ? "bg-gray-200 text-gray-600"
+                            : "bg-gradient-to-r from-purple-600 to-orange-500 text-white hover:brightness-105"
+                        }`}
+                        data-testid={`button-card-interior-refresh-${c.id}`}
+                      >
+                        {interiorClaimed ? (
+                          <CheckCircle2 className="h-4 w-4" />
+                        ) : interiorQr.isPending ? (
+                          <Loader2 className="h-4 w-4 animate-spin" />
+                        ) : (
+                          <QrCode className="h-4 w-4" />
+                        )}
+                        {interiorClaimed ? "Interior claimed" : "Interior QR"}
+                      </button>
                     )}
-                    Free wash
-                  </button>
+                  </div>
                 ) : (
                   due && (
                     <Link
@@ -908,6 +980,12 @@ export function VehiclesTab({ cars, memberships }: Props) {
           open={!!qrVoucher}
           onClose={() => setQrVoucher(null)}
           voucher={qrVoucher}
+        />
+      )}
+      {interiorVoucher && (
+        <InteriorRefreshQrDialog
+          voucher={interiorVoucher}
+          onClose={() => setInteriorVoucher(null)}
         />
       )}
     </div>

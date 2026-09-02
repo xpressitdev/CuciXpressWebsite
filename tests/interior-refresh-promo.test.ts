@@ -122,6 +122,7 @@ describe("Task 34: subscriber Interior Refresh", () => {
   afterAll(async () => {
     if (!pool) return;
     try {
+      await pool.query(`DELETE FROM orders WHERE payment_ref LIKE $1`, [`INTERIOR_REFRESH:irb_${suffix}%`]);
       await pool.query(`DELETE FROM interior_refresh_bookings WHERE id = ANY($1)`, [ids.booking]);
       await pool.query(`DELETE FROM service_history WHERE payment_reference LIKE $1`, [`INTERIOR_REFRESH:irb_${suffix}%`]);
       await pool.query(`DELETE FROM interior_refresh_entitlements WHERE subscription_id = ANY($1)`, [ids.sub]);
@@ -256,24 +257,71 @@ describe("Task 34: subscriber Interior Refresh", () => {
     expect((await pool.query(`SELECT count(*)::int n FROM service_history WHERE payment_reference=$1`, [`INTERIOR_REFRESH:${booking}`])).rows[0].n).toBe(0);
   });
 
-  it("serializes check-in against customer cancellation and creates one service record", async () => {
+  it("claims a booked QR once, creates one B$0 voucher order, and beats cancellation", async () => {
     const invoice = await paidInvoice(subId, "checkin");
     const e = await entitlementFor(invoice);
     await pool.query(`UPDATE interior_refresh_entitlements SET status='booked' WHERE id=$1`, [e]);
     // The status endpoint permits same-day check-in from 15 minutes before the
     // slot; a one-minute-old fixture also makes customer cancellation illegal.
     const booking = await insertBooking(e, subId, carId, new Date(Date.now() - 60_000));
+    const issued = await request(app)
+      .post(`/api/subscriptions/interior-refresh/bookings/${booking}/qr`)
+      .set("Cookie", customerCookie)
+      .send({});
+    expect(issued.status).toBe(200);
+    expect(issued.body.voucher.claimed).toBe(false);
+    expect(JSON.parse(issued.body.voucher.qr_payload)).toEqual({
+      type: "INTERIOR_REFRESH",
+      booking_id: booking,
+    });
+    const wrongBranchStaff = await request(app)
+      .post("/api/verify-qr")
+      .set("Cookie", `cx_staff_session=${otherBranchStaffSession}`)
+      .send({ qr_data: issued.body.voucher.qr_payload, branch_id: branchId });
+    expect(wrongBranchStaff.status).toBe(403);
+    expect(wrongBranchStaff.body.code).toBe("tungku_staff_only");
+
     const [checkin, cancel] = await Promise.all([
-      request(app).patch(`/api/staff/interior-refresh/bookings/${booking}/status`).set("Cookie", staffCookie).send({ status: "checked_in" }),
+      request(app).post("/api/verify-qr").set("Cookie", staffCookie).send({
+        qr_data: issued.body.voucher.qr_payload,
+        branch_id: branchId,
+      }),
       request(app).delete(`/api/subscriptions/interior-refresh/bookings/${booking}`).set("Cookie", customerCookie),
     ]);
     expect(checkin.status).toBe(200);
     expect(cancel.status).toBe(409);
+    expect(checkin.body.order.total_cents).toBe(0);
+    expect(checkin.body.order.package_name).toBe("Interior Refresh");
     const service = await pool.query(`SELECT count(*)::int n FROM service_history WHERE payment_reference=$1`, [`INTERIOR_REFRESH:${booking}`]);
     expect(service.rows[0].n).toBe(1);
-    const duplicate = await request(app).patch(`/api/staff/interior-refresh/bookings/${booking}/status`).set("Cookie", staffCookie).send({ status: "checked_in" });
-    expect(duplicate.status).toBe(409);
+    const duplicate = await request(app).post("/api/verify-qr").set("Cookie", staffCookie).send({
+      qr_data: issued.body.voucher.qr_payload,
+      branch_id: branchId,
+    });
+    expect(duplicate.status).toBe(200);
+    expect(duplicate.body.newly_allocated).toBe(false);
+    expect(duplicate.body.order.id).toBe(checkin.body.order.id);
     expect((await pool.query(`SELECT count(*)::int n FROM service_history WHERE payment_reference=$1`, [`INTERIOR_REFRESH:${booking}`])).rows[0].n).toBe(1);
+    const order = await pool.query(
+      `SELECT count(*)::int n, min(payment_method) payment_method,
+        min(qr_provider) qr_provider, min(order_type) order_type,
+        min(total_cents)::int total_cents
+       FROM orders WHERE payment_ref=$1`,
+      [`INTERIOR_REFRESH:${booking}`],
+    );
+    expect(order.rows[0]).toMatchObject({
+      n: 1,
+      payment_method: "voucher",
+      qr_provider: "interior_refresh",
+      order_type: "interior_refresh_promo",
+      total_cents: 0,
+    });
+    const manual = await request(app)
+      .patch(`/api/staff/interior-refresh/bookings/${booking}/status`)
+      .set("Cookie", staffCookie)
+      .send({ status: "checked_in" });
+    expect(manual.status).toBe(409);
+    expect(manual.body.error).toBe("qr_scan_required");
   });
 
   it("does not book past period end and disabling promotion preserves schedule/history", async () => {

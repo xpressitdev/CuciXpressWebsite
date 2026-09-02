@@ -2861,7 +2861,7 @@ export default function POS() {
           <DialogHeader>
             <DialogTitle className="flex items-center gap-2">
               <QrCode className="w-5 h-5 text-cuci-primary" />
-              Scan-In · Prepaid or Free-wash QR
+              Scan-In · Wash, voucher or Interior QR
             </DialogTitle>
           </DialogHeader>
           {/* Pass the active POS branch so free-wash vouchers get

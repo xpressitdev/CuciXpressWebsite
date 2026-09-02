@@ -246,11 +246,18 @@ export function ActivityTab({ orders }: Props) {
   const [range, setRange] = useState<DateRange>({ preset: "all" });
   const [openReceipt, setOpenReceipt] = useState<OrderRow | null>(null);
 
+  // Keep the B$0 Interior Refresh visit visible in history and receipts, but
+  // never count it as a wash in status, trends, favorites, or leaderboard.
+  const metricOrders = useMemo(
+    () => orders.filter((order) => order.order_type !== "interior_refresh_promo"),
+    [orders],
+  );
+
   // Status tier — derived from lifetime wash count. Replaces the old
   // "Lifetime spend" tile so customers see a status they're proud of
   // rather than a running bill total.
   const tier = (() => {
-    const n = orders.length;
+    const n = metricOrders.length;
     if (n >= 100) return { label: "Centurion", sub: "Hall of fame · 100+ washes", grad: "from-amber-300 to-orange-400" };
     if (n >= 50)  return { label: "Gold regular", sub: "Top-tier driver · 50+ washes", grad: "from-yellow-200 to-amber-300" };
     if (n >= 25)  return { label: "Silver regular", sub: "On a streak · 25+ washes", grad: "from-slate-200 to-slate-300" };
@@ -277,6 +284,9 @@ export function ActivityTab({ orders }: Props) {
       })
       .sort((a, b) => +new Date(b.created_at) - +new Date(a.created_at));
   }, [orders, filter, range]);
+  const filteredWashCount = filtered.filter(
+    (order) => order.order_type !== "interior_refresh_promo",
+  ).length;
 
   // Six-month bar chart of wash count
   const monthly = useMemo(() => {
@@ -292,7 +302,7 @@ export function ActivityTab({ orders }: Props) {
       });
     }
     const idx = new Map(buckets.map((b, i) => [b.key, i]));
-    for (const o of orders) {
+    for (const o of metricOrders) {
       const d = new Date(o.created_at);
       const k = `${d.getFullYear()}-${d.getMonth()}`;
       const i = idx.get(k);
@@ -302,7 +312,7 @@ export function ActivityTab({ orders }: Props) {
       }
     }
     return buckets;
-  }, [orders]);
+  }, [metricOrders]);
 
   const peakCount = Math.max(1, ...monthly.map((m) => m.count));
 
@@ -310,7 +320,7 @@ export function ActivityTab({ orders }: Props) {
   const favorites = useMemo(() => {
     const branchTally = new Map<string, number>();
     const pkgTally = new Map<string, number>();
-    for (const o of orders) {
+    for (const o of metricOrders) {
       if (o.branch_name) branchTally.set(o.branch_name, (branchTally.get(o.branch_name) ?? 0) + 1);
       pkgTally.set(o.package_name, (pkgTally.get(o.package_name) ?? 0) + 1);
     }
@@ -322,7 +332,7 @@ export function ActivityTab({ orders }: Props) {
       pkg: topPkg?.[0] ?? "—",
       pkgCount: topPkg?.[1] ?? 0,
     };
-  }, [orders]);
+  }, [metricOrders]);
 
   // Group filtered orders by Month YYYY for the timeline
   const groups = useMemo(() => {
@@ -381,8 +391,11 @@ export function ActivityTab({ orders }: Props) {
             Activity
           </h1>
           <p className="text-sm text-gray-500 mt-1">
-            {filtered.length} wash{filtered.length === 1 ? "" : "es"} · tap any
-            item for the receipt
+            {filteredWashCount} wash{filteredWashCount === 1 ? "" : "es"}
+            {filtered.length !== filteredWashCount
+              ? ` · ${filtered.length} total ${filtered.length === 1 ? "activity" : "activities"}`
+              : ""}
+            {" · "}tap any item for the receipt
           </p>
         </div>
         <div className="flex gap-2 flex-wrap">
@@ -452,7 +465,7 @@ export function ActivityTab({ orders }: Props) {
             <p className="text-xs uppercase tracking-widest font-bold text-white/70">
               Total washes
             </p>
-            <p className="text-5xl font-black leading-none mt-2">{orders.length}</p>
+            <p className="text-5xl font-black leading-none mt-2">{metricOrders.length}</p>
             <p className="mt-2 text-sm text-white/80 inline-flex items-center gap-1">
               <TrendingUp className="w-3.5 h-3.5" />
               {trendPct >= 0 ? "+" : ""}{trendPct}% vs last month
@@ -533,10 +546,10 @@ export function ActivityTab({ orders }: Props) {
       )}
 
       {/* Package mix donut + per-package spend */}
-      <PackageMixCard orders={filtered} />
+      <PackageMixCard orders={filtered.filter((order) => order.order_type !== "interior_refresh_promo")} />
 
       {/* Community leaderboard — unlocks once the customer hits 10 done washes */}
-      {orders.filter((o) => o.status === "done").length >= 10 && <Leaderboard />}
+      {metricOrders.filter((o) => o.status === "done").length >= 10 && <Leaderboard />}
 
       {/* Body */}
       {filtered.length === 0 ? (
@@ -559,7 +572,19 @@ export function ActivityTab({ orders }: Props) {
                 </h2>
                 <div className="flex-1 h-px bg-gradient-to-r from-gray-200 to-transparent" />
                 <span className="text-xs font-bold text-gray-400">
-                  {g.orders.length} wash{g.orders.length === 1 ? "" : "es"}
+                  {(() => {
+                    const washes = g.orders.filter(
+                      (order) => order.order_type !== "interior_refresh_promo",
+                    ).length;
+                    return (
+                      <>
+                        {washes} wash{washes === 1 ? "" : "es"}
+                        {g.orders.length !== washes
+                          ? ` · ${g.orders.length} ${g.orders.length === 1 ? "activity" : "activities"}`
+                          : ""}
+                      </>
+                    );
+                  })()}
                 </span>
               </div>
 
