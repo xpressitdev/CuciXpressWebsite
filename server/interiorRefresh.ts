@@ -53,6 +53,7 @@ const bookingSchema = z.object({
   vehicle_id: z.coerce.number().int().positive(),
   date: z.string(),
   start_time: z.string(),
+  reminder_opt_in: z.boolean().default(false),
 });
 
 const configSchema = z.object({
@@ -165,7 +166,7 @@ export function registerInteriorRefreshRoutes(app: Express) {
   app.post("/api/subscriptions/interior-refresh/bookings", requireLuciaUser, async (req, res) => {
     const parsed = bookingSchema.safeParse(req.body);
     if (!parsed.success) return res.status(400).json({ error: "invalid_request" });
-    const { vehicle_id, date, start_time } = parsed.data;
+    const { vehicle_id, date, start_time, reminder_opt_in } = parsed.data;
     const start = bruneiSlotInstant(date, start_time);
     if (!start || !generateInteriorRefreshSlots().includes(start_time)) {
       return res.status(400).json({ error: "invalid_slot" });
@@ -217,9 +218,10 @@ export function registerInteriorRefreshRoutes(app: Express) {
         const row = (await tx.execute(sql`
           INSERT INTO interior_refresh_bookings
             (id, entitlement_id, subscription_id, vehicle_id, branch_id,
-             slot_start, slot_end, booked_by_user_id)
+             slot_start, slot_end, booked_by_user_id, reminder_opt_in)
           VALUES (${id}, ${entitlement.id}, ${entitlement.sub_id}, ${vehicle_id},
-            ${c.branch_id}, ${start.toISOString()}, ${end.toISOString()}, ${userId})
+            ${c.branch_id}, ${start.toISOString()}, ${end.toISOString()}, ${userId},
+            ${reminder_opt_in})
           RETURNING *
         `)).rows[0];
         const claimed = (await tx.execute(sql`

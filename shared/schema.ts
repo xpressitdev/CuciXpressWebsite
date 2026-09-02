@@ -862,6 +862,8 @@ export const interiorRefreshBookings = pgTable("interior_refresh_bookings", {
   slot_start: timestamp("slot_start", { withTimezone: true }).notNull(),
   slot_end: timestamp("slot_end", { withTimezone: true }).notNull(),
   status: text("status").default("booked").notNull(), // booked | checked_in | completed | cancelled | no_show
+  reminder_opt_in: boolean("reminder_opt_in").default(false).notNull(),
+  reminder_sent_at: timestamp("reminder_sent_at", { withTimezone: true }),
   booked_by_user_id: integer("booked_by_user_id").references(() => users.id).notNull(),
   cancelled_at: timestamp("cancelled_at", { withTimezone: true }),
   checked_in_at: timestamp("checked_in_at", { withTimezone: true }),

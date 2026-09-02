@@ -1,3 +1,15 @@
+## 2026-09-02 — Interior Refresh appointment reminders
+
+**Migration:** `migrations/manual/2026-09-02_01_interior_refresh_reminders.sql`
+
+- Added an explicit email-reminder opt-in and delivery timestamp to Interior
+  Refresh bookings.
+- Added a partial due-reminder index for booked, opted-in, unsent appointments.
+- Reminder delivery remains disabled by default for existing and new bookings
+  unless the customer selects it while booking.
+
+---
+
 How to change the database schema
 Last updated: 2026-05-02
 Companion to: MIGRATION_NOTES.md (the why); this is the how.

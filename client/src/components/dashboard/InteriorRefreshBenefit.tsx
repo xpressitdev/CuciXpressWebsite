@@ -51,6 +51,8 @@ interface BenefitResponse {
     branch_name: string;
     vehicle_id: number;
     license_plate: string;
+    reminder_opt_in: boolean;
+    reminder_sent_at: string | null;
   }>;
   brunei_today: string;
 }
@@ -100,6 +102,7 @@ export function InteriorRefreshBenefit({ cars }: { cars: CarRow[] }) {
   const [vehicleId, setVehicleId] = useState("");
   const [date, setDate] = useState("");
   const [slot, setSlot] = useState("");
+  const [reminderOptIn, setReminderOptIn] = useState(false);
 
   const { data, isLoading, isError } = useQuery<BenefitResponse>({
     queryKey: BENEFIT_KEY,
@@ -148,11 +151,13 @@ export function InteriorRefreshBenefit({ cars }: { cars: CarRow[] }) {
         vehicle_id: Number(vehicleId),
         date,
         start_time: slot,
+        reminder_opt_in: reminderOptIn,
       });
       return response.json();
     },
     onSuccess: () => {
       setSlot("");
+      setReminderOptIn(false);
       qc.invalidateQueries({ queryKey: BENEFIT_KEY });
       qc.invalidateQueries({ queryKey: ["/api/subscriptions/interior-refresh/availability"] });
       toast({ title: "Interior Refresh booked", description: "We'll see you at Tungku Link." });
@@ -254,6 +259,13 @@ export function InteriorRefreshBenefit({ cars }: { cars: CarRow[] }) {
         <div className="mt-5 rounded-xl border border-purple-200 bg-white p-4">
           <p className="font-extrabold text-gray-900">{displayAppointment(appointment.starts_at)}</p>
           <p className="mt-1 text-sm text-gray-600">{appointment.branch_name} · {appointment.vehicle_plate}</p>
+          {rawAppointment?.reminder_opt_in && (
+            <p className="mt-2 text-xs font-semibold text-purple-700">
+              {rawAppointment.reminder_sent_at
+                ? "Email reminder sent"
+                : "Email reminder scheduled for about 24 hours before"}
+            </p>
+          )}
           {isUpcoming && (
             <Button
               variant="outline"
@@ -341,7 +353,19 @@ export function InteriorRefreshBenefit({ cars }: { cars: CarRow[] }) {
             {slotsFailed && <p className="mt-1 text-xs text-red-700">Availability could not be loaded. Check the date and try again.</p>}
           </div>
           <div className="md:col-span-3 flex flex-wrap items-center justify-between gap-3">
-            <p className="text-xs text-gray-600"><CalendarDays className="mr-1 inline h-4 w-4" />Book by the previous day. Benefit expires {displayDate(entitlement?.period_end)}.</p>
+            <div>
+              <label className="flex items-center gap-2 text-sm font-semibold text-gray-700">
+                <input
+                  type="checkbox"
+                  checked={reminderOptIn}
+                  onChange={(event) => setReminderOptIn(event.target.checked)}
+                  className="h-4 w-4 rounded border-gray-300"
+                  data-testid="checkbox-interior-refresh-reminder"
+                />
+                Email me a reminder about 24 hours before
+              </label>
+              <p className="mt-1 text-xs text-gray-600"><CalendarDays className="mr-1 inline h-4 w-4" />Book by the previous day. Benefit expires {displayDate(entitlement?.period_end)}.</p>
+            </div>
             <Button
               className="bg-cuci-primary font-bold text-white"
               disabled={!vehicleId || !slot || booking.isPending}

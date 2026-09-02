@@ -112,6 +112,66 @@ async function sendEmail(opts: {
   return false;
 }
 
+export interface InteriorRefreshReminderData {
+  customerEmail: string;
+  customerName?: string | null;
+  branchName: string;
+  vehicle: string;
+  slotStart: Date;
+}
+
+function escapeHtml(value: string): string {
+  return value.replace(/[&<>"']/g, (character) => ({
+    "&": "&amp;",
+    "<": "&lt;",
+    ">": "&gt;",
+    '"': "&quot;",
+    "'": "&#39;",
+  })[character]!);
+}
+
+export function buildInteriorRefreshReminderEmail(data: InteriorRefreshReminderData) {
+  const date = new Intl.DateTimeFormat("en-GB", {
+    timeZone: "Asia/Brunei",
+    weekday: "long",
+    day: "numeric",
+    month: "long",
+    year: "numeric",
+  }).format(data.slotStart);
+  const time = new Intl.DateTimeFormat("en-GB", {
+    timeZone: "Asia/Brunei",
+    hour: "2-digit",
+    minute: "2-digit",
+    hour12: false,
+  }).format(data.slotStart);
+  const greeting = data.customerName ? `Hi ${data.customerName},` : "Hi,";
+  const safeGreeting = escapeHtml(greeting);
+  const safeBranch = escapeHtml(data.branchName);
+  const safeVehicle = escapeHtml(data.vehicle);
+  const subject = `Reminder: Interior Refresh at Tungku on ${date}`;
+  const text = `${greeting}\n\nYour complimentary Interior Refresh appointment is tomorrow.\n\nLocation: ${data.branchName} (Tungku)\nVehicle: ${data.vehicle}\nDate: ${date}\nTime: ${time} (Brunei time)\n\nIf you cannot attend, please cancel from your Cuci Xpress dashboard so another subscriber can use the slot.`;
+  const html = `
+    <div style="font-family:Arial,sans-serif;line-height:1.6;color:#1f2937;max-width:600px">
+      <p>${safeGreeting}</p>
+      <p>Your complimentary <strong>Interior Refresh</strong> appointment is tomorrow.</p>
+      <div style="background:#faf5ff;border:1px solid #e9d5ff;border-radius:12px;padding:16px">
+        <p style="margin:0"><strong>Location:</strong> ${safeBranch} (Tungku)</p>
+        <p style="margin:6px 0 0"><strong>Vehicle:</strong> ${safeVehicle}</p>
+        <p style="margin:6px 0 0"><strong>Date:</strong> ${date}</p>
+        <p style="margin:6px 0 0"><strong>Time:</strong> ${time} (Brunei time)</p>
+      </div>
+      <p>If you cannot attend, please cancel from your Cuci Xpress dashboard so another subscriber can use the slot.</p>
+    </div>`;
+  return { subject, text, html };
+}
+
+export async function sendInteriorRefreshReminder(
+  data: InteriorRefreshReminderData,
+): Promise<boolean> {
+  const message = buildInteriorRefreshReminderEmail(data);
+  return sendEmail({ to: data.customerEmail, ...message });
+}
+
 interface PaymentConfirmationData {
   customerEmail: string;
   transactionId: string;
