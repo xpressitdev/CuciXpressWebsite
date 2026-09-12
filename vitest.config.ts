@@ -1,5 +1,6 @@
 import { defineConfig } from "vitest/config";
 import { fileURLToPath } from "node:url";
+import react from "@vitejs/plugin-react";
 
 // Standalone Vitest config (NOT the app's vite.config.ts). Tests are
 // integration tests that boot the real Express routes against the
@@ -7,10 +8,9 @@ import { fileURLToPath } from "node:url";
 // rewires DATABASE_URL to STAGING_DATABASE_URL *before* any app module
 // (which reads DATABASE_URL at import time) is loaded.
 export default defineConfig({
-  // tsconfig sets jsx:"preserve" (the app's vite.config.ts compiles JSX via
-  // @vitejs/plugin-react). Vitest 4 bundles rolldown-vite, whose oxc
-  // transform must be told to compile JSX for .tsx test/component files.
-  oxc: { jsx: { runtime: "automatic" } },
+  // tsconfig preserves JSX, so tests need the same automatic React transform
+  // as the application build.
+  plugins: [react()],
   resolve: {
     alias: {
       "@shared": fileURLToPath(new URL("./shared", import.meta.url)),
