@@ -15,6 +15,9 @@ import {
 import {
   bruneiYmd,
   buildYtdFromMonths,
+  connecteamSyncFailureResponse,
+  connecteamSyncInProgressResponse,
+  createConnecteamSyncHandler,
   deriveCoverageStatus,
   fetchAllConnecteamSubmissions,
   grossSalesCents,
@@ -209,6 +212,67 @@ describe("P&L accounting contract", () => {
     await request(app).put("/api/admin/profit-loss/depreciation").send({
       year: 2026, month: 1, branch_id: 1, cents: 14167,
     }).expect(403);
+  });
+
+  it("returns a running 202 for an active distributed sync, not a failure or completion", async () => {
+    const app = express();
+    app.use((req, _res, next) => {
+      req.staff = { user: { id: "owner-fixture", role: "owner" } as any, session: {} as any };
+      next();
+    });
+    app.post("/api/admin/profit-loss/sync", createConnecteamSyncHandler(async () => {
+      throw new Error("connecteam_sync_in_progress");
+    }));
+
+    const response = await request(app).post("/api/admin/profit-loss/sync").expect(202);
+    expect(response.body).toMatchObject({
+      status: "running",
+      message: expect.stringContaining("already in progress"),
+      pollAfterSeconds: 5,
+    });
+    expect(response.body.error).toBeUndefined();
+    expect(response.body.submissionsSeen).toBeUndefined();
+    expect(connecteamSyncInProgressResponse().status).toBe("running");
+  });
+
+  it("returns a whitelisted actionable error for a real sync failure without raw details", async () => {
+    const app = express();
+    app.use((req, _res, next) => {
+      req.staff = { user: { id: "owner-fixture", role: "owner" } as any, session: {} as any };
+      next();
+    });
+    app.post("/api/admin/profit-loss/sync", createConnecteamSyncHandler(async () => {
+      throw new Error("connecteam_fetch_timeout");
+    }));
+
+    const response = await request(app).post("/api/admin/profit-loss/sync").expect(502);
+    expect(response.body).toMatchObject({
+      status: "failed",
+      error: "connecteam_fetch_timeout",
+      message: expect.stringContaining("did not respond"),
+    });
+    expect(response.body.message).not.toContain("API");
+    expect(connecteamSyncFailureResponse(new Error("secret-upstream-payload"))).toMatchObject({
+      status: "failed",
+      error: "connecteam_sync_failed",
+    });
+  });
+
+  it("returns completed only when the sync executor reports a persisted success", async () => {
+    const app = express();
+    app.post("/api/admin/profit-loss/sync", createConnecteamSyncHandler(async () => ({
+      status: "succeeded",
+      submissionsSeen: 4,
+      eligible: 3,
+    })));
+
+    const response = await request(app).post("/api/admin/profit-loss/sync").expect(200);
+    expect(response.body).toEqual({
+      status: "succeeded",
+      submissionsSeen: 4,
+      eligible: 3,
+    });
+    expect(response.body.message).toBeUndefined();
   });
 
   it("recognizes each paid invoice by its actual Brunei-local period, including renewals", () => {

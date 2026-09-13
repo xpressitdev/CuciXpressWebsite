@@ -10,7 +10,12 @@ import {
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { apiRequest } from "@/lib/queryClient";
 import RecurringExpenseRemindersDialog from "@/components/admin/RecurringExpenseRemindersDialog";
-import { PNL_MONTHS, type RecurringExpenseReminder } from "@shared/profitLoss";
+import {
+  connecteamSyncErrorMessage,
+  PNL_MONTHS,
+  type ConnecteamSyncErrorCode,
+  type RecurringExpenseReminder,
+} from "@shared/profitLoss";
 
 type Line = { key: string; label: string; cents: number };
 type Report = {
@@ -26,7 +31,13 @@ type Report = {
     warnings?: Array<string | CoverageWarning>;
     ranges?: CoverageRanges;
   };
-  sync: { status: string; lastSuccessfulAt?: string; errorCode?: string; expectedSubmissionCount?: number };
+  sync: {
+    status: string;
+    lastSuccessfulAt?: string;
+    errorCode?: ConnecteamSyncErrorCode;
+    errorMessage?: string;
+    expectedSubmissionCount?: number;
+  };
   recurringExpenseReminders?: RecurringExpenseReminder[];
 };
 type CoverageWarning = {
@@ -49,6 +60,10 @@ type ExpenseEntry = {
   source_status: string | null; branch_id: number | null; pnl_category: string | null;
   allocation_status: string; cents: number;
 };
+type SyncResponse =
+  | { status: "succeeded"; submissionsSeen: number; eligible: number }
+  | { status: "running"; message: string; pollAfterSeconds: number }
+  | { status: "failed"; error: ConnecteamSyncErrorCode; message: string };
 
 const bnd = (cents: number) => new Intl.NumberFormat("en-BN", {
   style: "currency", currency: "BND", minimumFractionDigits: 2,
@@ -117,6 +132,7 @@ export default function ProfitLossTab() {
   const [depreciation, setDepreciation] = useState<Record<string, Record<number, string>>>({});
   const [depreciationValidation, setDepreciationValidation] = useState<Record<string, boolean>>({});
   const [expensePage, setExpensePage] = useState(1);
+  const [manualSyncAttempt, setManualSyncAttempt] = useState<{ lastSuccessfulAt: string | null } | null>(null);
   const scopeKey = reportScopeKey(year, branchId);
   const currentDepreciation = depreciation[scopeKey] ?? {};
   const reportUrl = queryUrl(year, branchId);
@@ -128,19 +144,31 @@ export default function ProfitLossTab() {
 
   const reportQuery = useQuery<Report>({
     queryKey: [reportUrl],
-    refetchInterval: 60_000, // live POS revenue, while the source sync runs every ten minutes
+    // A distributed lease can outlive an app restart. Poll the persisted
+    // state while it is running instead of retrying the sync or declaring the
+    // manual request complete from a 202 response.
+    refetchInterval: (query) => query.state.data?.sync.status === "running"
+      ? 5_000
+      : 60_000, // live POS revenue, while the source sync runs every ten minutes
   });
   const report = reportQuery.data;
   const expensesQuery = useQuery<{ entries: ExpenseEntry[] }>({
     queryKey: [expensesUrl],
     enabled: Boolean(report),
   });
-  const sync = useMutation({
-    mutationFn: () => apiRequest("POST", "/api/admin/profit-loss/sync", {}).then((response) => response.json()),
+  const sync = useMutation<SyncResponse>({
+    mutationFn: () => apiRequest("POST", "/api/admin/profit-loss/sync", {}).then((response) => response.json() as Promise<SyncResponse>),
     // Sync pulls source data used by both surfaces. Invalidate every cached
     // P&L report and audit query rather than the selection captured when the
     // button was clicked; the owner may switch year/branch while it runs.
     onSuccess: () => Promise.all([
+      queryClient.invalidateQueries({ predicate: (query) => isReportQueryKey(query.queryKey) }),
+      queryClient.invalidateQueries({ predicate: (query) => isExpensesQueryKey(query.queryKey) }),
+    ]),
+    // A failed request has already been persisted by the fenced worker. Read
+    // that state back so the owner sees the actionable reason while retaining
+    // the last report data in the query cache.
+    onError: () => Promise.all([
       queryClient.invalidateQueries({ predicate: (query) => isReportQueryKey(query.queryKey) }),
       queryClient.invalidateQueries({ predicate: (query) => isExpensesQueryKey(query.queryKey) }),
     ]),
@@ -203,6 +231,19 @@ export default function ProfitLossTab() {
   const requestedRanges = Object.entries(report.coverage.ranges?.requested ?? {});
   const observedRanges = Object.entries(report.coverage.ranges?.observed ?? {});
   const recurringExpenseReminders = report.recurringExpenseReminders ?? [];
+  const persistedSyncError = report.sync.errorMessage
+    ?? (report.sync.errorCode ? connecteamSyncErrorMessage(report.sync.errorCode) : null);
+  const manualResponseRunning = sync.data?.status === "running";
+  const successfulAtChanged = manualSyncAttempt !== null
+    && report.sync.status === "succeeded"
+    && report.sync.lastSuccessfulAt !== manualSyncAttempt.lastSuccessfulAt
+    && report.sync.lastSuccessfulAt !== undefined;
+  const manualResponseCompleted = sync.data?.status === "succeeded"
+    || (manualResponseRunning && successfulAtChanged);
+  const manualResponseFailed = manualResponseRunning && report.sync.status === "failed";
+  const syncActive = sync.isPending
+    || report.sync.status === "running"
+    || (manualResponseRunning && !manualResponseCompleted && !manualResponseFailed);
 
   return <div className="space-y-5">
     <Card>
@@ -223,8 +264,12 @@ export default function ProfitLossTab() {
               {report.branches.map((branch) => <SelectItem key={branch.id} value={branch.id}>{branch.name}</SelectItem>)}
             </SelectContent>
           </Select>
-          <Button variant="outline" onClick={() => sync.mutate()} disabled={sync.isPending} data-testid="button-profit-loss-sync">
-            <RefreshCw className={`mr-2 h-4 w-4 ${sync.isPending ? "animate-spin" : ""}`} />Sync Connecteam
+          <Button variant="outline" onClick={() => {
+            setManualSyncAttempt({ lastSuccessfulAt: report.sync.lastSuccessfulAt ?? null });
+            sync.mutate();
+          }} disabled={syncActive} data-testid="button-profit-loss-sync">
+            <RefreshCw className={`mr-2 h-4 w-4 ${syncActive ? "animate-spin" : ""}`} />
+            {syncActive ? "Sync in progress…" : "Sync Connecteam"}
           </Button>
           <RecurringExpenseRemindersDialog
             reminders={recurringExpenseReminders}
@@ -238,8 +283,23 @@ export default function ProfitLossTab() {
         {reportQuery.isFetching && <p className="text-muted-foreground" role="status" aria-live="polite">Refreshing live P&amp;L…</p>}
         {reportQuery.isError && <p className="text-red-700" role="alert">The latest P&amp;L refresh failed. Showing the last successfully fetched report.</p>}
         {sync.isPending && <p className="text-muted-foreground" role="status" aria-live="polite">Syncing Connecteam expenses…</p>}
-        {sync.isError && <p className="text-red-700" role="alert">Connecteam sync failed. Existing synced expense data was not replaced.</p>}
-        {sync.isSuccess && !sync.isPending && !sync.isError && <p className={coverageHealthy ? "text-emerald-700" : "text-amber-800"} role="status">Connecteam sync completed; refreshing the report and audit entries.</p>}
+        {sync.isSuccess && manualResponseRunning && !manualResponseCompleted && !manualResponseFailed
+          && <p className="text-muted-foreground" role="status" aria-live="polite">
+            {sync.data?.status === "running" ? sync.data.message : "Connecteam sync is still running."} The report will refresh automatically.
+          </p>}
+        {sync.isSuccess && manualResponseCompleted
+          && <p className={coverageHealthy ? "text-emerald-700" : "text-amber-800"} role="status">
+            Connecteam sync completed; the report and audit entries reflect the persisted successful sync.
+          </p>}
+        {sync.isError && <p className="text-red-700" role="alert">
+          {persistedSyncError ?? "Connecteam sync failed. Existing synced expense data was not replaced."}
+        </p>}
+        {manualResponseFailed && <p className="text-red-700" role="alert">
+          {persistedSyncError ?? "Connecteam sync failed. Existing synced expense data was not replaced."}
+        </p>}
+        {report.sync.status === "failed" && !sync.isError && !manualResponseFailed && <p className="text-red-700" role="alert">
+          {persistedSyncError ?? "The last Connecteam sync failed. Existing synced expense data was not replaced."}
+        </p>}
         <div className={`flex gap-2 ${coverageHealthy ? "text-emerald-700" : "text-amber-800"}`} role="status">
           {coverageHealthy
             ? <CheckCircle2 className="mt-0.5 h-4 w-4 shrink-0" />
@@ -276,7 +336,6 @@ export default function ProfitLossTab() {
         <p className="text-muted-foreground">
           Connecteam: <b>{report.sync.status}</b>
           {report.sync.lastSuccessfulAt ? ` · last complete sync ${new Date(report.sync.lastSuccessfulAt).toLocaleString()}` : ""}
-          {report.sync.errorCode ? ` · ${report.sync.errorCode}` : ""}
         </p>
       </CardContent>
     </Card>

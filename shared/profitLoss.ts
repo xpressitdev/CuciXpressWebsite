@@ -19,6 +19,87 @@ export const PNL_BRANCH_NAMES = [
   "Lambak",
 ] as const;
 
+/**
+ * The sync API deliberately exposes only these stable, non-sensitive error
+ * codes.  Upstream response bodies (which can contain account details or
+ * credentials) never cross the API boundary.
+ */
+export const CONNECTEAM_SYNC_ERROR_CODES = [
+  "connecteam_not_configured",
+  "connecteam_fetch_timeout",
+  "connecteam_http_400",
+  "connecteam_http_401",
+  "connecteam_http_403",
+  "connecteam_http_404",
+  "connecteam_http_408",
+  "connecteam_http_409",
+  "connecteam_http_425",
+  "connecteam_http_429",
+  "connecteam_http_500",
+  "connecteam_http_502",
+  "connecteam_http_503",
+  "connecteam_http_504",
+  "connecteam_invalid_response",
+  "connecteam_invalid_paging",
+  "connecteam_incomplete_paging",
+  "connecteam_duplicate_submission",
+  "connecteam_branch_mapping_invalid",
+  "connecteam_persist_failed",
+  "connecteam_lease_lost",
+  "connecteam_sync_failed",
+] as const;
+
+export type ConnecteamSyncErrorCode = (typeof CONNECTEAM_SYNC_ERROR_CODES)[number];
+
+const connecteamSyncErrorCodeSet = new Set<string>(CONNECTEAM_SYNC_ERROR_CODES);
+
+/**
+ * Converts persisted/upstream-derived values to the response whitelist. This
+ * is intentionally defensive for rows written by older application versions.
+ */
+export function safeConnecteamSyncErrorCode(value: unknown): ConnecteamSyncErrorCode {
+  return typeof value === "string" && connecteamSyncErrorCodeSet.has(value)
+    ? value as ConnecteamSyncErrorCode
+    : "connecteam_sync_failed";
+}
+
+export function connecteamSyncErrorMessage(value: unknown): string {
+  const code = safeConnecteamSyncErrorCode(value);
+  if (code === "connecteam_not_configured") {
+    return "Connecteam sync is not configured. Ask an administrator to configure the Connecteam integration, then try again.";
+  }
+  if (code === "connecteam_fetch_timeout") {
+    return "Connecteam did not respond in time. Existing synced expense data is unchanged; try again shortly.";
+  }
+  if (code === "connecteam_http_401" || code === "connecteam_http_403") {
+    return "Connecteam rejected the integration credentials. Ask an administrator to verify the API key, then try again.";
+  }
+  if (code === "connecteam_http_429") {
+    return "Connecteam is rate-limiting requests. Wait a moment before trying the sync again.";
+  }
+  if (code === "connecteam_http_408") {
+    return "Connecteam timed out while serving the snapshot. Existing synced expense data is unchanged; try again shortly.";
+  }
+  if (code === "connecteam_http_500" || code === "connecteam_http_502"
+    || code === "connecteam_http_503" || code === "connecteam_http_504") {
+    return "Connecteam is temporarily unavailable. Existing synced expense data is unchanged; try again shortly.";
+  }
+  if (code === "connecteam_invalid_response" || code === "connecteam_invalid_paging"
+    || code === "connecteam_incomplete_paging" || code === "connecteam_duplicate_submission") {
+    return "Connecteam returned an incomplete expense snapshot. Existing synced expense data is unchanged; try again after the source data is available.";
+  }
+  if (code === "connecteam_branch_mapping_invalid") {
+    return "The five P&L branch mappings are incomplete. Ask an administrator to fix the branch configuration before syncing.";
+  }
+  if (code === "connecteam_persist_failed") {
+    return "The Connecteam snapshot could not be saved. Existing synced expense data is unchanged; try again shortly.";
+  }
+  if (code === "connecteam_lease_lost") {
+    return "Another sync took ownership while this sync was running. The report will update when that sync finishes.";
+  }
+  return "Connecteam sync could not be completed. Existing synced expense data is unchanged; try again shortly.";
+}
+
 export type PnlBranchName = (typeof PNL_BRANCH_NAMES)[number];
 export type PnlSection = "cost_of_services" | "operating_expense";
 

@@ -52,11 +52,12 @@ function renderTab() {
       },
     },
   });
-  return render(
+  render(
     <QueryClientProvider client={queryClient}>
       <ProfitLossTab />
     </QueryClientProvider>,
   );
+  return queryClient;
 }
 
 async function chooseBranch(name: string) {
@@ -260,5 +261,63 @@ describe("ProfitLossTab depreciation controls", () => {
     fireEvent.click(screen.getByTestId("button-expense-reminders"));
     expect(await screen.findByTestId("dialog-expense-reminders")).toBeVisible();
     expect(screen.getByText("No expense reminders for this month.")).toBeVisible();
+  });
+
+  it("treats a 202 running response as active work, not a completed sync", async () => {
+    let reportReads = 0;
+    vi.stubGlobal("fetch", vi.fn(async (input: RequestInfo | URL) => {
+      const url = new URL(String(input), "http://localhost");
+      if (url.pathname.endsWith("/expenses")) return new Response(JSON.stringify({ entries: [] }));
+      reportReads += 1;
+      return new Response(JSON.stringify(makeReport(
+        Number(url.searchParams.get("year")),
+        url.searchParams.get("branch_id") ?? "overall",
+        {},
+        { sync: { status: reportReads > 1 ? "running" : "succeeded" } },
+      )));
+    }));
+    vi.mocked(apiRequest).mockResolvedValue(new Response(JSON.stringify({
+      status: "running",
+      message: "A Connecteam expense sync is already running.",
+      pollAfterSeconds: 5,
+    }), { status: 202 }));
+
+    renderTab();
+    const button = await screen.findByTestId("button-profit-loss-sync");
+    fireEvent.click(button);
+
+    expect(await screen.findByText(/already running/)).toBeVisible();
+    expect(screen.queryByText(/sync completed/i)).not.toBeInTheDocument();
+    await waitFor(() => expect(screen.getByTestId("button-profit-loss-sync")).toBeDisabled());
+  });
+
+  it("shows a completed state only after the polled report reaches succeeded", async () => {
+    let reportReads = 0;
+    let queryClient: QueryClient;
+    vi.stubGlobal("fetch", vi.fn(async (input: RequestInfo | URL) => {
+      const url = new URL(String(input), "http://localhost");
+      if (url.pathname.endsWith("/expenses")) return new Response(JSON.stringify({ entries: [] }));
+      reportReads += 1;
+      return new Response(JSON.stringify(makeReport(
+        Number(url.searchParams.get("year")),
+        url.searchParams.get("branch_id") ?? "overall",
+        {},
+        { sync: { status: reportReads > 1 ? "succeeded" : "running" } },
+      )));
+    }));
+    vi.mocked(apiRequest).mockResolvedValue(new Response(JSON.stringify({
+      status: "running",
+      message: "A Connecteam expense sync is already running.",
+      pollAfterSeconds: 5,
+    }), { status: 202 }));
+
+    queryClient = renderTab();
+    expect(await screen.findByText("running", { selector: "b" })).toBeVisible();
+    const button = screen.getByTestId("button-profit-loss-sync");
+    expect(button).toBeDisabled();
+
+    await queryClient.invalidateQueries({ predicate: (query) => String(query.queryKey[0]).startsWith("/api/admin/profit-loss?") });
+    await waitFor(() => expect(screen.getByText("succeeded", { selector: "b" })).toBeVisible());
+    expect(screen.getByTestId("button-profit-loss-sync")).not.toBeDisabled();
   });
 });

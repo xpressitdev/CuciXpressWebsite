@@ -1,5 +1,5 @@
 import crypto from "node:crypto";
-import type { Express } from "express";
+import type { Express, Request, Response as ExpressResponse } from "express";
 import { sql } from "drizzle-orm";
 import { db } from "./db";
 import { requireStaff, requireStaffRole } from "./auth/middleware";
@@ -9,6 +9,9 @@ import {
   mapPnlExpenseCategory,
   PNL_BRANCH_NAMES,
   inferRecurringExpenseReminders,
+  connecteamSyncErrorMessage,
+  safeConnecteamSyncErrorCode,
+  type ConnecteamSyncErrorCode,
   type PnlAllocationTarget,
   type PnlExpenseInput,
   type PnlRevenueInput,
@@ -306,6 +309,38 @@ export function mdrFeeForGroup(
 let activeSync: Promise<SyncResult> | null = null;
 export type SyncResult = { status: "succeeded"; submissionsSeen: number; eligible: number };
 
+export type ConnecteamSyncResponse =
+  | SyncResult
+  | { status: "running"; message: string; pollAfterSeconds: number }
+  | { status: "failed"; error: ConnecteamSyncErrorCode; message: string };
+
+const CONNECTEAM_SYNC_RUNNING_MESSAGE =
+  "A Connecteam expense sync is already in progress. The existing P&L report is unchanged while it completes.";
+
+/**
+ * The distributed lease is intentionally not touched here. An in-progress
+ * result means another process owns the lease (possibly across an app
+ * restart), so callers must poll the persisted report instead of retrying or
+ * declaring success.
+ */
+export function connecteamSyncInProgressResponse(): Extract<ConnecteamSyncResponse, { status: "running" }> {
+  return {
+    status: "running",
+    message: CONNECTEAM_SYNC_RUNNING_MESSAGE,
+    pollAfterSeconds: 5,
+  };
+}
+
+export function connecteamSyncFailureResponse(error: unknown): Extract<ConnecteamSyncResponse, { status: "failed" }> {
+  const rawCode = error instanceof Error ? error.message : undefined;
+  const errorCode = safeConnecteamSyncErrorCode(rawCode);
+  return {
+    status: "failed",
+    error: errorCode,
+    message: connecteamSyncErrorMessage(errorCode),
+  };
+}
+
 export function syncConnecteamExpenses(): Promise<SyncResult> {
   if (!activeSync) {
     activeSync = syncConnecteamExpensesOnce().finally(() => { activeSync = null; });
@@ -473,8 +508,10 @@ async function syncConnecteamExpensesOnce(): Promise<SyncResult> {
   });
   return { status: "succeeded", submissionsSeen: unique.length, eligible: unique.filter((entry) => entry.eligible).length };
   } catch (error: unknown) {
-    const code = error instanceof Error && /^connecteam_[a-z0-9_]+$/.test(error.message)
-      ? error.message : "connecteam_sync_failed";
+    const rawCode = error instanceof Error ? error.message : undefined;
+    const code = rawCode === "connecteam_sync_in_progress"
+      ? rawCode
+      : safeConnecteamSyncErrorCode(rawCode);
     if (code !== "connecteam_sync_in_progress") await markSyncFailed(code, leaseToken);
     throw error;
   }
@@ -884,8 +921,37 @@ export async function getProfitLossReport(year: number, branchId: string | "over
     },
     sync: sync ? {
       lastSuccessfulAt: sync.last_successful_at, status: sync.last_attempt_status,
-      errorCode: sync.last_error_code, expectedSubmissionCount: sync.expected_submission_count,
+      ...(sync.last_error_code ? {
+        errorCode: safeConnecteamSyncErrorCode(sync.last_error_code),
+        errorMessage: connecteamSyncErrorMessage(sync.last_error_code),
+      } : {}),
+      expectedSubmissionCount: sync.expected_submission_count,
     } : { status: "never" },
+  };
+}
+
+export function createConnecteamSyncHandler(
+  sync: () => Promise<SyncResult> = syncConnecteamExpenses,
+) {
+  return async (_req: Request, res: ExpressResponse) => {
+    try {
+      // syncConnecteamExpenses resolves only after the fenced transaction has
+      // written last_successful_at and status='succeeded'. A 200 response is
+      // therefore never used as an acknowledgement of merely starting work.
+      const result = await sync();
+      if (result.status !== "succeeded") {
+        res.setHeader("Retry-After", "5");
+        return res.status(202).json(connecteamSyncInProgressResponse());
+      }
+      return res.json(result);
+    } catch (error: unknown) {
+      if (error instanceof Error && error.message === "connecteam_sync_in_progress") {
+        res.setHeader("Retry-After", "5");
+        return res.status(202).json(connecteamSyncInProgressResponse());
+      }
+      const failure = connecteamSyncFailureResponse(error);
+      return res.status(502).json(failure);
+    }
   };
 }
 
@@ -923,10 +989,12 @@ export function registerProfitLossRoutes(app: Express) {
     `);
     res.json({ entries: rows.rows }); // deliberately excludes description, receipt, user and account fields
   });
-  app.post("/api/admin/profit-loss/sync", requireStaff, requireStaffRole("owner"), async (_req, res) => {
-    try { res.json(await syncConnecteamExpenses()); }
-    catch { res.status(502).json({ error: "connecteam_sync_failed" }); }
-  });
+  app.post(
+    "/api/admin/profit-loss/sync",
+    requireStaff,
+    requireStaffRole("owner"),
+    createConnecteamSyncHandler(),
+  );
   app.put("/api/admin/profit-loss/depreciation", requireStaff, requireStaffRole("owner"), async (req, res) => {
     const { year, month, branch_id, cents } = req.body ?? {};
     if (!Number.isInteger(year) || !Number.isInteger(month) || month < 1 || month > 12

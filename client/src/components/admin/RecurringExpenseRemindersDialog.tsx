@@ -8,12 +8,17 @@ import {
 import {
   Select, SelectContent, SelectItem, SelectTrigger, SelectValue,
 } from "@/components/ui/select";
-import { PNL_MONTHS, type RecurringExpenseReminder } from "@shared/profitLoss";
+import {
+  connecteamSyncErrorMessage,
+  PNL_MONTHS,
+  type RecurringExpenseReminder,
+} from "@shared/profitLoss";
 
 type ReminderSync = {
   status: string;
   lastSuccessfulAt?: string;
   errorCode?: string;
+  errorMessage?: string;
 };
 
 interface RecurringExpenseRemindersDialogProps {
@@ -82,6 +87,8 @@ export default function RecurringExpenseRemindersDialog({
   const lastSync = sync.lastSuccessfulAt
     ? new Date(sync.lastSuccessfulAt).toLocaleString()
     : null;
+  const syncErrorMessage = sync.errorMessage
+    ?? (sync.errorCode ? connecteamSyncErrorMessage(sync.errorCode) : null);
 
   return (
     <>
@@ -129,7 +136,7 @@ export default function RecurringExpenseRemindersDialog({
                 Suggestions may be outdated because the Connecteam expense sync is
                 {syncStatus === "never" ? " not complete yet" : ` ${sync.status}`}.
                 {lastSync ? ` Last complete sync: ${lastSync}.` : ""}
-                {sync.errorCode ? ` Sync error: ${sync.errorCode}.` : ""}
+                 {syncErrorMessage ? ` ${syncErrorMessage}` : ""}
               </span>
             </div>
           )}
