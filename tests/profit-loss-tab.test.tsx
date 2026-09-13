@@ -74,6 +74,23 @@ afterEach(() => {
 });
 
 describe("ProfitLossTab depreciation controls", () => {
+  it("freezes month headers above opaque frozen total labels", async () => {
+    vi.stubGlobal("fetch", vi.fn(async (input: RequestInfo | URL) => {
+      const url = new URL(String(input), "http://localhost");
+      if (url.pathname.endsWith("/expenses")) return new Response(JSON.stringify({ entries: [] }));
+      return new Response(JSON.stringify(makeReport(currentYear, "overall")));
+    }));
+    renderTab();
+    const table = await screen.findByTestId("table-profit-loss");
+    expect(table.parentElement).toHaveClass("overflow-auto", "max-h-[70dvh]", "isolate");
+    const headers = within(table).getAllByRole("columnheader");
+    for (const header of headers) expect(header).toHaveClass("sticky", "top-0", "bg-background");
+    expect(headers[0]).toHaveClass("left-0", "z-40");
+    const revenueLabel = within(table).getByText("Revenue");
+    expect(revenueLabel).toHaveClass("sticky", "left-0", "bg-muted");
+    expect(revenueLabel).not.toHaveClass("bg-muted/50");
+  });
+
   beforeEach(() => {
     HTMLElement.prototype.scrollIntoView = vi.fn();
   });

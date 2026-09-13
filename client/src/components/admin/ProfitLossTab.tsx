@@ -423,13 +423,13 @@ export default function ProfitLossTab() {
     </Card>
 
     <Card className="overflow-hidden">
-      <CardContent className="p-0 overflow-x-auto">
-        <Table data-testid="table-profit-loss" className="min-w-[980px]">
-          <TableHeader><TableRow><TableHead className={`${stickyFirstColumn} font-semibold`}>P&amp;L line (BND)</TableHead>
-            {report.months.map((month) => <TableHead className="whitespace-nowrap text-right" key={monthKeyFor(month, reportYear)}>
+      <CardContent className="p-0">
+        <Table data-testid="table-profit-loss" className="min-w-[980px] border-separate border-spacing-0" containerClassName="isolate max-h-[70dvh]">
+          <TableHeader><TableRow><TableHead className={`${stickyFirstColumn} top-0 z-40 border-b font-semibold`}>P&amp;L line (BND)</TableHead>
+            {report.months.map((month) => <TableHead className="sticky top-0 z-30 border-b bg-background whitespace-nowrap text-right" key={monthKeyFor(month, reportYear)}>
               {monthHeading(month, reportYear, isCustomPeriod)}
             </TableHead>)}
-            <TableHead className="whitespace-nowrap text-right font-bold">{totalLabel}</TableHead>
+            <TableHead className="sticky top-0 z-30 border-b bg-background whitespace-nowrap text-right font-bold">{totalLabel}</TableHead>
           </TableRow></TableHeader>
           <TableBody>{rows.map((row) => {
             const isTotal = ["revenue", "cost_of_services", "gross_profit", "operating_expense", "ebitda", "net_profit"].includes(row.key);
@@ -437,16 +437,16 @@ export default function ProfitLossTab() {
             const isUnmapped = row.key === "unmapped_expenses";
             const rowClass = isTotal ? "bg-muted/50 font-semibold" : isUnmapped ? "bg-amber-50 text-amber-900" : "";
             const firstCellBackground = isTotal
-              ? "bg-muted/50"
+              ? "bg-muted"
               : isUnmapped ? "bg-amber-50 text-amber-900" : "bg-background";
             return <TableRow key={row.key} className={rowClass}>
-              <TableCell className={`${stickyFirstColumn} ${firstCellBackground}`}>{row.label}</TableCell>
-              {report.months.map((month) => <TableCell className="text-right tabular-nums" key={monthKeyFor(month, reportYear)}>
+              <TableCell className={`${stickyFirstColumn} border-b ${firstCellBackground}`}>{row.label}</TableCell>
+              {report.months.map((month) => <TableCell className="border-b text-right tabular-nums" key={monthKeyFor(month, reportYear)}>
                 {isMargin
                   ? marginText(lineFor(month.lines, row.key), lineFor(month.lines, "revenue"))
                   : bnd(lineFor(month.lines, row.key))}
               </TableCell>)}
-              <TableCell className="text-right tabular-nums font-bold">
+              <TableCell className="border-b text-right tabular-nums font-bold">
                 {isMargin
                   ? marginText(report.ytd[row.key], report.ytd.revenue ?? 0)
                   : bnd(report.ytd[row.key] ?? 0)}
