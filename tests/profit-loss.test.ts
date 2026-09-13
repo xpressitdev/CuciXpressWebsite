@@ -7,6 +7,7 @@ import {
   allocateConnecteamExpense,
   buildPnl,
   mapPnlExpenseCategory,
+  inferRecurringExpenseReminders,
   PNL_BRANCH_NAMES,
   splitCentsExactly,
   type PnlAllocationTarget,
@@ -34,6 +35,79 @@ const line = (month: ReturnType<typeof buildPnl>[number], key: string) =>
   month.lines.find((entry) => entry.key === key)?.cents;
 
 describe("P&L accounting contract", () => {
+  it("suggests the first absent month after a two-month recurring pattern", () => {
+    const observations = [
+      { expenseDate: "2024-07-01", sourceCategory: "Management Fee", branchId: "1", eligible: true },
+      { expenseDate: "2024-08-01", sourceCategory: "Management Fee", branchId: "1", eligible: true },
+      // A valid zero-value capture still counts as captured.
+      { expenseDate: "2024-08-15", sourceCategory: "Management Fee", branchId: "1", eligible: true },
+    ];
+    const reminders = inferRecurringExpenseReminders({
+      observations, reportYear: 2024, currentBruneiYmd: "2024-09-13",
+      branchNames: { "1": "Tungku" },
+    });
+    expect(reminders).toHaveLength(1);
+    expect(reminders[0]).toMatchObject({
+      category: "Management Fee", sourceCategory: "Management Fee",
+      branchId: "1", branchName: "Tungku", year: 2024, month: 9,
+      period: "current", status: "missing", evidenceMonths: ["2024-07", "2024-08"],
+    });
+    expect(reminders.some((reminder) => reminder.month === 7 || reminder.month === 8)).toBe(false);
+  });
+
+  it("does not promote one-offs, invalid dates, or invalid branches into recurrence", () => {
+    const reminders = inferRecurringExpenseReminders({
+      observations: [
+        { expenseDate: "2024-07-01", sourceCategory: "Foods & Drink", branchId: "1", eligible: true },
+        { expenseDate: "2024-08-01", sourceCategory: "Maintenance & Repair", branchId: "1", eligible: true },
+        // Even an eligible row cannot establish a pattern when its allocation
+        // is explicitly invalid.
+        { expenseDate: "2024-07-01", sourceCategory: "Management Fee", branchId: "1", eligible: true, allocationStatus: "invalid_amount" },
+        { expenseDate: "2024-08-01", sourceCategory: "Management Fee", branchId: "1", eligible: true, allocationStatus: "allocated" },
+        { expenseDate: null, sourceCategory: "Management Fee", branchId: "1", eligible: true },
+        { expenseDate: "2024-07-01", sourceCategory: "Management Fee", branchId: null, eligible: true },
+      ],
+      reportYear: 2024, currentBruneiYmd: "2024-09-13",
+    });
+    expect(reminders).toEqual([]);
+  });
+
+  it("keeps pending and rejected submissions distinct from a truly absent month", () => {
+    const reminders = inferRecurringExpenseReminders({
+      observations: [
+        { expenseDate: "2024-07-01", sourceCategory: "Management Fee", branchId: "1", eligible: true },
+        { expenseDate: "2024-08-01", sourceCategory: "Management Fee", branchId: "1", eligible: true },
+        { expenseDate: "2024-09-01", sourceCategory: "Management Fee", branchId: "1", eligible: false, sourceStatus: "Pending" },
+        { expenseDate: "2024-10-01", sourceCategory: "Management Fee", branchId: "1", eligible: false, sourceStatus: "Rejected" },
+      ],
+      reportYear: 2024, currentBruneiYmd: "2024-10-13",
+    });
+    expect(reminders).toEqual(expect.arrayContaining([
+      expect.objectContaining({ month: 9, status: "pending", period: "completed" }),
+      expect.objectContaining({ month: 10, status: "rejected", period: "current" }),
+    ]));
+    expect(reminders).toHaveLength(2);
+  });
+
+  it("uses prior-year evidence and keeps Overall allocations branch-specific", () => {
+    const reminders = inferRecurringExpenseReminders({
+      observations: [
+        { expenseDate: "2023-11-01", sourceCategory: "Management Fee", branchId: "1", eligible: true },
+        { expenseDate: "2023-12-01", sourceCategory: "Management Fee", branchId: "1", eligible: true },
+        { expenseDate: "2023-11-01", sourceCategory: "Management Fee", branchId: "2", eligible: true },
+        // Branch 2 has only one preceding capture and must not inherit branch 1's pattern.
+      ],
+      reportYear: 2024, currentBruneiYmd: "2024-01-13",
+      branchNames: { "1": "Tungku", "2": "Salar" },
+    });
+    expect(reminders).toEqual([
+      expect.objectContaining({
+        month: 1, year: 2024, branchId: "1", branchName: "Tungku",
+        evidenceMonths: ["2023-11", "2023-12"],
+      }),
+    ]);
+  });
+
   it("splits an All expense exactly once with cent conservation", () => {
     const allocations = allocateConnecteamExpense(101, ["All", "Tungku", "Tungku"], branches);
     expect(allocations).toEqual([
@@ -45,6 +119,7 @@ describe("P&L accounting contract", () => {
     ]);
     expect(allocations.reduce((total, entry) => total + entry.cents, 0)).toBe(101);
     expect(splitCentsExactly(-101, branches).reduce((total, entry) => total + entry.cents, 0)).toBe(-101);
+    expect(allocateConnecteamExpense(1, ["Tungku Branch"], branches)).toEqual([{ branchId: "1", cents: 1 }]);
   });
 
   it("deduplicates selected branches and leaves invalid choices unallocated", () => {

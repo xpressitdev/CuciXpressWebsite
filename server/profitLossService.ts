@@ -8,9 +8,11 @@ import {
   buildPnl,
   mapPnlExpenseCategory,
   PNL_BRANCH_NAMES,
+  inferRecurringExpenseReminders,
   type PnlAllocationTarget,
   type PnlExpenseInput,
   type PnlRevenueInput,
+  type RecurringExpenseObservation,
 } from "@shared/profitLoss";
 
 const CONNECTEAM_FORM_ID = "6495602";
@@ -548,7 +550,7 @@ export function deriveCoverageStatus(
 }
 
 export async function getProfitLossReport(year: number, branchId: string | "overall") {
-  const [expenseRows, warningRows, depreciationRows, branchesRows, stateRows, posRows, counterRows, invoiceRows, legacySubscriptionRows, feeRateRows, sourceRangeRows] = await Promise.all([
+  const [expenseRows, warningRows, depreciationRows, branchesRows, stateRows, posRows, counterRows, invoiceRows, legacySubscriptionRows, feeRateRows, sourceRangeRows, recurringExpenseRows] = await Promise.all([
     db.execute(sql`
       SELECT extract(month FROM s.expense_date)::int AS month, a.branch_id::text AS branch_id,
              a.pnl_category, a.allocation_status, a.cents
@@ -670,6 +672,21 @@ export async function getProfitLossReport(year: number, branchId: string | "over
       JOIN subscriptions s ON s.id = i.subscription_id
       WHERE i.status = 'paid' AND COALESCE(s.is_test, false) = false
     `),
+    // Recurrence needs six preceding calendar months (including the prior
+    // year for January).  The query remains a sanitized source projection:
+    // no Connecteam descriptions, receipts, submitter identity, or accounts
+    // enter the report.
+    db.execute(sql`
+      SELECT s.expense_date::text AS expense_date, s.source_category, s.source_status,
+             s.is_eligible, s.branch_choices, a.branch_id::text AS branch_id,
+             a.allocation_status
+      FROM pnl_expense_allocations a
+      JOIN connecteam_expense_submissions s ON s.id = a.connecteam_expense_submission_id
+      WHERE s.form_id = ${CONNECTEAM_FORM_ID} AND s.is_present
+        AND s.expense_date >= make_date(${year - 1}, 7, 1)
+        AND s.expense_date < make_date(${year + 1}, 1, 1)
+        AND a.allocation_status <> 'excluded_mdr_duplicate'
+    `),
   ]);
 
   const revenue: PnlRevenueInput[] = posRows.rows.map((row: any) => ({
@@ -786,9 +803,54 @@ export async function getProfitLossReport(year: number, branchId: string | "over
   const observedRanges = Object.fromEntries((sourceRangeRows.rows as any[]).map((row) => [
     row.source, { firstDate: row.first_date ?? null, lastDate: row.last_date ?? null },
   ]));
+  const currentBruneiYmd = bruneiYmd(new Date());
+  const canonicalBranches = (branchesRows.rows as any[]).map((row) => ({
+    id: String(row.id),
+    name: String(row.name) as PnlAllocationTarget["name"],
+  }));
+  const branchNames = Object.fromEntries(canonicalBranches.map((branch) => [branch.id, branch.name]));
+  const recurringObservations: RecurringExpenseObservation[] = [];
+  for (const row of recurringExpenseRows.rows as any[]) {
+    const directBranchId = row.branch_id === null || row.branch_id === undefined
+      ? null : String(row.branch_id);
+    const branchIds = directBranchId
+      ? [directBranchId]
+      : Boolean(row.is_eligible)
+        ? []
+        : (() => {
+          const choices: unknown[] = Array.isArray(row.branch_choices) ? row.branch_choices : [];
+          // Reuse the same canonical branch/all handling as accounting. The
+          // nominal amount is irrelevant; allocation targets are what matter
+          // for a pending/rejected source row.
+          return allocateConnecteamExpense(1, choices.filter(
+            (choice: unknown): choice is string => typeof choice === "string",
+          ), canonicalBranches).map((allocation) => allocation.branchId);
+        })();
+    // An unrecognized branch, invalid amount/date, or absent branch choice
+    // cannot prove a branch was captured or omitted.
+    for (const recurringBranchId of branchIds) {
+      recurringObservations.push({
+        expenseDate: row.expense_date ?? null,
+        sourceCategory: row.source_category ?? null,
+        branchId: recurringBranchId,
+        eligible: Boolean(row.is_eligible),
+        sourceStatus: row.source_status ?? null,
+        allocationStatus: row.allocation_status ?? null,
+        isPresent: true,
+      });
+    }
+  }
+  const recurringExpenseReminders = inferRecurringExpenseReminders({
+    observations: recurringObservations,
+    reportYear: year,
+    currentBruneiYmd,
+    branchId,
+    branchNames,
+  });
   return {
     year, branchId, branches: branchesRows.rows,
     months, ytd,
+    recurringExpenseReminders,
     // Monetary accounting begins only where POS/Connecteam sources have
     // coverage; the UI presents this as a warning rather than invented zeroes.
     coverage: {

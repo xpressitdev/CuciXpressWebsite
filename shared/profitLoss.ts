@@ -169,9 +169,10 @@ export function allocateConnecteamExpense(
   rawChoices: readonly string[] | null | undefined,
   branches: readonly PnlAllocationTarget[],
 ): PnlAllocation[] {
-  const selected = new Set((rawChoices ?? []).map(normalise));
+  const branchChoiceKey = (value: string) => normalise(value).replace(/\s+branch$/, "");
+  const selected = new Set((rawChoices ?? []).map(branchChoiceKey));
   const allSelected = selected.has("all");
-  const branchByName = new Map(branches.map((branch) => [normalise(branch.name), branch]));
+  const branchByName = new Map(branches.map((branch) => [branchChoiceKey(branch.name), branch]));
   const targets = allSelected
     ? branches
     : Array.from(selected)
@@ -316,3 +317,238 @@ export function buildPnl(input: PnlBuildInput): PnlMonth[] {
     };
   });
 }
+
+/**
+ * A sanitized, allocation-level observation used by the recurring expense
+ * reminder.  This intentionally contains only the source projection already
+ * retained for P&L (never a description, receipt, submitter, or account
+ * field).  `sourceCategory` is preferred over `category` so the reminder can
+ * explain which source label established the pattern.
+ */
+export interface RecurringExpenseObservation {
+  expenseDate?: string | null;
+  year?: number;
+  month?: number;
+  sourceCategory?: string | null;
+  category?: string | null;
+  branchId?: string | null;
+  eligible?: boolean;
+  sourceStatus?: string | null;
+  /** Optional source status for pure fixtures that do not have eligible. */
+  status?: string | null;
+  allocationStatus?: string | null;
+  isPresent?: boolean;
+}
+
+export type RecurringExpenseReminderStatus = "missing" | "pending" | "rejected";
+
+export interface RecurringExpenseReminder {
+  /** Canonical P&L category when known, otherwise the sanitized source label. */
+  category: string;
+  /** The sanitized label as submitted to Connecteam. */
+  sourceCategory: string;
+  branchId: string;
+  branchName?: string;
+  year: number;
+  month: number;
+  monthKey: string;
+  /** Current Brunei month is a check; a closed month is only possibly missing. */
+  period: "current" | "completed";
+  status: RecurringExpenseReminderStatus;
+  /** Approved captures in the six preceding calendar months. */
+  evidenceMonths: string[];
+  /** Kept explicit for clients that want to explain the inference. */
+  pattern: "two-of-preceding-six";
+  sourceStatus?: string | null;
+}
+
+export interface InferRecurringExpenseRemindersInput {
+  observations?: readonly RecurringExpenseObservation[];
+  /** Alias useful to callers that model the source projection as records. */
+  records?: readonly RecurringExpenseObservation[];
+  reportYear: number;
+  currentBruneiYmd: string;
+  /** "overall" evaluates each known allocation independently. */
+  branchId?: string | "overall";
+  branchNames?: Readonly<Record<string, string>>;
+  recentMonths?: number;
+}
+
+const monthIndex = (year: number, month: number) => year * 12 + month - 1;
+const monthFromIndex = (index: number) => ({
+  year: Math.floor(index / 12),
+  month: (index % 12) + 1,
+});
+const monthKeyFromIndex = (index: number) => {
+  const value = monthFromIndex(index);
+  return `${value.year}-${String(value.month).padStart(2, "0")}`;
+};
+const validMonthDate = (value: string) => {
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(value)) return null;
+  const year = Number(value.slice(0, 4));
+  const month = Number(value.slice(5, 7));
+  const day = Number(value.slice(8, 10));
+  if (!Number.isInteger(year) || month < 1 || month > 12 || day < 1 || day > 31) return null;
+  const parsed = new Date(`${value}T00:00:00Z`);
+  if (Number.isNaN(parsed.getTime()) || parsed.toISOString().slice(0, 10) !== value) return null;
+  return { year, month };
+};
+
+function observationMonth(observation: RecurringExpenseObservation) {
+  if (observation.expenseDate !== undefined) {
+    if (typeof observation.expenseDate !== "string") return null;
+    return validMonthDate(observation.expenseDate);
+  }
+  if (Number.isInteger(observation.year) && Number.isInteger(observation.month)
+    && observation.month! >= 1 && observation.month! <= 12) {
+    return { year: observation.year!, month: observation.month! };
+  }
+  return null;
+}
+
+function observationLabel(observation: RecurringExpenseObservation) {
+  const sourceCategory = observation.sourceCategory?.trim() || observation.category?.trim() || "";
+  if (!sourceCategory) return null;
+  const canonical = mapPnlExpenseCategory(sourceCategory);
+  return {
+    sourceCategory,
+    category: canonical ?? sourceCategory,
+    key: normalise(canonical ?? sourceCategory),
+  };
+}
+
+function notApprovedStatus(observation: RecurringExpenseObservation) {
+  if (observation.eligible === true) return null;
+  if (observation.eligible === undefined
+    && (observation.allocationStatus === "allocated"
+      || observation.allocationStatus === "unmapped_category")) return null;
+  const status = normalise(observation.sourceStatus ?? observation.status ?? "");
+  if (observation.eligible === undefined && (!status || status === "approve" || status === "approved")) {
+    return null;
+  }
+  if (status.includes("reject") || status.includes("declin")) return "rejected" as const;
+  return "pending" as const;
+}
+
+/**
+ * Infers recurring omissions without treating an aggregate P&L line as an
+ * expense.  Each canonical branch/category pair is evaluated independently.
+ *
+ * A pair establishes a pattern for a candidate month only when approved
+ * captures exist in at least two distinct months in the six calendar months
+ * immediately before that candidate.  This makes July/August captures
+ * establish a September expectation, while never considering a future month
+ * or a same-month capture as evidence.  Invalid dates, branches, categories,
+ * and non-present rows are deliberately ignored because they cannot prove
+ * either capture or absence.
+ */
+export function inferRecurringExpenseReminders(
+  input: InferRecurringExpenseRemindersInput,
+): RecurringExpenseReminder[] {
+  const recentMonths = input.recentMonths ?? 6;
+  if (!Number.isInteger(input.reportYear) || input.reportYear < 1
+    || !Number.isInteger(recentMonths) || recentMonths < 2) return [];
+  const current = validMonthDate(input.currentBruneiYmd);
+  if (!current) return [];
+  const currentIndex = monthIndex(current.year, current.month);
+  const reportStart = monthIndex(input.reportYear, 1);
+  const reportEnd = monthIndex(input.reportYear, 12);
+  if (reportStart > currentIndex) return [];
+  const lastCandidate = Math.min(reportEnd, currentIndex);
+  const selectedBranch = input.branchId && input.branchId !== "overall"
+    ? input.branchId : null;
+  type Group = {
+    category: string;
+    sourceCategory: string;
+    branchId: string;
+    branchName?: string;
+    approved: Set<number>;
+    submissions: Map<number, { status: RecurringExpenseReminderStatus; sourceStatus: string | null }>;
+  };
+  const groups = new Map<string, Group>();
+  const observations = input.observations ?? input.records ?? [];
+  for (const observation of observations) {
+    if (observation.isPresent === false) continue;
+    const branchId = observation.branchId?.trim();
+    if (!branchId || (selectedBranch !== null && branchId !== selectedBranch)) continue;
+    const date = observationMonth(observation);
+    const label = observationLabel(observation);
+    if (!date || !label) continue;
+    const index = monthIndex(date.year, date.month);
+    // Future source rows must not establish an expectation in the present.
+    if (index > currentIndex) continue;
+    // Invalid allocations cannot prove either a capture or an omission. Keep
+    // this before the eligible check so an invalid eligible fixture cannot
+    // accidentally become recurrence evidence.
+    if (observation.allocationStatus === "invalid_amount"
+      || observation.allocationStatus === "invalid_date"
+      || observation.allocationStatus === "invalid_branch"
+      || observation.allocationStatus === "excluded_mdr_duplicate") continue;
+    const key = `${branchId}\u0000${label.key}`;
+    let group = groups.get(key);
+    if (!group) {
+      group = {
+        category: label.category,
+        sourceCategory: label.sourceCategory,
+        branchId,
+        branchName: input.branchNames?.[branchId],
+        approved: new Set<number>(),
+        submissions: new Map(),
+      };
+      groups.set(key, group);
+    }
+    // The source label is stable for a mapped category in normal operation.
+    // Prefer the first observed label and never expose an unsanitized field.
+    if (notApprovedStatus(observation) === null) {
+      group.approved.add(index);
+      group.submissions.delete(index);
+      continue;
+    }
+    const status = notApprovedStatus(observation);
+    const existing = group.submissions.get(index);
+    if (status && !existing) {
+      group.submissions.set(index, {
+        status,
+        sourceStatus: observation.sourceStatus ?? observation.status ?? null,
+      });
+    }
+  }
+
+  const reminders: RecurringExpenseReminder[] = [];
+  groups.forEach((group) => {
+    for (let candidate = reportStart; candidate <= lastCandidate; candidate += 1) {
+      if (group.approved.has(candidate)) continue;
+      const evidence: number[] = Array.from(group.approved)
+        .filter((observed) => observed >= candidate - recentMonths && observed < candidate)
+        .sort((left, right) => left - right);
+      if (new Set(evidence).size < 2) continue;
+      const submission = group.submissions.get(candidate);
+      const period = candidate === currentIndex ? "current" : "completed";
+      const date = monthFromIndex(candidate);
+      reminders.push({
+        category: group.category,
+        sourceCategory: group.sourceCategory,
+        branchId: group.branchId,
+        ...(group.branchName ? { branchName: group.branchName } : {}),
+        year: date.year,
+        month: date.month,
+        monthKey: monthKeyFromIndex(candidate),
+        period,
+        status: submission?.status ?? "missing",
+        evidenceMonths: evidence.map(monthKeyFromIndex),
+        pattern: "two-of-preceding-six",
+        ...(submission ? { sourceStatus: submission.sourceStatus } : {}),
+      });
+    }
+  });
+  return reminders.sort((left, right) => {
+    const branchOrder = (left.branchName ?? left.branchId).localeCompare(right.branchName ?? right.branchId);
+    return left.year - right.year
+      || left.month - right.month
+      || branchOrder
+      || left.category.localeCompare(right.category);
+  });
+}
+
+/** Short alias for callers that prefer a noun-oriented helper name. */
+export const inferRecurringExpenseGaps = inferRecurringExpenseReminders;

@@ -9,7 +9,8 @@ import {
 } from "@/components/ui/select";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { apiRequest } from "@/lib/queryClient";
-import { PNL_MONTHS } from "@shared/profitLoss";
+import RecurringExpenseRemindersDialog from "@/components/admin/RecurringExpenseRemindersDialog";
+import { PNL_MONTHS, type RecurringExpenseReminder } from "@shared/profitLoss";
 
 type Line = { key: string; label: string; cents: number };
 type Report = {
@@ -26,6 +27,7 @@ type Report = {
     ranges?: CoverageRanges;
   };
   sync: { status: string; lastSuccessfulAt?: string; errorCode?: string; expectedSubmissionCount?: number };
+  recurringExpenseReminders?: RecurringExpenseReminder[];
 };
 type CoverageWarning = {
   code?: string;
@@ -200,6 +202,7 @@ export default function ProfitLossTab() {
     : report.coverage.status === "live" ? "Needs attention" : report.coverage.status;
   const requestedRanges = Object.entries(report.coverage.ranges?.requested ?? {});
   const observedRanges = Object.entries(report.coverage.ranges?.observed ?? {});
+  const recurringExpenseReminders = report.recurringExpenseReminders ?? [];
 
   return <div className="space-y-5">
     <Card>
@@ -223,6 +226,12 @@ export default function ProfitLossTab() {
           <Button variant="outline" onClick={() => sync.mutate()} disabled={sync.isPending} data-testid="button-profit-loss-sync">
             <RefreshCw className={`mr-2 h-4 w-4 ${sync.isPending ? "animate-spin" : ""}`} />Sync Connecteam
           </Button>
+          <RecurringExpenseRemindersDialog
+            reminders={recurringExpenseReminders}
+            reportScope={scopeKey}
+            coverageStatus={report.coverage.status}
+            sync={report.sync}
+          />
         </div>
       </CardTitle></CardHeader>
       <CardContent className="space-y-2 text-sm">

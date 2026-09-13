@@ -12,7 +12,12 @@ vi.mock("@/lib/queryClient", () => ({
 
 const currentYear = new Date().getFullYear();
 
-function makeReport(year: number, branchId: string, coverageOverrides: Record<string, unknown> = {}) {
+function makeReport(
+  year: number,
+  branchId: string,
+  coverageOverrides: Record<string, unknown> = {},
+  reportOverrides: Record<string, unknown> = {},
+) {
   const months = Array.from({ length: 12 }, (_, offset) => ({
     month: offset + 1,
     lines: [
@@ -29,6 +34,8 @@ function makeReport(year: number, branchId: string, coverageOverrides: Record<st
     ytd: { revenue: 120000, depreciation: 0, profit_margin_bps: 1250 },
     coverage: { status: "live", note: "Live", depreciationMissingMonths: [], ...coverageOverrides },
     sync: { status: "complete" },
+    recurringExpenseReminders: [],
+    ...reportOverrides,
   };
 }
 
@@ -179,5 +186,79 @@ describe("ProfitLossTab depreciation controls", () => {
     const marginRow = screen.getByText("Profit Margin").closest("tr");
     expect(marginRow).toHaveTextContent("25.00%");
     expect(marginRow).toHaveTextContent("—");
+  });
+
+  it("auto-opens recurring reminders, reopens from the count button, and handles an empty month filter", async () => {
+    const reminders = [
+      {
+        category: "Management Fee",
+        sourceCategory: "Management Fee",
+        branchId: "7",
+        branchName: "Tungku",
+        year: currentYear,
+        month: 1,
+        monthKey: `${currentYear}-01`,
+        period: "completed",
+        status: "missing",
+        evidenceMonths: [`${currentYear - 1}-11`, `${currentYear - 1}-12`],
+        pattern: "two-of-preceding-six",
+      },
+      {
+        category: "Management Fee",
+        sourceCategory: "Management Fee",
+        branchId: "8",
+        branchName: "Salar",
+        year: currentYear,
+        month: 2,
+        monthKey: `${currentYear}-02`,
+        period: "current",
+        status: "pending",
+        sourceStatus: "Pending",
+        evidenceMonths: [`${currentYear - 1}-12`, `${currentYear}-01`],
+        pattern: "two-of-preceding-six",
+      },
+    ];
+    vi.stubGlobal("fetch", vi.fn(async (input: RequestInfo | URL) => {
+      const url = new URL(String(input), "http://localhost");
+      if (url.pathname.endsWith("/expenses")) return new Response(JSON.stringify({ entries: [] }));
+      return new Response(JSON.stringify(makeReport(
+        Number(url.searchParams.get("year")),
+        url.searchParams.get("branch_id") ?? "overall",
+        {},
+        { recurringExpenseReminders: reminders },
+      )));
+    }));
+
+    renderTab();
+    expect(await screen.findByTestId("dialog-expense-reminders")).toBeVisible();
+    expect(screen.getByText("Possibly missing")).toBeVisible();
+    expect(screen.getByText("Check this month · Submitted pending")).toBeVisible();
+
+    fireEvent.click(screen.getByRole("button", { name: "Close" }));
+    await waitFor(() => expect(screen.queryByTestId("dialog-expense-reminders")).not.toBeInTheDocument());
+    fireEvent.click(screen.getByTestId("button-expense-reminders"));
+    expect(await screen.findByTestId("dialog-expense-reminders")).toBeVisible();
+
+    fireEvent.click(screen.getByRole("combobox", { name: "Reminder month" }));
+    fireEvent.click(await screen.findByRole("option", { name: `Mar ${currentYear}` }));
+    expect(screen.getByText("No expense reminders for this month.")).toBeVisible();
+  });
+
+  it("keeps the zero-count reminder button available with an explicit empty state", async () => {
+    vi.stubGlobal("fetch", vi.fn(async (input: RequestInfo | URL) => {
+      const url = new URL(String(input), "http://localhost");
+      if (url.pathname.endsWith("/expenses")) return new Response(JSON.stringify({ entries: [] }));
+      return new Response(JSON.stringify(makeReport(
+        Number(url.searchParams.get("year")),
+        url.searchParams.get("branch_id") ?? "overall",
+      )));
+    }));
+
+    renderTab();
+    expect(await screen.findByTestId("button-expense-reminders")).toHaveTextContent("Expense reminders");
+    expect(screen.getByTestId("button-expense-reminders")).toHaveTextContent("0");
+    fireEvent.click(screen.getByTestId("button-expense-reminders"));
+    expect(await screen.findByTestId("dialog-expense-reminders")).toBeVisible();
+    expect(screen.getByText("No expense reminders for this month.")).toBeVisible();
   });
 });
