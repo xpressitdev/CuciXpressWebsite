@@ -42,6 +42,10 @@ import {
   Stamp,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
+import {
+  formatWashingState,
+  type LiveWashingCar,
+} from "@/lib/liveQueue";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -166,6 +170,7 @@ interface TodayOrder {
   created_at: string;
   // Lane-control manual ordering. NULL = FIFO by created_at.
   queue_position?: number | null;
+  washing_started_at?: string | null;
   // Phase 4 — populated when status='refunded'.
   refunded_at?: string | null;
   refund_reason?: string | null;
@@ -447,7 +452,10 @@ export default function POS() {
     },
   });
 
-  const { data: todayData } = useQuery<{ orders: TodayOrder[] }>({
+  const { data: todayData, dataUpdatedAt: todayDataUpdatedAt } = useQuery<{
+    orders: TodayOrder[];
+    server_time?: string;
+  }>({
     queryKey: ["/api/pos/orders/today", branchId],
     enabled: isAuthenticated && branchId !== null,
     queryFn: async () => {
@@ -1645,6 +1653,8 @@ export default function POS() {
                   (o) => o.status === "queued" || o.status === "washing",
                 )}
                 branchId={branchId}
+                serverTime={todayData?.server_time}
+                snapshotReceivedAtMs={todayDataUpdatedAt}
                 onChanged={() => {
                   queryClient.invalidateQueries({
                     queryKey: ["/api/pos/orders/today", branchId],
@@ -3169,14 +3179,23 @@ function LaneControl({
   orders,
   branchId,
   onChanged,
+  serverTime,
+  snapshotReceivedAtMs,
 }: {
   orders: TodayOrder[];
   branchId: number | null;
   onChanged: () => void;
+  serverTime?: string;
+  snapshotReceivedAtMs?: number;
 }) {
   const { toast } = useToast();
   const [pendingId, setPendingId] = useState<string | null>(null);
   const [reordering, setReordering] = useState(false);
+  const [nowMs, setNowMs] = useState(() => Date.now());
+  useEffect(() => {
+    const timer = window.setInterval(() => setNowMs(Date.now()), 1_000);
+    return () => window.clearInterval(timer);
+  }, []);
 
   const washing = orders.filter((o) => o.status === "washing");
   // "Up next", front-first: manual queue_position wins, then FIFO by created_at.
@@ -3283,7 +3302,13 @@ function LaneControl({
             <p className="text-sm text-gray-400 italic">No cars in the wash.</p>
           ) : (
             <div className="space-y-2">
-              {washing.map((o) => (
+              {washing.map((o) => {
+                const car: LiveWashingCar = {
+                  plate: o.plate,
+                  package_name: o.package_name,
+                  washing_started_at: o.washing_started_at,
+                };
+                return (
                 <div
                   key={o.id}
                   className="border-2 border-cuci-secondary/40 bg-cuci-secondary/5 rounded-lg px-3 py-2.5"
@@ -3296,6 +3321,14 @@ function LaneControl({
                     <p className="text-sm text-gray-600 break-words">
                       {o.ticket_code} · {o.package_name}
                     </p>
+                     <p className="text-xs font-semibold text-cuci-secondary mt-1">
+                       {formatWashingState(
+                         car,
+                         serverTime,
+                         nowMs,
+                         snapshotReceivedAtMs,
+                       )}
+                     </p>
                   </div>
                   <div className="flex items-center gap-2">
                     <Button
@@ -3329,7 +3362,8 @@ function LaneControl({
                     </Button>
                   </div>
                 </div>
-              ))}
+                );
+              })}
             </div>
           )}
         </div>

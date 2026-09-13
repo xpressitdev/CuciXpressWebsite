@@ -370,8 +370,117 @@ describe("Lane control — busy multi-device queue edits", () => {
     expect(realTransitions).toBe(1);
 
     // The car ends up washing.
-    const row = await pool.query(`SELECT status FROM orders WHERE id = $1`, [car.id]);
+    const row = await pool.query(
+      `SELECT status, washing_started_at FROM orders WHERE id = $1`,
+      [car.id],
+    );
     expect(row.rows[0].status).toBe("washing");
+    expect(row.rows[0].washing_started_at).not.toBeNull();
+  });
+
+  it("does not restart an already-washing countdown on an idempotent retry", async () => {
+    const car = await seedOrder({ status: "queued", minutesAgo: 1 });
+
+    const first = await request(app)
+      .patch(`/api/pos/orders/${car.id}/status`)
+      .set("Cookie", staffCookie)
+      .send({ to: "washing" });
+    expect(first.status).toBe(200);
+    const before = await pool.query(
+      `SELECT washing_started_at FROM orders WHERE id = $1`,
+      [car.id],
+    );
+    const startedAt = before.rows[0].washing_started_at;
+    expect(startedAt).not.toBeNull();
+
+    // A retry is a no-op, so the original server timestamp is preserved.
+    const retry = await request(app)
+      .patch(`/api/pos/orders/${car.id}/status`)
+      .set("Cookie", staffCookie)
+      .send({ to: "washing" });
+    expect(retry.status).toBe(200);
+    expect(retry.body.order.no_op).toBe(true);
+    const after = await pool.query(
+      `SELECT washing_started_at FROM orders WHERE id = $1`,
+      [car.id],
+    );
+    expect(new Date(after.rows[0].washing_started_at).getTime())
+      .toBe(new Date(startedAt).getTime());
+  });
+
+  it("starts the wash clock after a waiting row lock is released", async () => {
+    const car = await seedOrder({ status: "queued", minutesAgo: 1 });
+    const locker = await pool.connect();
+    try {
+      await locker.query("BEGIN");
+      await locker.query(`SELECT id FROM orders WHERE id = $1 FOR UPDATE`, [car.id]);
+      const transactionClock = await locker.query(`SELECT now() AS started_at`);
+      const pending = request(app)
+        .patch(`/api/pos/orders/${car.id}/status`)
+        .set("Cookie", staffCookie)
+        .send({ to: "washing" })
+        .then((response) => response);
+
+      // The route transaction starts while the row is locked. `now()` would
+      // be stuck at that transaction start; clock_timestamp() must reflect
+      // the later instant after the lock wait.
+      await new Promise((resolve) => setTimeout(resolve, 1_000));
+      await locker.query("COMMIT");
+      const response = await pending;
+      expect(response.status).toBe(200);
+
+      const stored = await pool.query(
+        `SELECT washing_started_at FROM orders WHERE id = $1`,
+        [car.id],
+      );
+      const routeStart = new Date(stored.rows[0].washing_started_at).getTime();
+      const transactionStart = new Date(
+        transactionClock.rows[0].started_at,
+      ).getTime();
+      expect(routeStart - transactionStart).toBeGreaterThanOrEqual(800);
+    } finally {
+      await locker.query("ROLLBACK").catch(() => undefined);
+      locker.release();
+    }
+  });
+
+  it("clears the start on requeue and records a fresh start next time", async () => {
+    const car = await seedOrder({ status: "queued", minutesAgo: 1 });
+
+    const first = await request(app)
+      .patch(`/api/pos/orders/${car.id}/status`)
+      .set("Cookie", staffCookie)
+      .send({ to: "washing" });
+    expect(first.status).toBe(200);
+    const started = await pool.query(
+      `SELECT washing_started_at FROM orders WHERE id = $1`,
+      [car.id],
+    );
+    const firstStart = new Date(started.rows[0].washing_started_at).getTime();
+
+    const back = await request(app)
+      .patch(`/api/pos/orders/${car.id}/status`)
+      .set("Cookie", staffCookie)
+      .send({ to: "queued" });
+    expect(back.status).toBe(200);
+    const reset = await pool.query(
+      `SELECT status, washing_started_at FROM orders WHERE id = $1`,
+      [car.id],
+    );
+    expect(reset.rows[0].status).toBe("queued");
+    expect(reset.rows[0].washing_started_at).toBeNull();
+
+    const second = await request(app)
+      .patch(`/api/pos/orders/${car.id}/status`)
+      .set("Cookie", staffCookie)
+      .send({ to: "washing" });
+    expect(second.status).toBe(200);
+    const restarted = await pool.query(
+      `SELECT washing_started_at FROM orders WHERE id = $1`,
+      [car.id],
+    );
+    expect(new Date(restarted.rows[0].washing_started_at).getTime())
+      .toBeGreaterThanOrEqual(firstStart);
   });
 
   it("rejects an illegal status transition (done -> washing) with 409", async () => {

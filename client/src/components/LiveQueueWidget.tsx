@@ -1,6 +1,12 @@
+import { useEffect, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { Link } from "wouter";
 import { ArrowRight } from "lucide-react";
+import {
+  formatLiveWaitSeconds,
+  liveQueueWaitSeconds,
+  type LiveWashingCar,
+} from "@/lib/liveQueue";
 
 interface QueueBranch {
   id: number;
@@ -11,7 +17,9 @@ interface QueueBranch {
   queued_count: number;
   washing_count: number;
   today_total: number;
-  est_wait_minutes: number;
+  est_wait_seconds: number | null;
+  est_wait_minutes: number | null;
+  washing: LiveWashingCar[];
 }
 interface Snap {
   branches: QueueBranch[];
@@ -32,15 +40,31 @@ const isBranchOpen = (b: QueueBranch) => {
 };
 
 export default function LiveQueueWidget({ embedded = false }: { embedded?: boolean }) {
-  const { data, isLoading } = useQuery<Snap>({
+  const { data, dataUpdatedAt, isLoading } = useQuery<Snap>({
     queryKey: ["/api/queue/snapshot"],
-    refetchInterval: 15_000,
+    refetchInterval: 7_000,
   });
+  const [nowMs, setNowMs] = useState(() => Date.now());
+  useEffect(() => {
+    const timer = window.setInterval(() => setNowMs(Date.now()), 1_000);
+    return () => window.clearInterval(timer);
+  }, []);
   const branches = data?.branches ?? [];
   const totalToday = branches.reduce((s, b) => s + b.today_total, 0);
   const openOnly = branches.filter((b) => isBranchOpen(b));
-  const shortest = [...openOnly].sort((a, b) => a.est_wait_minutes - b.est_wait_minutes)[0];
-  const maxWait = Math.max(20, ...branches.map((b) => b.est_wait_minutes));
+  const waitFor = (b: QueueBranch) =>
+    liveQueueWaitSeconds(b, data?.server_time, nowMs, dataUpdatedAt);
+  const shortest = [...openOnly].sort((a, b) => {
+    const aw = waitFor(a);
+    const bw = waitFor(b);
+    if (aw === null) return 1;
+    if (bw === null) return -1;
+    return aw - bw;
+  })[0];
+  const maxWait = Math.max(
+    20 * 60,
+    ...branches.map((b) => waitFor(b) ?? 0),
+  );
   const time = new Date(data?.server_time ?? Date.now()).toLocaleTimeString([], {
     hour: "2-digit",
     minute: "2-digit",
@@ -65,7 +89,17 @@ export default function LiveQueueWidget({ embedded = false }: { embedded?: boole
               data-testid="badge-fastest-lane"
             >
               Fastest lane · {shortBranchName(shortest.name)}
-              {shortest.queued_count > 0 ? ` · ~${shortest.est_wait_minutes}m` : " · open now"}
+              {shortest.washing_count > 0
+                ? ` · ${
+                    waitFor(shortest) === null
+                      ? "Washing · time unavailable"
+                      : waitFor(shortest)! > 0
+                      ? formatLiveWaitSeconds(waitFor(shortest)!)
+                      : "Washing · finishing"
+                  }`
+                : shortest.queued_count > 0
+                ? ` · ${formatLiveWaitSeconds(waitFor(shortest))}`
+                : " · open now"}
             </span>
           )}
         </div>
@@ -82,21 +116,29 @@ export default function LiveQueueWidget({ embedded = false }: { embedded?: boole
             {branches.map((b) => {
               const st = branchStatusOf(b);
               const open = st === "open" || st === "busy";
-              const pct = Math.min(100, (b.est_wait_minutes / maxWait) * 100);
-              const quiet = b.queued_count === 0;
-              const busy = st === "busy" || b.est_wait_minutes >= 20;
+              const waitSeconds = waitFor(b);
+              const pct = Math.min(100, ((waitSeconds ?? 0) / maxWait) * 100);
+              const occupied = b.washing_count > 0;
+              const quiet = b.queued_count === 0 && !occupied;
+              const busy = st === "busy" || (waitSeconds !== null && waitSeconds >= 20 * 60);
               const color = busy
                 ? "bg-red-500"
-                : b.est_wait_minutes >= 10
+                : waitSeconds !== null && waitSeconds >= 10 * 60
                 ? "bg-amber-500"
                 : "bg-emerald-500";
               const label = !open
                 ? st === "maintenance" ? "Maintenance" : "Closed"
                 : st === "busy"
                 ? "Busy"
+                : occupied
+                ? waitSeconds === null
+                  ? "Washing · time unavailable"
+                  : waitSeconds > 0
+                  ? `Washing · ${formatLiveWaitSeconds(waitSeconds)}`
+                  : "Washing · finishing"
                 : quiet
                 ? "Open"
-                : `~${b.est_wait_minutes}m`;
+                : formatLiveWaitSeconds(waitSeconds);
               const labelColor = !open
                 ? "text-gray-400"
                 : busy
@@ -137,13 +179,19 @@ export default function LiveQueueWidget({ embedded = false }: { embedded?: boole
         )}
 
         <div className="flex items-center justify-between mt-5 pt-4 border-t flex-wrap gap-2">
-          {shortest && shortest.queued_count > 0 ? (
+          {shortest && (shortest.queued_count > 0 || shortest.washing_count > 0) ? (
             <span className="text-sm text-gray-600">
-              Shortest wait:{" "}
+              {shortest.washing_count > 0 ? "Next available: " : "Shortest wait: "}
               <span className="text-cuci-primary font-semibold">
                 {shortBranchName(shortest.name)}
               </span>{" "}
-              · drive in
+              {shortest.washing_count > 0
+                ? waitFor(shortest) === null
+                  ? "· washing — time unavailable"
+                  : waitFor(shortest)! > 0
+                  ? `· ${formatLiveWaitSeconds(waitFor(shortest)!)}`
+                  : "· washing — finishing"
+                : "· drive in"}
             </span>
           ) : shortest ? (
             <span className="text-sm text-gray-600">

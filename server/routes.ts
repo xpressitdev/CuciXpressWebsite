@@ -43,6 +43,10 @@ import {
 } from "./auth/google";
 import { storage } from "./storage";
 import { eq, desc, sql } from "drizzle-orm";
+import {
+  estimateNextAvailableSeconds,
+  remainingWashSeconds,
+} from "@shared/liveQueue";
 
 const collaborationInterestSchema = z.object({
   name: z.string().min(1, "Name is required"),
@@ -306,23 +310,22 @@ export async function registerRoutes(app: Express): Promise<Server> {
     sql.raw(`COALESCE(SUM(CASE WHEN ${prefix}status <> 'refunded' OR ${prefix}legacy_source IS NULL THEN ${prefix}total_cents ELSE 0 END), 0)`);
 
   // ===================================================================
-  // Public Live Queue snapshot (no auth). Polled ~every 15s by both
+  // Public Live Queue snapshot (no auth). Polled ~every 7s by both
   // the /queue page and the home-page widget.
   //
   // Status mapping for v1:
   //   queued  = orders today with status in ('paid','queued')
   //   washing = orders today with status = 'washing'
   //   today_total = orders today with status = 'done'
-  // Wait estimate: queued × 8 minutes (simple per-car heuristic; will
-  // be refined once we have lane-level timings from LiveQue).
+  // Wait estimate: the earliest known washing lane release plus queued ×
+  // eight minutes. A washing row without a recorded start remains occupied,
+  // but has no fabricated ETA.
   //
   // We use a single SELECT for active orders rather than one query per
-  // branch, so this stays cheap even at 5 branches × 15s polling.
+  // branch, so this stays cheap even at 5 branches × 7s polling.
   // ===================================================================
   app.get("/api/queue/snapshot", async (_req, res) => {
     try {
-      const PER_CAR_MIN = 8;
-
       const branchesRes = await db.execute(sql`
         SELECT id, name, location, is_open, status, status_note
         FROM branches
@@ -334,8 +337,20 @@ export async function registerRoutes(app: Express): Promise<Server> {
         status: string | null; status_note: string | null;
       }>;
 
+      // Use the database clock as the anchor returned to clients. This keeps
+      // the one-second client countdown correct even when a phone's clock is
+      // wrong, and keeps every elapsed calculation on the same server clock.
+      const clockRes = await db.execute(sql`SELECT now() AS server_time`);
+      const rawServerTime = (clockRes.rows[0] as {
+        server_time?: string | Date;
+      } | undefined)?.server_time;
+      const serverTime = rawServerTime instanceof Date
+        ? rawServerTime.toISOString()
+        : String(rawServerTime ?? new Date().toISOString());
+
       const activeRes = await db.execute(sql`
-        SELECT branch_id, plate, package_name, status, created_at, queue_position
+        SELECT branch_id, plate, package_name, status, created_at, queue_position,
+               washing_started_at
         FROM orders
         WHERE status IN ('paid','queued','washing')
           AND date(${bizDay()} AT TIME ZONE 'Asia/Brunei')
@@ -347,7 +362,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
       `);
       const active = activeRes.rows as Array<{
         branch_id: number; plate: string; package_name: string; status: string; created_at: string;
-        queue_position: number | null;
+        queue_position: number | null; washing_started_at: string | Date | null;
       }>;
 
       const totalsRes = await db.execute(sql`
@@ -381,12 +396,39 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
       const result = branches.map((b) => {
         const mine = active.filter((o) => o.branch_id === b.id);
+        const washingRows = mine.filter((o) => o.status === 'washing');
+        // `paid` is retained for already-paid in-person POS rows. The
+        // bizDay() predicate above naturally excludes an unclaimed PocketPay
+        // row (claimed_at IS NULL), while a claimed QR row is queue-visible.
+        const queuedRows = mine.filter((o) => o.status !== 'washing');
         const washing = mine
           .filter((o) => o.status === 'washing')
-          .map((o) => ({ plate: o.plate, package_name: o.package_name }));
+          .map((o) => ({
+            plate: o.plate,
+            package_name: o.package_name,
+            washing_started_at: o.washing_started_at,
+          }));
         const queued = mine
           .filter((o) => o.status !== 'washing')
           .map((o, i) => ({ plate: o.plate, package_name: o.package_name, position: i + 1 }));
+
+        // If several active washes exist, the first incoming car can use the
+        // earliest lane to become available; do not sum independent active
+        // lanes as though they were one serial queue. We intentionally do not
+        // change staff's operational status model here (lane assignment is
+        // currently not authoritative).
+        const serverMs = new Date(serverTime).getTime();
+        const remainingKnown = washingRows.map((o) =>
+          remainingWashSeconds(o.washing_started_at, serverMs),
+        );
+        const hasUnknownStart = remainingKnown.some((v) => v === null);
+        const activeRemaining = remainingKnown.length > 0 && !hasUnknownStart
+          ? (remainingKnown as number[])
+          : [];
+        const estWaitSeconds = hasUnknownStart
+          ? null
+          : estimateNextAvailableSeconds(activeRemaining, queuedRows.length);
+
         return {
           id: b.id,
           name: b.name,
@@ -398,14 +440,19 @@ export async function registerRoutes(app: Express): Promise<Server> {
           queued_count: queued.length,
           today_total: todayMap.get(b.id) ?? 0,
           avg_wash_minutes: avgMap.get(b.id) ?? null,
-          est_wait_minutes: queued.length * PER_CAR_MIN,
+          est_wait_seconds: estWaitSeconds,
+          // Keep the original minutes field for older clients. A null value
+          // means the active lane has no trustworthy start time.
+          est_wait_minutes: estWaitSeconds === null
+            ? null
+            : Math.ceil(estWaitSeconds / 60),
           washing,
           queued,
         };
       });
 
       res.set('Cache-Control', 'no-store');
-      res.json({ branches: result, server_time: new Date().toISOString() });
+      res.json({ branches: result, server_time: serverTime });
     } catch (err) {
       console.error('queue/snapshot failed', err);
       res.status(500).json({ message: 'Failed to load queue snapshot' });
@@ -9273,8 +9320,8 @@ export async function registerRoutes(app: Express): Promise<Server> {
   // owner/manager can advance any branch's orders.
   //
   // Wrapped in a FOR UPDATE transaction so two phones tapping
-  // "Start wash" at the same instant produce one transition + one
-  // 409 instead of corrupting the row.
+  // "Start wash" at the same instant produce one transition and one
+  // idempotent no-op instead of corrupting or restarting the row.
   // ==========================================================================
   app.patch('/api/pos/orders/:id/status', requireStaff, requireStaffRole('owner', 'manager', 'lane', 'cashier'), async (req, res) => {
     const orderId = String(req.params.id);
@@ -9293,11 +9340,20 @@ export async function registerRoutes(app: Express): Promise<Server> {
     try {
       const updated = await db.transaction(async (tx) => {
         const rows = (await tx.execute(sql`
-          SELECT id, branch_id, status, ticket_code, plate, package_name
+          SELECT id, branch_id, status, ticket_code, plate, package_name,
+                 washing_started_at
             FROM orders
            WHERE id = ${orderId}
            FOR UPDATE
-        `)).rows as Array<{ id: string; branch_id: number; status: string; ticket_code: string | null; plate: string; package_name: string }>;
+        `)).rows as Array<{
+          id: string;
+          branch_id: number;
+          status: string;
+          ticket_code: string | null;
+          plate: string;
+          package_name: string;
+          washing_started_at: string | Date | null;
+        }>;
 
         if (rows.length === 0) {
           throw Object.assign(new Error('not_found'), { httpStatus: 404 });
@@ -9331,20 +9387,27 @@ export async function registerRoutes(app: Express): Promise<Server> {
           ? (await tx.execute(sql`
               UPDATE orders
                  SET status = ${to},
+                     washing_started_at = NULL,
                      queue_position = COALESCE((
                        SELECT MIN(queue_position) FROM orders
                         WHERE branch_id = ${o.branch_id} AND status = 'queued'
                      ), 0) - 1
                WHERE id = ${orderId}
                  AND status = ${requiredFrom}
-              RETURNING id, branch_id, status, ticket_code, plate, package_name
+               RETURNING id, branch_id, status, ticket_code, plate, package_name,
+                         washing_started_at
             `)).rows
           : (await tx.execute(sql`
               UPDATE orders
-                 SET status = ${to}
+                 SET status = ${to},
+                     washing_started_at = CASE
+                        WHEN ${to} = 'washing' THEN clock_timestamp()
+                       ELSE NULL
+                     END
                WHERE id = ${orderId}
                  AND status = ${requiredFrom}
-              RETURNING id, branch_id, status, ticket_code, plate, package_name
+               RETURNING id, branch_id, status, ticket_code, plate, package_name,
+                         washing_started_at
             `)).rows) as any[];
 
         if (r.length === 0) {
@@ -10331,19 +10394,25 @@ export async function registerRoutes(app: Express): Promise<Server> {
       }
     }
     try {
+      const clock = (await db.execute(sql`SELECT now() AS server_time`)).rows[0] as {
+        server_time?: string | Date;
+      } | undefined;
+      const serverTime = clock?.server_time instanceof Date
+        ? clock.server_time.toISOString()
+        : String(clock?.server_time ?? new Date().toISOString());
       const rows = (await db.execute(sql`
         SELECT id, ticket_code, plate, package_name,
                package_price_cents, addons, subtotal_cents,
                paid_amount_cents, change_cents, branch_id,
                total_cents, payment_method, qr_provider, status, created_at,
-               refunded_at, refund_reason, queue_position
+               refunded_at, refund_reason, queue_position, washing_started_at
           FROM orders
          WHERE branch_id = ${branchId}
            AND date(${bizDay()} AT TIME ZONE 'Asia/Brunei') = (now() AT TIME ZONE 'Asia/Brunei')::date
            ${realOrders()}
          ORDER BY ${bizDay()} DESC
       `)).rows;
-      res.json({ orders: rows });
+       res.json({ orders: rows, server_time: serverTime });
     } catch (err) {
       console.error('[pos.orders.today] failed:', err);
       res.status(500).json({ error: 'Failed to load today\'s orders' });

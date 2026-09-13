@@ -187,6 +187,20 @@ Wait until tomorrow if you're unsure
 
 ## Applied migrations log
 
+### 2026-09-13 — `migrations/manual/2026-09-13_01_washing_started_at.sql`
+**Author:** agent (live queue wash occupancy)
+
+**Summary:** Added nullable `orders.washing_started_at` (`TIMESTAMPTZ`).
+The lane status transition records the database server time only for a real
+`queued -> washing` transition, keeps it unchanged for idempotent retries, and
+clears it when a wash is sent back to `queued` (or finished). Existing
+`washing` rows remain NULL; their start time is unknown and the public queue
+reports them as occupied without fabricating an ETA.
+
+**Status:** Apply to staging first with `tsx scripts/migrate-staging.ts`, verify
+the column with `\d orders`, then apply the same SQL to the shared
+production/dev database and verify there. No existing order rows are changed.
+
 ### 2026-05-04 — `migrations/manual/2026-05-04_03_flat_pricing.sql`
 **Author:** agent (Phase 2 prep — flat per-package pricing, BND)
 **Summary:** Cuci Xpress does not distinguish vehicle size when pricing

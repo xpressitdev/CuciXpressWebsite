@@ -695,6 +695,10 @@ export const orders = pgTable("orders", {
   // "Up next" queue. NULL = no manual position → falls back to created_at
   // (FIFO). Lower number = earlier in the queue.
   queue_position: integer("queue_position"),
+  // Set atomically only on a real queued -> washing transition. Legacy
+  // washing rows may remain NULL because their historical start time is
+  // unknown; active queue consumers must not infer one from created_at.
+  washing_started_at: timestamp("washing_started_at", { withTimezone: true }),
   // Phase 4 — refund audit. Populated together when status='refunded'.
   refunded_at: timestamp("refunded_at", { withTimezone: true }),
   refunded_by_staff_id: text("refunded_by_staff_id").references(() => staff.id),

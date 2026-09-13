@@ -1,9 +1,15 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { Link } from "wouter";
 import { Sparkles, ArrowLeft, Car, Clock, Timer, Activity } from "lucide-react";
 import Navigation from "@/components/Navigation";
 import Footer from "@/components/Footer";
+import {
+  formatLiveWaitSeconds,
+  formatWashingState,
+  liveQueueWaitSeconds,
+  type LiveWashingCar,
+} from "@/lib/liveQueue";
 
 interface QueueCar {
   plate: string;
@@ -21,8 +27,9 @@ interface QueueBranch {
   queued_count: number;
   today_total: number;
   avg_wash_minutes: number | null;
-  est_wait_minutes: number;
-  washing: QueueCar[];
+  est_wait_seconds: number | null;
+  est_wait_minutes: number | null;
+  washing: LiveWashingCar[];
   queued: QueueCar[];
 }
 interface QueueSnapshot {
@@ -31,9 +38,14 @@ interface QueueSnapshot {
 }
 
 const shortBranchName = (name: string) => name.replace(/^Cuci Xpress\s+/i, "");
-const fmtWait = (m: number) =>
-  m === 0 ? "Open" : m < 60 ? `~${m}m` : `~${Math.round(m / 60)}h`;
-
+const fmtWait = (minutes: number | null) =>
+  minutes === null
+    ? "Time unavailable"
+    : minutes === 0
+    ? "Open"
+    : minutes < 60
+    ? `~${minutes}m`
+    : `~${Math.round(minutes / 60)}h`;
 // Resolve a branch's effective live status. Falls back to the legacy is_open
 // flag for older snapshots that don't carry an explicit status.
 type BranchStatus = "open" | "closed" | "maintenance" | "busy";
@@ -50,10 +62,15 @@ const STATUS_LABEL: Record<BranchStatus, string> = {
 };
 
 export default function QueuePage() {
-  const { data, isLoading } = useQuery<QueueSnapshot>({
+  const { data, dataUpdatedAt, isLoading } = useQuery<QueueSnapshot>({
     queryKey: ["/api/queue/snapshot"],
-    refetchInterval: 15_000,
+    refetchInterval: 7_000,
   });
+  const [nowMs, setNowMs] = useState(() => Date.now());
+  useEffect(() => {
+    const timer = window.setInterval(() => setNowMs(Date.now()), 1_000);
+    return () => window.clearInterval(timer);
+  }, []);
   const branches = data?.branches ?? [];
   const [selectedId, setSelectedId] = useState<number | null>(null);
   const selected =
@@ -71,6 +88,8 @@ export default function QueuePage() {
     avgWashValues.length > 0
       ? Math.round(avgWashValues.reduce((s, v) => s + v, 0) / avgWashValues.length)
       : null;
+  const waitFor = (branch: QueueBranch) =>
+    liveQueueWaitSeconds(branch, data?.server_time, nowMs, dataUpdatedAt);
 
   return (
     <div className="cuci-page-bg">
@@ -144,8 +163,10 @@ export default function QueuePage() {
                 const active = selected?.id === b.id;
                 const st = branchStatusOf(b);
                 const open = st === "open" || st === "busy";
-                const quiet = b.queued_count === 0;
-                const busy = st === "busy" || b.est_wait_minutes >= 20;
+                const waitSeconds = waitFor(b);
+                const occupied = b.washing_count > 0;
+                const quiet = b.queued_count === 0 && !occupied;
+                const busy = st === "busy" || (waitSeconds !== null && waitSeconds >= 20 * 60);
                 const waitColor = !open
                   ? "text-gray-400"
                   : busy
@@ -157,6 +178,12 @@ export default function QueuePage() {
                   ? STATUS_LABEL[st]
                   : st === "busy"
                   ? "Busy"
+                  : occupied
+                  ? waitSeconds === null
+                    ? "Washing · time unavailable"
+                    : waitSeconds > 0
+                    ? `Washing · ${formatLiveWaitSeconds(waitSeconds)}`
+                    : "Washing · finishing"
                   : fmtWait(b.est_wait_minutes);
                 return (
                   <button
@@ -195,7 +222,14 @@ export default function QueuePage() {
             </div>
 
             {/* Selected branch detail */}
-            {selected && <BranchDetail branch={selected} />}
+            {selected && (
+              <BranchDetail
+                branch={selected}
+                serverTime={data?.server_time}
+                nowMs={nowMs}
+                snapshotReceivedAtMs={dataUpdatedAt}
+              />
+            )}
           </div>
         )}
       </main>
@@ -225,8 +259,18 @@ function NetworkKpi({
   );
 }
 
-function BranchDetail({ branch }: { branch: QueueBranch }) {
-  type LaneCar = QueueCar & { kind: "washing" | "queued"; label: string };
+function BranchDetail({
+  branch,
+  serverTime,
+  nowMs,
+  snapshotReceivedAtMs,
+}: {
+  branch: QueueBranch;
+  serverTime?: string;
+  nowMs: number;
+  snapshotReceivedAtMs?: number;
+}) {
+  type LaneCar = LiveWashingCar & { kind: "washing" | "queued"; label: string };
   const lane: LaneCar[] = [
     ...branch.washing.map((c) => ({ ...c, kind: "washing" as const, label: "Washing" })),
     ...branch.queued.map((c) => ({
@@ -238,8 +282,15 @@ function BranchDetail({ branch }: { branch: QueueBranch }) {
 
   const st = branchStatusOf(branch);
   const open = st === "open" || st === "busy";
+  const occupied = branch.washing_count > 0;
+  const waitSeconds = liveQueueWaitSeconds(
+    branch,
+    serverTime,
+    nowMs,
+    snapshotReceivedAtMs,
+  );
   const headerText =
-    st === "open" ? "● Open now"
+    st === "open" ? (occupied ? "● Open · washing" : "● Open now")
     : st === "busy" ? "● Open · busy"
     : st === "maintenance" ? "Under maintenance"
     : "Closed";
@@ -270,9 +321,21 @@ function BranchDetail({ branch }: { branch: QueueBranch }) {
         </div>
         {open && (
           <div className="text-right">
-            <p className="cuci-eyebrow">Est. wait</p>
+            <p className="cuci-eyebrow">{occupied ? "Next available" : "Est. wait"}</p>
             <p className="text-3xl md:text-4xl font-black text-cuci-secondary">
-              {st === "busy" ? "Long" : fmtWait(branch.est_wait_minutes)}
+              {st === "busy"
+                ? "Long"
+                : occupied
+                ? waitSeconds === null
+                  ? "Washing · time unavailable"
+                  : waitSeconds > 0
+                  ? formatLiveWaitSeconds(waitSeconds)
+                  : "Finishing"
+                : waitSeconds === null
+                ? "Time unavailable"
+                : waitSeconds === 0
+                ? "Open"
+                : formatLiveWaitSeconds(waitSeconds)}
             </p>
           </div>
         )}
@@ -332,8 +395,15 @@ function BranchDetail({ branch }: { branch: QueueBranch }) {
                       : "border-gray-700 bg-gray-800 text-gray-200"
                   }`}
                 >
-                  <p className="text-[10px] uppercase tracking-wider opacity-80 font-bold">
-                    {car.label}
+                   <p className="text-[10px] uppercase tracking-wider opacity-80 font-bold">
+                     {car.kind === "washing"
+                       ? formatWashingState(
+                           car,
+                           serverTime,
+                           nowMs,
+                           snapshotReceivedAtMs,
+                         )
+                       : car.label}
                   </p>
                   <p className="font-black text-sm">{car.plate}</p>
                   <p className="text-[10px] opacity-80 truncate max-w-[130px]">
