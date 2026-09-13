@@ -69,12 +69,31 @@ export default function RecurringExpenseRemindersDialog({
     setMonthFilter("all");
   }, [reportScope]);
 
-  const reportYear = Number(reportScope.split(":")[0]) || reminders[0]?.year;
-  const monthOptions = useMemo(() =>
-    PNL_MONTHS.map((label, index) => ({
+  const scopeDates = reportScope.match(/\d{4}-\d{2}-\d{2}/g) ?? [];
+  const reportYear = scopeDates[0]
+    ? Number(scopeDates[0].slice(0, 4))
+    : Number(reportScope.split(":")[0]) || reminders[0]?.year;
+  const monthOptions = useMemo(() => {
+    if (scopeDates.length >= 2) {
+      // Custom scopes carry their exact bounds. Use only the returned month
+      // keys so a cross-year range never offers a same-month key from the
+      // inferred first year.
+      return Array.from(new Set(reminders.map((reminder) => reminder.monthKey)))
+        .sort()
+        .map((monthKey) => {
+          const [monthYear, monthNumber] = monthKey.split("-");
+          const month = Number(monthNumber);
+          return {
+            value: monthKey,
+            label: `${PNL_MONTHS[month - 1] ?? `Month ${month}`} ${monthYear}`,
+          };
+        });
+    }
+    return PNL_MONTHS.map((label, index) => ({
       value: `${reportYear}-${String(index + 1).padStart(2, "0")}`,
       label: `${label} ${reportYear}`,
-    })), [reportYear]);
+    }));
+  }, [reportYear, reminders, scopeDates.join(":")]);
   const visibleReminders = monthFilter === "all"
     ? reminders
     : reminders.filter((reminder) => reminder.monthKey === monthFilter);

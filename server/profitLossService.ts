@@ -577,6 +577,99 @@ export function buildYtdFromMonths(
   return { ytd, ytdThroughMonth };
 }
 
+export interface ProfitLossDateRange {
+  startDate: string;
+  endDate: string;
+}
+
+interface NormalizedDateRange extends ProfitLossDateRange {
+  startDay: number;
+  endDay: number;
+}
+
+const ISO_DATE_PATTERN = /^\d{4}-\d{2}-\d{2}$/;
+const MAX_CUSTOM_PERIOD_DAYS = 5 * 366;
+
+function parseBruneiDate(value: unknown): { ymd: string; day: number } | null {
+  if (typeof value !== "string" || !ISO_DATE_PATTERN.test(value)) return null;
+  const parsed = new Date(`${value}T00:00:00Z`);
+  if (Number.isNaN(parsed.getTime()) || parsed.toISOString().slice(0, 10) !== value) return null;
+  return { ymd: value, day: dayNumber(value) };
+}
+
+/**
+ * Custom reports use strict Brunei calendar dates.  Keeping this validation
+ * independent of Express also gives callers that construct reports directly
+ * the same inclusive and five-year bound as the route.
+ */
+export function normalizeProfitLossDateRange(
+  startDate: unknown,
+  endDate: unknown,
+): NormalizedDateRange | null {
+  const start = parseBruneiDate(startDate);
+  const end = parseBruneiDate(endDate);
+  if (!start || !end || end.day < start.day
+    || end.day - start.day + 1 > MAX_CUSTOM_PERIOD_DAYS) return null;
+  const startYear = Number(start.ymd.slice(0, 4));
+  const endYear = Number(end.ymd.slice(0, 4));
+  if (startYear < 2000 || endYear > 2200) return null;
+  return {
+    startDate: start.ymd,
+    endDate: end.ymd,
+    startDay: start.day,
+    endDay: end.day,
+  };
+}
+
+function dateRangeMonths(range: NormalizedDateRange) {
+  const months: Array<{ year: number; month: number; monthKey: string }> = [];
+  let year = Number(range.startDate.slice(0, 4));
+  let month = Number(range.startDate.slice(5, 7));
+  const endYear = Number(range.endDate.slice(0, 4));
+  const endMonth = Number(range.endDate.slice(5, 7));
+  while (year < endYear || (year === endYear && month <= endMonth)) {
+    months.push({ year, month, monthKey: `${year}-${String(month).padStart(2, "0")}` });
+    month += 1;
+    if (month === 13) {
+      month = 1;
+      year += 1;
+    }
+  }
+  return months;
+}
+
+function daysInCalendarMonth(year: number, month: number) {
+  const first = dayNumber(`${year}-${String(month).padStart(2, "0")}-01`);
+  const nextYear = month === 12 ? year + 1 : year;
+  const nextMonth = month === 12 ? 1 : month + 1;
+  return dayNumber(`${nextYear}-${String(nextMonth).padStart(2, "0")}-01`) - first;
+}
+
+function selectedDaysInMonth(year: number, month: number, range: NormalizedDateRange) {
+  const first = dayNumber(`${year}-${String(month).padStart(2, "0")}-01`);
+  const last = first + daysInCalendarMonth(year, month) - 1;
+  const from = Math.max(first, range.startDay);
+  const through = Math.min(last, range.endDay);
+  return Math.max(0, through - from + 1);
+}
+
+function ytdForSelectedMonths(
+  months: ReadonlyArray<{ lines: ReadonlyArray<{ key: string; cents: number }> }>,
+) {
+  const ytd = {} as Record<string, number>;
+  for (const month of months) {
+    for (const entry of month.lines) {
+      if (entry.key !== "profit_margin_bps") {
+        ytd[entry.key] = (ytd[entry.key] ?? 0) + entry.cents;
+      }
+    }
+  }
+  ytd.profit_margin_bps = ytd.revenue
+    ? Math.round((ytd.net_profit ?? 0) * 10_000 / ytd.revenue)
+    : 0;
+  return ytd;
+}
+
 export function deriveCoverageStatus(
   syncHealth: "live" | "stale" | "error" | "never",
   revenueAvailable: boolean,
@@ -586,7 +679,7 @@ export function deriveCoverageStatus(
   return revenueAvailable && !hasAccountingWarnings ? "live" : "provisional";
 }
 
-export async function getProfitLossReport(year: number, branchId: string | "overall") {
+async function getAnnualProfitLossReport(year: number, branchId: string | "overall") {
   const [expenseRows, warningRows, depreciationRows, branchesRows, stateRows, posRows, counterRows, invoiceRows, legacySubscriptionRows, feeRateRows, sourceRangeRows, recurringExpenseRows] = await Promise.all([
     db.execute(sql`
       SELECT extract(month FROM s.expense_date)::int AS month, a.branch_id::text AS branch_id,
@@ -930,6 +1023,358 @@ export async function getProfitLossReport(year: number, branchId: string | "over
   };
 }
 
+/**
+ * Custom periods intentionally use a separate query path.  The established
+ * annual path above remains byte-for-byte accounting-compatible, while this
+ * path keeps calendar dates through recognition and only then buckets them by
+ * year/month.
+ */
+async function getCustomProfitLossReport(
+  year: number,
+  branchId: string | "overall",
+  range: NormalizedDateRange,
+) {
+  const startSql = sql`${range.startDate}::date`;
+  const endExclusive = ymdFromDayNumber(range.endDay + 1);
+  const endSql = sql`${endExclusive}::date`;
+  const startYear = Number(range.startDate.slice(0, 4));
+  const endYear = Number(range.endDate.slice(0, 4));
+  const [expenseRows, warningRows, depreciationRows, branchesRows, stateRows, posRows,
+    counterRows, invoiceRows, legacyRows, feeRows, sourceRows, recurringRows] = await Promise.all([
+    db.execute(sql`
+      SELECT extract(year FROM s.expense_date)::int AS year,
+        extract(month FROM s.expense_date)::int AS month, a.branch_id::text AS branch_id,
+        a.pnl_category, a.allocation_status, a.cents
+      FROM pnl_expense_allocations a
+      JOIN connecteam_expense_submissions s ON s.id = a.connecteam_expense_submission_id
+      WHERE s.form_id = ${CONNECTEAM_FORM_ID} AND s.is_present AND s.is_eligible
+        AND s.expense_date >= ${startSql} AND s.expense_date < ${endSql}
+        AND a.allocation_status <> 'excluded_mdr_duplicate'
+    `),
+    db.execute(sql`
+      SELECT a.allocation_status, count(*)::int AS count,
+        count(*) FILTER (WHERE s.expense_date IS NULL)::int AS missing_date_count,
+        count(*) FILTER (WHERE s.amount_cents IS NULL)::int AS missing_amount_count,
+        COALESCE(sum(s.amount_cents), 0)::int AS known_cents
+      FROM pnl_expense_allocations a
+      JOIN connecteam_expense_submissions s ON s.id = a.connecteam_expense_submission_id
+      WHERE s.form_id = ${CONNECTEAM_FORM_ID} AND s.is_present
+        AND (s.expense_date IS NULL OR (
+          s.expense_date >= ${startSql} AND s.expense_date < ${endSql}
+        ))
+        AND a.allocation_status <> 'allocated'
+      GROUP BY a.allocation_status ORDER BY a.allocation_status
+    `),
+    db.execute(sql`
+      SELECT year, month, branch_id::text AS branch_id, cents
+      FROM pnl_depreciation_settings
+      WHERE year >= ${startYear} AND year <= ${endYear}
+    `),
+    db.execute(sql`
+      SELECT b.id::text AS id, m.canonical_name AS name
+      FROM branches b
+      JOIN (VALUES
+        ('tungku', 'Tungku', 1), ('cuci xpress tungku', 'Tungku', 1),
+        ('salar', 'Salar', 2), ('cuci xpress salar', 'Salar', 2),
+        ('bengkurong', 'Bengkurong', 3), ('cuci xpress bengkurong', 'Bengkurong', 3),
+        ('tutong', 'Tutong', 4), ('cuci xpress tutong', 'Tutong', 4),
+        ('lambak', 'Lambak', 5), ('cuci xpress lambak', 'Lambak', 5)
+      ) AS m(db_name, canonical_name, sort_order) ON lower(trim(b.name)) = m.db_name
+      ORDER BY m.sort_order, b.id
+    `),
+    db.execute(sql`SELECT last_successful_at, last_attempt_status, last_error_code, expected_submission_count
+      FROM connecteam_expense_sync_state WHERE form_id = ${CONNECTEAM_FORM_ID}`),
+    db.execute(sql`
+      SELECT extract(year FROM date(CASE WHEN o.qr_provider = 'pocket_pay' THEN o.claimed_at ELSE o.created_at END AT TIME ZONE 'Asia/Brunei'))::int AS year,
+        extract(month FROM date(CASE WHEN o.qr_provider = 'pocket_pay' THEN o.claimed_at ELSE o.created_at END AT TIME ZONE 'Asia/Brunei'))::int AS month,
+        o.branch_id::text AS branch_id,
+        COALESCE(SUM(CASE
+          WHEN o.status = 'refunded' AND o.legacy_source IS NOT NULL THEN 0
+          WHEN o.status <> 'refunded' OR o.legacy_source IS NULL THEN o.total_cents ELSE 0 END), 0)::int
+          - COALESCE(SUM(CASE WHEN o.status = 'refunded' THEN o.total_cents ELSE 0 END), 0)::int AS pos_net_cents,
+        ROUND(COALESCE(SUM(CASE
+          WHEN o.status = 'refunded' AND o.legacy_source IS NOT NULL THEN 0
+          ELSE o.total_cents END), 0) * COALESCE(r.mdr_bps, 0) / 10000.0)::int AS mdr_cents
+      FROM orders o
+      LEFT JOIN payment_fee_rates r ON r.payment_method = o.payment_method
+        AND COALESCE(r.qr_provider, '') = COALESCE(o.qr_provider, '')
+      WHERE o.status NOT IN ('voided', 'pending_payment')
+        AND COALESCE(o.order_type, '') NOT IN ('counter_subscription', 'interior_refresh_promo')
+        AND date((CASE WHEN o.qr_provider = 'pocket_pay' THEN o.claimed_at ELSE o.created_at END) AT TIME ZONE 'Asia/Brunei') >= ${startSql}
+        AND date((CASE WHEN o.qr_provider = 'pocket_pay' THEN o.claimed_at ELSE o.created_at END) AT TIME ZONE 'Asia/Brunei') < ${endSql}
+      GROUP BY 1, 2, 3, o.payment_method, o.qr_provider, r.mdr_bps
+    `),
+    db.execute(sql`
+      SELECT id, branch_id::text AS branch_id, vehicle_id, total_cents, payment_method, qr_provider, created_at
+      FROM orders
+      WHERE order_type = 'counter_subscription'
+        AND status NOT IN ('voided', 'pending_payment', 'refunded')
+        AND date(created_at AT TIME ZONE 'Asia/Brunei') < ${endSql}
+      ORDER BY vehicle_id NULLS LAST, created_at ASC, id ASC
+    `),
+    db.execute(sql`
+      SELECT i.id, i.amount_cents, i.period_start, i.period_end, s.payment_provider
+      FROM subscription_invoices i
+      JOIN subscriptions s ON s.id = i.subscription_id
+      WHERE i.status = 'paid' AND COALESCE(s.is_test, false) = false
+        AND s.status <> 'incomplete'
+        AND (i.period_start IS NULL OR i.period_end IS NULL OR (
+          date(i.period_start AT TIME ZONE 'Asia/Brunei') < ${endSql}
+          AND date(i.period_end AT TIME ZONE 'Asia/Brunei') > ${startSql}
+        ))
+      ORDER BY i.period_start ASC, i.created_at ASC, i.id ASC
+    `),
+    db.execute(sql`
+      SELECT s.id, s.price_cents, s.created_at, s.payment_provider
+      FROM subscriptions s
+      WHERE COALESCE(s.is_test, false) = false AND s.status <> 'incomplete'
+        AND date(s.created_at AT TIME ZONE 'Asia/Brunei') >= (${startSql} - 30)
+        AND date(s.created_at AT TIME ZONE 'Asia/Brunei') < ${endSql}
+        AND NOT EXISTS (
+          SELECT 1 FROM subscription_invoices i
+          WHERE i.subscription_id = s.id AND i.status = 'paid'
+        )
+    `),
+    db.execute(sql`SELECT payment_method, qr_provider, mdr_bps FROM payment_fee_rates`),
+    db.execute(sql`
+      SELECT 'expenses' AS source, min(s.expense_date)::text AS first_date, max(s.expense_date)::text AS last_date
+      FROM connecteam_expense_submissions s
+      WHERE s.form_id = ${CONNECTEAM_FORM_ID} AND s.is_present
+        AND s.expense_date >= ${startSql} AND s.expense_date < ${endSql}
+      UNION ALL
+      SELECT 'pos' AS source,
+        min(date((CASE WHEN o.qr_provider = 'pocket_pay' THEN o.claimed_at ELSE o.created_at END) AT TIME ZONE 'Asia/Brunei'))::text,
+        max(date((CASE WHEN o.qr_provider = 'pocket_pay' THEN o.claimed_at ELSE o.created_at END) AT TIME ZONE 'Asia/Brunei'))::text
+      FROM orders o
+      WHERE o.status NOT IN ('voided', 'pending_payment')
+        AND COALESCE(o.order_type, '') NOT IN ('counter_subscription', 'interior_refresh_promo')
+        AND date((CASE WHEN o.qr_provider = 'pocket_pay' THEN o.claimed_at ELSE o.created_at END) AT TIME ZONE 'Asia/Brunei') >= ${startSql}
+        AND date((CASE WHEN o.qr_provider = 'pocket_pay' THEN o.claimed_at ELSE o.created_at END) AT TIME ZONE 'Asia/Brunei') < ${endSql}
+      UNION ALL
+      SELECT 'subscription_invoices' AS source,
+        min(date(i.period_start AT TIME ZONE 'Asia/Brunei'))::text,
+        max(date(i.period_end AT TIME ZONE 'Asia/Brunei'))::text
+      FROM subscription_invoices i
+      JOIN subscriptions s ON s.id = i.subscription_id
+      WHERE i.status = 'paid' AND COALESCE(s.is_test, false) = false
+        AND (i.period_start IS NULL OR i.period_end IS NULL OR (
+          date(i.period_start AT TIME ZONE 'Asia/Brunei') < ${endSql}
+          AND date(i.period_end AT TIME ZONE 'Asia/Brunei') > ${startSql}
+        ))
+    `),
+    db.execute(sql`
+      SELECT s.expense_date::text AS expense_date, s.source_category, s.source_status,
+        s.is_eligible, s.branch_choices, a.branch_id::text AS branch_id, a.allocation_status
+      FROM pnl_expense_allocations a
+      JOIN connecteam_expense_submissions s ON s.id = a.connecteam_expense_submission_id
+      WHERE s.form_id = ${CONNECTEAM_FORM_ID} AND s.is_present
+        AND s.expense_date >= make_date(${startYear - 1}, 1, 1)
+        AND s.expense_date < make_date(${endYear + 1}, 1, 1)
+        AND a.allocation_status <> 'excluded_mdr_duplicate'
+    `),
+  ]);
+
+  const revenue: PnlRevenueInput[] = posRows.rows.map((row: any) => ({
+    year: Number(row.year), month: Number(row.month), branchId: row.branch_id ?? null,
+    posNetRevenueCents: Number(row.pos_net_cents), subscriptionRecognizedGrossCents: 0,
+    mdrCents: Number(row.mdr_cents),
+  }));
+  const revenueWarnings: Array<{ code: string; count: number }> = [];
+  const addRevenueWarning = (code: string) => {
+    const existing = revenueWarnings.find((warning) => warning.code === code);
+    if (existing) existing.count += 1;
+    else revenueWarnings.push({ code, count: 1 });
+  };
+  const addRecognition = (input: RecognitionInput, warningCode: string) => {
+    const recognized = recognizeRevenueByBruneiDay(input);
+    if (!recognized) {
+      addRevenueWarning(warningCode);
+      return;
+    }
+    const firstDay = dayNumber(bruneiYmd(input.startsAt));
+    recognized.forEach((entry, index) => {
+      const recognizedDate = ymdFromDayNumber(firstDay + index);
+      if (recognizedDate >= range.startDate && recognizedDate <= range.endDate) {
+        revenue.push({ ...entry, year: entry.year });
+      }
+    });
+  };
+  const lastCounterEnd = new Map<string, number>();
+  const feeRates = new Map((feeRows.rows as any[]).map((row) => [
+    `${row.payment_method}|${row.qr_provider ?? ""}`, Number(row.mdr_bps) || 0,
+  ]));
+  for (const row of counterRows.rows as any[]) {
+    const saleDay = dayNumber(bruneiYmd(new Date(row.created_at)));
+    const key = row.vehicle_id != null ? `v${row.vehicle_id}` : `o${row.id}`;
+    const startDay = Math.max(saleDay, (lastCounterEnd.get(key) ?? -Infinity) + 1);
+    lastCounterEnd.set(key, startDay + RECOGNITION_DAYS - 1);
+    const gross = Number(row.total_cents);
+    const bps = feeRates.get(`${row.payment_method}|${row.qr_provider ?? ""}`) ?? 0;
+    addRecognition({
+      amountCents: gross, mdrCents: mdrFeeForGroup(bps, gross),
+      startsAt: new Date(startDay * 86_400_000), branchId: row.branch_id ?? null,
+    }, "invalid_counter_subscription");
+  }
+  for (const row of invoiceRows.rows as any[]) {
+    if (!row.period_start || !row.period_end || !Number.isSafeInteger(Number(row.amount_cents))) {
+      addRevenueWarning("invalid_subscription_invoice_period");
+      continue;
+    }
+    const pocketPay = row.payment_provider === "pocket_pay";
+    const gross = Number(row.amount_cents);
+    addRecognition({
+      amountCents: gross,
+      mdrCents: mdrFeeForGroup(feeRates.get(pocketPay ? "qr_code|pocket_pay" : "card|") ?? 0, gross),
+      startsAt: new Date(row.period_start), endsAt: new Date(row.period_end), branchId: null,
+    }, "invalid_subscription_invoice_period");
+  }
+  for (const row of legacyRows.rows as any[]) {
+    const pocketPay = row.payment_provider === "pocket_pay";
+    const gross = Number(row.price_cents);
+    addRecognition({
+      amountCents: gross,
+      mdrCents: mdrFeeForGroup(feeRates.get(pocketPay ? "qr_code|pocket_pay" : "card|") ?? 0, gross),
+      startsAt: new Date(row.created_at), branchId: null,
+    }, "legacy_subscription_without_paid_invoice");
+  }
+  const expenses: PnlExpenseInput[] = expenseRows.rows.map((row: any) => ({
+    year: Number(row.year), month: Number(row.month), branchId: row.branch_id ?? null,
+    category: row.allocation_status === "allocated" ? row.pnl_category : undefined,
+    unmappedReason: row.allocation_status === "allocated" ? undefined : row.allocation_status,
+    cents: Number(row.cents),
+  }));
+  const depreciation = depreciationRows.rows.flatMap((row: any) => {
+    const rowYear = Number(row.year);
+    const month = Number(row.month);
+    const selectedDays = selectedDaysInMonth(rowYear, month, range);
+    if (!selectedDays) return [];
+    return [{
+      year: rowYear, month, branchId: String(row.branch_id),
+      cents: Math.round(Number(row.cents) * selectedDays / daysInCalendarMonth(rowYear, month)),
+    }];
+  });
+  const branchIds = (branchesRows.rows as any[]).map((branch) => String(branch.id));
+  const buildYear = (targetYear: number) => buildPnl({
+    branchId, reportYear: targetYear, overallBranchIds: branchIds,
+    revenue, expenses, depreciation,
+  }).map((month) => ({
+    ...month, year: targetYear,
+    monthKey: `${targetYear}-${String(month.month).padStart(2, "0")}`,
+    labels: Object.fromEntries(month.lines.map((line) => [line.key, line.label])),
+  }));
+  const months = dateRangeMonths(range).flatMap(({ year: targetYear, month }) =>
+    buildYear(targetYear).filter((entry) => entry.month === month));
+  const ytd = ytdForSelectedMonths(months);
+  const sync = stateRows.rows[0] as any;
+  const lastSuccessMs = sync?.last_successful_at ? new Date(sync.last_successful_at).getTime() : NaN;
+  const syncHealth = !sync ? "never"
+    : sync.last_attempt_status === "failed" || sync.last_attempt_status === "incomplete" ? "error"
+      : !Number.isFinite(lastSuccessMs) || Date.now() - lastSuccessMs > 15 * 60_000 ? "stale" : "live";
+  const branchMappingValid = branchesRows.rows.length === 5
+    && new Set((branchesRows.rows as any[]).map((branch) => branch.name)).size === 5;
+  const accountingWarningStatuses = new Set([
+    "unmapped_category", "invalid_amount", "invalid_date", "invalid_branch", "excluded_mdr_duplicate",
+  ]);
+  const hasAccountingWarnings = !branchMappingValid
+    || (warningRows.rows as any[]).some((row) => accountingWarningStatuses.has(String(row.allocation_status)))
+    || revenueWarnings.length > 0 || months.some((month) => !month.depreciationConfigured);
+  const coverageStatus = deriveCoverageStatus(syncHealth, posRows.rows.length > 0, hasAccountingWarnings);
+  const observedRanges = Object.fromEntries((sourceRows.rows as any[]).map((row) => [
+    row.source, { firstDate: row.first_date ?? null, lastDate: row.last_date ?? null },
+  ]));
+  const canonicalBranches = (branchesRows.rows as any[]).map((row) => ({
+    id: String(row.id), name: String(row.name) as PnlAllocationTarget["name"],
+  }));
+  const branchNames = Object.fromEntries(canonicalBranches.map((branch) => [branch.id, branch.name]));
+  const observations: RecurringExpenseObservation[] = [];
+  for (const row of recurringRows.rows as any[]) {
+    const direct = row.branch_id == null ? null : String(row.branch_id);
+    const selected = direct ? [direct] : Boolean(row.is_eligible) ? [] : (() => {
+      const choices: unknown[] = Array.isArray(row.branch_choices) ? row.branch_choices : [];
+      return allocateConnecteamExpense(1, choices.filter(
+        (choice: unknown): choice is string => typeof choice === "string",
+      ), canonicalBranches).map((allocation) => allocation.branchId);
+    })();
+    for (const branch of selected) observations.push({
+      expenseDate: row.expense_date ?? null, sourceCategory: row.source_category ?? null,
+      branchId: branch, eligible: Boolean(row.is_eligible), sourceStatus: row.source_status ?? null,
+      allocationStatus: row.allocation_status ?? null, isPresent: true,
+    });
+  }
+  const keys = new Set(dateRangeMonths(range).map((entry) => entry.monthKey));
+  const reminders = Array.from(new Set(dateRangeMonths(range).map((entry) => entry.year)))
+    .flatMap((reportYear) => inferRecurringExpenseReminders({
+      observations, reportYear, currentBruneiYmd: bruneiYmd(new Date()), branchId, branchNames,
+    }))
+    .filter((reminder, index, all) =>
+      keys.has(reminder.monthKey) && all.findIndex((candidate) =>
+        candidate.monthKey === reminder.monthKey && candidate.branchId === reminder.branchId
+          && candidate.category === reminder.category) === index);
+  const syncResult = sync ? {
+    lastSuccessfulAt: sync.last_successful_at, status: sync.last_attempt_status,
+    ...(sync.last_error_code ? {
+      errorCode: safeConnecteamSyncErrorCode(sync.last_error_code),
+      errorMessage: connecteamSyncErrorMessage(sync.last_error_code),
+    } : {}),
+    expectedSubmissionCount: sync.expected_submission_count,
+  } : { status: "never" };
+  return {
+    year, branchId, branches: branchesRows.rows,
+    dateRange: { startDate: range.startDate, endDate: range.endDate },
+    totalLabel: "Period total", months, ytd, recurringExpenseReminders: reminders,
+    coverage: {
+      status: coverageStatus,
+      note: `Connecteam expenses are live only after a complete sync. ${posRows.rows.length
+        ? "Historical POS coverage follows KedaiPOS lineage and may differ from the reference workbook."
+        : "No POS rows are available for this selected period, so revenue is provisional rather than asserted as zero."} This custom period prorates configured monthly depreciation by selected Brunei calendar days; full selected months retain the configured amount. Recurring suggestions indicate a pattern only and are not proof of an omitted expense.`,
+      unallocatedOnlineRevenueCents: months.reduce((total, month) =>
+        total + lineValue(month, "recognized_subscription_revenue"), 0),
+      depreciationMissingMonths: months.filter((month) => !month.depreciationConfigured).map((month) => month.monthKey),
+      staleAfterSeconds: DISTRIBUTED_SYNC_LEASE_MS / 1000,
+      ranges: {
+        requested: {
+          expenseDate: `${range.startDate} through ${range.endDate} (Brunei calendar, inclusive)`,
+          posRevenue: `${range.startDate} through ${range.endDate} (Brunei realization day, inclusive)`,
+          subscriptionRevenue: "Paid invoice period_start inclusive through period_end exclusive (Brunei calendar), intersected with the selected dates",
+        },
+        observed: observedRanges,
+      },
+      ytdThroughMonth: months.length ? months[months.length - 1].month : 0,
+      warnings: [
+        ...(branchMappingValid ? [] : [{ code: "branch_mapping_invalid", count: branchesRows.rows.length }]),
+        ...(warningRows.rows as any[]).map((row) => ({
+          code: row.allocation_status, count: Number(row.count),
+          missingDateCount: Number(row.missing_date_count),
+          missingAmountCount: Number(row.missing_amount_count), knownCents: Number(row.known_cents),
+        })),
+        ...revenueWarnings,
+      ],
+    },
+    sync: syncResult,
+  };
+}
+
+export async function getProfitLossReport(
+  year: number,
+  branchId: string | "overall",
+  requestedDateRange: ProfitLossDateRange | null = null,
+) {
+  if (requestedDateRange === null) {
+    const report = await getAnnualProfitLossReport(year, branchId);
+    return {
+      ...report,
+      dateRange: null,
+      totalLabel: "YTD",
+      months: report.months.map((month: any) => ({
+        ...month, year, monthKey: `${year}-${String(month.month).padStart(2, "0")}`,
+      })),
+    };
+  }
+  const range = normalizeProfitLossDateRange(requestedDateRange.startDate, requestedDateRange.endDate);
+  if (!range) throw new Error("invalid_date_range");
+  return getCustomProfitLossReport(year, branchId, range);
+}
+
 export function createConnecteamSyncHandler(
   sync: () => Promise<SyncResult> = syncConnecteamExpenses,
 ) {
@@ -957,37 +1402,82 @@ export function createConnecteamSyncHandler(
 
 export function registerProfitLossRoutes(app: Express) {
   app.get("/api/admin/profit-loss", requireStaff, requireStaffRole("owner"), async (req, res) => {
-    const year = Number(req.query.year);
+    const rawYear = typeof req.query.year === "string" ? req.query.year : undefined;
+    const rawStart = typeof req.query.start_date === "string" ? req.query.start_date : undefined;
+    const rawEnd = typeof req.query.end_date === "string" ? req.query.end_date : undefined;
+    if ((rawStart === undefined) !== (rawEnd === undefined)) {
+      return res.status(400).json({ error: "invalid_date_range" });
+    }
+    const normalizedRange = rawStart !== undefined && rawEnd !== undefined
+      ? normalizeProfitLossDateRange(rawStart, rawEnd) : null;
+    if (rawStart !== undefined && !normalizedRange) {
+      return res.status(400).json({ error: "invalid_date_range" });
+    }
+    const year = rawYear === undefined && normalizedRange
+      ? Number(normalizedRange.startDate.slice(0, 4)) : Number(rawYear);
     const branchId = String(req.query.branch_id ?? "overall");
     if (!Number.isInteger(year) || year < 2000 || year > 2200) return res.status(400).json({ error: "invalid_year" });
     if (branchId !== "overall" && (!/^\d+$/.test(branchId) || !await isCanonicalBranchId(Number(branchId)))) {
       return res.status(400).json({ error: "invalid_branch" });
     }
-    try { res.json(await getProfitLossReport(year, branchId)); }
+    try {
+      res.json(await getProfitLossReport(
+        year, branchId,
+        normalizedRange ? { startDate: normalizedRange.startDate, endDate: normalizedRange.endDate } : null,
+      ));
+    }
     catch { res.status(503).json({ error: "profit_loss_unavailable" }); }
   });
   app.get("/api/admin/profit-loss/expenses", requireStaff, requireStaffRole("owner"), async (req, res) => {
-    const year = Number(req.query.year);
-    const month = Number(req.query.month);
-    if (!Number.isInteger(year) || !Number.isInteger(month) || month < 1 || month > 12) return res.status(400).json({ error: "invalid_period" });
+    const rawYear = typeof req.query.year === "string" ? req.query.year : undefined;
+    const rawMonth = typeof req.query.month === "string" ? req.query.month : undefined;
+    const rawStart = typeof req.query.start_date === "string" ? req.query.start_date : undefined;
+    const rawEnd = typeof req.query.end_date === "string" ? req.query.end_date : undefined;
+    if ((rawStart === undefined) !== (rawEnd === undefined)) {
+      return res.status(400).json({ error: "invalid_date_range" });
+    }
+    const normalizedRange = rawStart !== undefined && rawEnd !== undefined
+      ? normalizeProfitLossDateRange(rawStart, rawEnd) : null;
+    if (rawStart !== undefined && !normalizedRange) {
+      return res.status(400).json({ error: "invalid_date_range" });
+    }
+    const year = rawYear === undefined && normalizedRange
+      ? Number(normalizedRange.startDate.slice(0, 4)) : Number(rawYear);
+    const month = Number(rawMonth);
+    if (!normalizedRange && (!Number.isInteger(year) || year < 2000 || year > 2200
+      || !Number.isInteger(month) || month < 1 || month > 12)) {
+      return res.status(400).json({ error: "invalid_period" });
+    }
+    if (normalizedRange && (!Number.isInteger(year) || year < 2000 || year > 2200)) {
+      return res.status(400).json({ error: "invalid_year" });
+    }
     const branchId = String(req.query.branch_id ?? "overall");
     if (branchId !== "overall" && (!/^\d+$/.test(branchId) || !await isCanonicalBranchId(Number(branchId)))) {
       return res.status(400).json({ error: "invalid_branch" });
     }
     const branchPredicate = branchId === "overall" ? sql`` : sql`AND a.branch_id = ${Number(branchId)}`;
+    const datePredicate = normalizedRange
+      ? sql`AND s.expense_date >= ${sql`${normalizedRange.startDate}::date`}
+        AND s.expense_date < ${sql`${ymdFromDayNumber(normalizedRange.endDay + 1)}::date`}`
+      : sql`AND (
+        (extract(year FROM s.expense_date) = ${year} AND extract(month FROM s.expense_date) = ${month})
+        OR s.expense_date IS NULL
+      )`;
     const rows = await db.execute(sql`
       SELECT s.submission_id, s.expense_date, s.source_category, s.source_status,
              a.branch_id, a.pnl_category, a.allocation_status, a.cents
       FROM pnl_expense_allocations a JOIN connecteam_expense_submissions s ON s.id = a.connecteam_expense_submission_id
       WHERE s.form_id = ${CONNECTEAM_FORM_ID} AND s.is_present
-        AND (
-          (extract(year FROM s.expense_date) = ${year} AND extract(month FROM s.expense_date) = ${month})
-          OR s.expense_date IS NULL
-        )
+        ${datePredicate}
         ${branchPredicate}
       ORDER BY s.expense_date, s.submission_id
     `);
-    res.json({ entries: rows.rows }); // deliberately excludes description, receipt, user and account fields
+    res.json({
+      entries: rows.rows,
+      dateRange: normalizedRange
+        ? { startDate: normalizedRange.startDate, endDate: normalizedRange.endDate } : null,
+      totalLabel: normalizedRange ? "Period total" : "Month total",
+    }); // deliberately excludes description, receipt, user and account fields
   });
   app.post(
     "/api/admin/profit-loss/sync",
@@ -997,7 +1487,8 @@ export function registerProfitLossRoutes(app: Express) {
   );
   app.put("/api/admin/profit-loss/depreciation", requireStaff, requireStaffRole("owner"), async (req, res) => {
     const { year, month, branch_id, cents } = req.body ?? {};
-    if (!Number.isInteger(year) || !Number.isInteger(month) || month < 1 || month > 12
+    if (!Number.isInteger(year) || year < 2000 || year > 2200
+      || !Number.isInteger(month) || month < 1 || month > 12
       || !Number.isInteger(branch_id) || !Number.isInteger(cents) || cents < 0) {
       return res.status(400).json({ error: "invalid_depreciation" });
     }

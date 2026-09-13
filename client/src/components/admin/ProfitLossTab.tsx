@@ -10,6 +10,10 @@ import {
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { apiRequest } from "@/lib/queryClient";
 import RecurringExpenseRemindersDialog from "@/components/admin/RecurringExpenseRemindersDialog";
+import ProfitLossRangeControls, {
+  type ProfitLossDateRange,
+  type ProfitLossRangeMode,
+} from "@/components/admin/ProfitLossRangeControls";
 import {
   connecteamSyncErrorMessage,
   PNL_MONTHS,
@@ -19,11 +23,19 @@ import {
 
 type Line = { key: string; label: string; cents: number };
 type Report = {
-  year: number;
+  year?: number;
   branchId: string;
   branches: Array<{ id: string; name: string }>;
-  months: Array<{ month: number; lines: Line[]; depreciationConfigured: boolean }>;
+  months: Array<{
+    month: number;
+    year?: number;
+    monthKey?: string;
+    lines: Line[];
+    depreciationConfigured: boolean;
+  }>;
   ytd: Record<string, number>;
+  totalLabel?: string;
+  dateRange?: { startDate: string; endDate: string } | null;
   coverage: {
     status: string;
     note: string;
@@ -69,15 +81,27 @@ const bnd = (cents: number) => new Intl.NumberFormat("en-BN", {
   style: "currency", currency: "BND", minimumFractionDigits: 2,
 }).format(cents / 100);
 
-function queryUrl(year: number, branchId: string) {
+function queryUrl(year: number, branchId: string, dateRange: ProfitLossDateRange | null) {
+  if (dateRange) {
+    return `/api/admin/profit-loss?start_date=${encodeURIComponent(dateRange.startDate)}&end_date=${encodeURIComponent(dateRange.endDate)}&branch_id=${encodeURIComponent(branchId)}`;
+  }
   return `/api/admin/profit-loss?year=${year}&branch_id=${encodeURIComponent(branchId)}`;
 }
 
-function expensesQueryUrl(year: number, month: string, branchId: string) {
+function expensesQueryUrl(
+  year: number,
+  month: string,
+  branchId: string,
+  dateRange: ProfitLossDateRange | null,
+) {
+  if (dateRange) {
+    return `/api/admin/profit-loss/expenses?start_date=${encodeURIComponent(dateRange.startDate)}&end_date=${encodeURIComponent(dateRange.endDate)}&branch_id=${encodeURIComponent(branchId)}`;
+  }
   return `/api/admin/profit-loss/expenses?year=${year}&month=${month}&branch_id=${encodeURIComponent(branchId)}`;
 }
 
-function reportScopeKey(year: number, branchId: string) {
+function reportScopeKey(year: number, branchId: string, dateRange: ProfitLossDateRange | null) {
+  if (dateRange) return `${dateRange.startDate.slice(0, 4)}:${branchId}:${dateRange.startDate}:${dateRange.endDate}`;
   return `${year}:${branchId}`;
 }
 
@@ -122,10 +146,44 @@ function marginText(bps: number | undefined, revenueCents: number) {
   return `${(bps / 100).toFixed(2)}%`;
 }
 
+function monthKeyFor(
+  month: { month: number; year?: number; monthKey?: string },
+  fallbackYear: number,
+) {
+  if (month.monthKey) return month.monthKey;
+  return `${month.year ?? fallbackYear}-${String(month.month).padStart(2, "0")}`;
+}
+
+function monthHeading(
+  month: { month: number; year?: number; monthKey?: string },
+  fallbackYear: number,
+  custom: boolean,
+) {
+  const name = PNL_MONTHS[month.month - 1] ?? `Month ${month.month}`;
+  if (!custom) return name;
+  const monthYear = month.year
+    ?? (month.monthKey && /^\d{4}-\d{2}$/.test(month.monthKey) ? Number(month.monthKey.slice(0, 4)) : fallbackYear);
+  return `${name} ${monthYear}`;
+}
+
+function dateRangeHasPartialMonth(dateRange: ProfitLossDateRange) {
+  const start = new Date(`${dateRange.startDate}T00:00:00Z`);
+  const end = new Date(`${dateRange.endDate}T00:00:00Z`);
+  if (Number.isNaN(start.getTime()) || Number.isNaN(end.getTime())) return false;
+  const lastDay = new Date(Date.UTC(end.getUTCFullYear(), end.getUTCMonth() + 1, 0)).getUTCDate();
+  return start.getUTCDate() !== 1 || end.getUTCDate() !== lastDay;
+}
+
+const stickyFirstColumn = "sticky left-0 z-20 w-[180px] min-w-[160px] max-w-[220px] border-r border-border bg-background shadow-[2px_0_4px_-2px_rgba(0,0,0,0.14)]";
+
 export default function ProfitLossTab() {
   const queryClient = useQueryClient();
   const [year, setYear] = useState(new Date().getFullYear());
   const [branchId, setBranchId] = useState("overall");
+  const [rangeMode, setRangeMode] = useState<ProfitLossRangeMode>("year");
+  const [customStartDate, setCustomStartDate] = useState("");
+  const [customEndDate, setCustomEndDate] = useState("");
+  const [appliedDateRange, setAppliedDateRange] = useState<ProfitLossDateRange | null>(null);
   const [drilldownMonth, setDrilldownMonth] = useState("1");
   // Drafts are keyed by the complete report scope. A draft from one
   // branch/year must never appear in, or be submitted for, another.
@@ -133,14 +191,15 @@ export default function ProfitLossTab() {
   const [depreciationValidation, setDepreciationValidation] = useState<Record<string, boolean>>({});
   const [expensePage, setExpensePage] = useState(1);
   const [manualSyncAttempt, setManualSyncAttempt] = useState<{ lastSuccessfulAt: string | null } | null>(null);
-  const scopeKey = reportScopeKey(year, branchId);
+  const activeDateRange = rangeMode === "custom" ? appliedDateRange : null;
+  const scopeKey = reportScopeKey(year, branchId, activeDateRange);
   const currentDepreciation = depreciation[scopeKey] ?? {};
-  const reportUrl = queryUrl(year, branchId);
-  const expensesUrl = expensesQueryUrl(year, drilldownMonth, branchId);
+  const reportUrl = queryUrl(year, branchId, activeDateRange);
+  const expensesUrl = expensesQueryUrl(year, drilldownMonth, branchId, activeDateRange);
 
   useEffect(() => {
     setExpensePage(1);
-  }, [year, branchId, drilldownMonth]);
+  }, [year, branchId, drilldownMonth, activeDateRange?.startDate, activeDateRange?.endDate]);
 
   const reportQuery = useQuery<Report>({
     queryKey: [reportUrl],
@@ -185,7 +244,7 @@ export default function ProfitLossTab() {
       // Always invalidate the report that was submitted, not whichever report
       // happens to be selected when an asynchronous response arrives.
       const invalidation = queryClient.invalidateQueries({
-        queryKey: [queryUrl(variables.year, variables.branchId)],
+        queryKey: [queryUrl(variables.year, variables.branchId, null)],
       });
       setDepreciation((old) => {
         const scoped = old[variables.scopeKey];
@@ -216,6 +275,9 @@ export default function ProfitLossTab() {
     <Card><CardContent className="py-10 text-red-700" role="alert">Profit &amp; Loss is temporarily unavailable. Existing accounting data has not been replaced.</CardContent></Card>
   );
 
+  const reportYear = report.year ?? (activeDateRange ? Number(activeDateRange.startDate.slice(0, 4)) : year);
+  const isCustomPeriod = Boolean(activeDateRange);
+  const totalLabel = report.totalLabel ?? (isCustomPeriod ? "Period total" : "YTD");
   const coverageWarnings = (report.coverage.warnings ?? []).map(coverageWarningText);
   const missingDepreciation = report.coverage.depreciationMissingMonths ?? [];
   const coverageWarningItems = [
@@ -249,16 +311,30 @@ export default function ProfitLossTab() {
     <Card>
       <CardHeader className="pb-3"><CardTitle className="flex flex-wrap items-center justify-between gap-3">
         <span>Profit &amp; Loss</span>
-        <div className="flex items-center gap-2">
-          <Select value={String(year)} onValueChange={(value) => setYear(Number(value))}>
-            <SelectTrigger className="w-24"><SelectValue /></SelectTrigger>
-            <SelectContent>{Array.from({ length: Math.max(1, new Date().getFullYear() - 2019) }, (_, index) => 2020 + index)
+        <div className="flex min-w-0 flex-1 flex-wrap items-center justify-end gap-2">
+          <ProfitLossRangeControls
+            mode={rangeMode}
+            year={year}
+            years={Array.from({ length: Math.max(1, new Date().getFullYear() - 2019) }, (_, index) => 2020 + index)
               .concat(new Date().getFullYear() + 1)
-              .filter((value, index, all) => all.indexOf(value) === index)
-              .map((value) => <SelectItem key={value} value={String(value)}>{value}</SelectItem>)}</SelectContent>
-          </Select>
+              .filter((value, index, all) => all.indexOf(value) === index)}
+            startDate={customStartDate}
+            endDate={customEndDate}
+            onModeChange={(mode) => {
+              setRangeMode(mode);
+              if (mode === "year") {
+                setAppliedDateRange(null);
+                setCustomStartDate("");
+                setCustomEndDate("");
+              }
+            }}
+            onYearChange={setYear}
+            onStartDateChange={setCustomStartDate}
+            onEndDateChange={setCustomEndDate}
+            onApply={setAppliedDateRange}
+          />
           <Select value={branchId} onValueChange={setBranchId}>
-            <SelectTrigger className="w-44"><SelectValue /></SelectTrigger>
+            <SelectTrigger className="w-full max-w-full sm:w-44"><SelectValue /></SelectTrigger>
             <SelectContent>
               <SelectItem value="overall">Overall (incl. unallocated online)</SelectItem>
               {report.branches.map((branch) => <SelectItem key={branch.id} value={branch.id}>{branch.name}</SelectItem>)}
@@ -312,6 +388,12 @@ export default function ProfitLossTab() {
             {coverageWarningItems.map((warning, index) => <li key={`${warning}-${index}`}>{warning}</li>)}
           </ul>
         </div>}
+        {isCustomPeriod && activeDateRange && dateRangeHasPartialMonth(activeDateRange) && (
+          <div className="rounded-md border border-amber-200 bg-amber-50 p-3 text-amber-900" role="status">
+            This custom range includes partial months. Revenue and expenses use the inclusive dates;
+            configured depreciation is prorated for the partial months.
+          </div>
+        )}
         {(requestedRanges.length > 0 || observedRanges.length > 0) && <div className="border-t pt-2 text-xs text-muted-foreground">
           <p className="font-medium text-foreground">Source ranges</p>
           {requestedRanges.length > 0 && <div className="mt-1">
@@ -343,16 +425,23 @@ export default function ProfitLossTab() {
     <Card className="overflow-hidden">
       <CardContent className="p-0 overflow-x-auto">
         <Table data-testid="table-profit-loss" className="min-w-[980px]">
-          <TableHeader><TableRow><TableHead className="min-w-64">P&amp;L line (BND)</TableHead>
-            {PNL_MONTHS.map((month) => <TableHead className="text-right" key={month}>{month}</TableHead>)}
-            <TableHead className="text-right font-bold">YTD</TableHead>
+          <TableHeader><TableRow><TableHead className={`${stickyFirstColumn} font-semibold`}>P&amp;L line (BND)</TableHead>
+            {report.months.map((month) => <TableHead className="whitespace-nowrap text-right" key={monthKeyFor(month, reportYear)}>
+              {monthHeading(month, reportYear, isCustomPeriod)}
+            </TableHead>)}
+            <TableHead className="whitespace-nowrap text-right font-bold">{totalLabel}</TableHead>
           </TableRow></TableHeader>
           <TableBody>{rows.map((row) => {
             const isTotal = ["revenue", "cost_of_services", "gross_profit", "operating_expense", "ebitda", "net_profit"].includes(row.key);
             const isMargin = row.key === "profit_margin_bps";
-            return <TableRow key={row.key} className={isTotal ? "bg-muted/50 font-semibold" : row.key === "unmapped_expenses" ? "bg-amber-50 text-amber-900" : ""}>
-              <TableCell>{row.label}</TableCell>
-              {report.months.map((month) => <TableCell className="text-right tabular-nums" key={month.month}>
+            const isUnmapped = row.key === "unmapped_expenses";
+            const rowClass = isTotal ? "bg-muted/50 font-semibold" : isUnmapped ? "bg-amber-50 text-amber-900" : "";
+            const firstCellBackground = isTotal
+              ? "bg-muted/50"
+              : isUnmapped ? "bg-amber-50 text-amber-900" : "bg-background";
+            return <TableRow key={row.key} className={rowClass}>
+              <TableCell className={`${stickyFirstColumn} ${firstCellBackground}`}>{row.label}</TableCell>
+              {report.months.map((month) => <TableCell className="text-right tabular-nums" key={monthKeyFor(month, reportYear)}>
                 {isMargin
                   ? marginText(lineFor(month.lines, row.key), lineFor(month.lines, "revenue"))
                   : bnd(lineFor(month.lines, row.key))}
@@ -368,20 +457,21 @@ export default function ProfitLossTab() {
       </CardContent>
     </Card>
 
-    {branchId !== "overall" && <Card>
+    {branchId !== "overall" && !isCustomPeriod && <Card>
       <CardHeader className="pb-3"><CardTitle className="flex items-center gap-2 text-base"><Settings2 className="h-4 w-4" />Depreciation settings</CardTitle></CardHeader>
       <CardContent className="grid gap-2 sm:grid-cols-2 lg:grid-cols-3">
         {report.months.map((item) => {
           const existing = lineFor(item.lines, "depreciation");
-          const inputKey = `${scopeKey}:${item.month}`;
+          const itemYear = item.year ?? reportYear;
+          const inputKey = `${scopeKey}:${itemYear}:${item.month}`;
           const value = currentDepreciation[item.month] ?? (existing / 100).toFixed(2);
           const savePending = saveDepreciation.isPending
             && saveDepreciation.variables?.scopeKey === scopeKey
             && saveDepreciation.variables.month === item.month;
-          return <div className="flex items-center gap-2" key={item.month}>
-            <label className="w-9 shrink-0 text-sm" htmlFor={`depreciation-${scopeKey}-${item.month}`}>{PNL_MONTHS[item.month - 1]}</label>
+          return <div className="flex items-center gap-2" key={monthKeyFor(item, itemYear)}>
+            <label className="w-9 shrink-0 text-sm" htmlFor={`depreciation-${scopeKey}-${itemYear}-${item.month}`}>{PNL_MONTHS[item.month - 1]}</label>
             <Input aria-label={`${PNL_MONTHS[item.month - 1]} depreciation`} className="h-9 min-w-0" type="number" min="0" step="0.01"
-              id={`depreciation-${scopeKey}-${item.month}`}
+              id={`depreciation-${scopeKey}-${itemYear}-${item.month}`}
               value={value}
               aria-invalid={depreciationValidation[inputKey] || undefined}
               onChange={(event) => {
@@ -404,7 +494,7 @@ export default function ProfitLossTab() {
                 return;
               }
               saveDepreciation.mutate({
-                year, branchId, scopeKey, month: item.month, cents: Math.round(parsed * 100),
+                year: itemYear, branchId, scopeKey, month: item.month, cents: Math.round(parsed * 100),
                 draftValue: currentDepreciation[item.month],
               });
             }}>{savePending ? "Saving…" : "Save"}</Button>
@@ -417,14 +507,29 @@ export default function ProfitLossTab() {
           && <p className="text-sm text-emerald-700" role="status">Depreciation saved.</p>}
       </CardContent>
     </Card>}
+    {branchId !== "overall" && isCustomPeriod && <Card>
+      <CardHeader className="pb-3"><CardTitle className="flex items-center gap-2 text-base"><Settings2 className="h-4 w-4" />Depreciation settings</CardTitle></CardHeader>
+      <CardContent className="text-sm text-muted-foreground">
+        Monthly depreciation settings are available in Year mode. Return to Year mode to edit
+        depreciation without ambiguous month values across calendar years.
+      </CardContent>
+    </Card>}
 
     <Card>
       <CardHeader className="pb-3"><CardTitle className="text-base">Expense audit drilldown</CardTitle></CardHeader>
       <CardContent className="space-y-3">
-        <div className="mb-3 flex items-center gap-2"><label className="text-sm">Month</label>
-          <Select value={drilldownMonth} onValueChange={setDrilldownMonth}><SelectTrigger className="w-28"><SelectValue /></SelectTrigger>
-            <SelectContent>{PNL_MONTHS.map((name, index) => <SelectItem key={name} value={String(index + 1)}>{name}</SelectItem>)}</SelectContent>
-          </Select>
+        <div className="mb-3 flex flex-wrap items-center gap-2">
+          {isCustomPeriod ? (
+            <p className="text-sm text-muted-foreground">All dates in the selected custom range</p>
+          ) : (
+            <>
+              <label className="text-sm" htmlFor="profit-loss-audit-month">Month</label>
+              <Select value={drilldownMonth} onValueChange={setDrilldownMonth}>
+                <SelectTrigger id="profit-loss-audit-month" className="w-28"><SelectValue /></SelectTrigger>
+                <SelectContent>{PNL_MONTHS.map((name, index) => <SelectItem key={name} value={String(index + 1)}>{name}</SelectItem>)}</SelectContent>
+              </Select>
+            </>
+          )}
         </div>
         {expensesQuery.isPending || expensesQuery.isFetching
           ? <p className="text-sm text-muted-foreground" role="status" aria-live="polite">Loading expense audit entries…</p>

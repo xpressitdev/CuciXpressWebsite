@@ -265,6 +265,8 @@ export function allocateConnecteamExpense(
 export interface PnlRevenueInput {
   /** 1..12 calendar month in the requested P&L year. */
   month: number;
+  /** Calendar year for custom, cross-year periods. Omitted for legacy callers. */
+  year?: number;
   /** null means online revenue with no attributable branch. */
   branchId: string | null;
   /** POS gross sales less refunds; counter subscriptions must already be excluded. */
@@ -277,6 +279,8 @@ export interface PnlRevenueInput {
 
 export interface PnlExpenseInput {
   month: number;
+  /** Calendar year for custom, cross-year periods. Omitted for legacy callers. */
+  year?: number;
   branchId: string | null;
   category?: PnlCategory;
   /** Kept visible in output if category is missing; never omitted from totals. */
@@ -286,6 +290,8 @@ export interface PnlExpenseInput {
 
 export interface PnlDepreciationInput {
   month: number;
+  /** Calendar year for custom, cross-year periods. Omitted for legacy callers. */
+  year?: number;
   branchId: string;
   cents: number;
 }
@@ -297,7 +303,11 @@ export interface PnlLine {
 }
 
 export interface PnlMonth {
+  /** Present on API responses, including custom periods spanning years. */
+  year?: number;
   month: number;
+  /** YYYY-MM, disambiguates January across different calendar years. */
+  monthKey?: string;
   lines: PnlLine[];
   /** A configured value is required for every selected branch/month. */
   depreciationConfigured: boolean;
@@ -305,6 +315,8 @@ export interface PnlMonth {
 
 export interface PnlBuildInput {
   branchId: string | "overall";
+  /** Restricts year-tagged inputs while retaining yearless legacy fixtures. */
+  reportYear?: number;
   /** Required to decide whether an Overall depreciation month is complete. */
   overallBranchIds?: readonly string[];
   revenue: readonly PnlRevenueInput[];
@@ -327,20 +339,22 @@ const sum = (values: readonly number[]) => values.reduce((total, value) => total
 export function buildPnl(input: PnlBuildInput): PnlMonth[] {
   const isOverall = input.branchId === "overall";
   const includes = (branchId: string | null) => isOverall || branchId === input.branchId;
+  const inReportYear = (year: number | undefined) =>
+    input.reportYear === undefined || year === undefined || year === input.reportYear;
 
   return Array.from({ length: 12 }, (_, offset) => {
     const month = offset + 1;
     const revenue = input.revenue.filter((entry) => {
       assertMonth(entry.month);
-      return entry.month === month && includes(entry.branchId);
+      return entry.month === month && inReportYear(entry.year) && includes(entry.branchId);
     });
     const expenses = input.expenses.filter((entry) => {
       assertMonth(entry.month);
-      return entry.month === month && includes(entry.branchId);
+      return entry.month === month && inReportYear(entry.year) && includes(entry.branchId);
     });
     const depreciation = input.depreciation.filter((entry) => {
       assertMonth(entry.month);
-      return entry.month === month && includes(entry.branchId);
+      return entry.month === month && inReportYear(entry.year) && includes(entry.branchId);
     });
 
     const netPosRevenue = sum(revenue.map((entry) => entry.posNetRevenueCents));

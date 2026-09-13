@@ -20,8 +20,10 @@ import {
   createConnecteamSyncHandler,
   deriveCoverageStatus,
   fetchAllConnecteamSubmissions,
+  getProfitLossReport,
   grossSalesCents,
   mdrFeeForGroup,
+  normalizeProfitLossDateRange,
   planConnecteamExpenseAllocations,
   recognizeRevenueByBruneiDay,
   registerProfitLossRoutes,
@@ -36,6 +38,76 @@ const branches: PnlAllocationTarget[] = PNL_BRANCH_NAMES.map((name, index) => ({
 
 const line = (month: ReturnType<typeof buildPnl>[number], key: string) =>
   month.lines.find((entry) => entry.key === key)?.cents;
+
+const queryText = (query: unknown) => {
+  const chunks = (query as { queryChunks?: unknown[] })?.queryChunks ?? [];
+  return chunks.map((chunk: any) => {
+    if (typeof chunk === "string") return chunk;
+    if (Array.isArray(chunk?.value)) return chunk.value.join("");
+    if (Array.isArray(chunk?.queryChunks)) return queryText(chunk);
+    return "";
+  }).join("");
+};
+
+/**
+ * The custom report is deliberately exercised through the backend service,
+ * while the database boundary is supplied with deterministic read-only rows.
+ * This keeps date-boundary assertions independent of staging data and still
+ * lets the service's recognition, depreciation, YTD, and response contract run.
+ */
+function mockCustomReportReads(options?: {
+  expenses?: any[];
+  depreciation?: any[];
+  invoices?: any[];
+  counter?: any[];
+  fees?: any[];
+  branches?: any[];
+}) {
+  const queries: string[] = [];
+  const branchesForFixture = options?.branches ?? branches.map((branch) => ({
+    id: branch.id, name: branch.name,
+  }));
+  const execute = vi.spyOn(db, "execute").mockImplementation(((query: unknown) => {
+    const text = queryText(query);
+    queries.push(text);
+    let rows: any[] = [];
+    if (text.includes("SELECT extract(year FROM s.expense_date)")) {
+      rows = (options?.expenses ?? []).map((row) => ({
+        year: row.year ?? 2026, month: row.month ?? 1, branch_id: row.branch_id ?? "1",
+        pnl_category: row.pnl_category ?? "Water Bill",
+        allocation_status: row.allocation_status ?? "allocated", cents: row.cents ?? 0,
+      }));
+    } else if (text.includes("SELECT a.allocation_status")) {
+      rows = [];
+    } else if (text.includes("SELECT year, month, branch_id")) {
+      rows = options?.depreciation ?? [];
+    } else if (text.includes("SELECT b.id::text AS id")) {
+      rows = branchesForFixture;
+    } else if (text.includes("SELECT last_successful_at")) {
+      rows = [];
+    } else if (text.includes("SELECT extract(year FROM date(")) {
+      rows = [];
+    } else if (text.includes("SELECT id, branch_id::text AS branch_id, vehicle_id")) {
+      rows = options?.counter ?? [];
+    } else if (text.includes("SELECT i.id, i.amount_cents")) {
+      rows = options?.invoices ?? [];
+    } else if (text.includes("SELECT s.id, s.price_cents")) {
+      rows = [];
+    } else if (text.includes("SELECT payment_method, qr_provider, mdr_bps")) {
+      rows = options?.fees ?? [];
+    } else if (text.includes("SELECT 'expenses' AS source")) {
+      rows = [
+        { source: "expenses", first_date: null, last_date: null },
+        { source: "pos", first_date: null, last_date: null },
+        { source: "subscription_invoices", first_date: null, last_date: null },
+      ];
+    } else if (text.includes("SELECT s.expense_date::text AS expense_date")) {
+      rows = [];
+    }
+    return Promise.resolve({ rows } as any);
+  }) as any);
+  return { execute, queries };
+}
 
 describe("P&L accounting contract", () => {
   it("suggests the first absent month after a two-month recurring pattern", () => {
@@ -299,6 +371,194 @@ describe("P&L accounting contract", () => {
       amountCents: 100, mdrCents: 0, startsAt: new Date("2026-07-01T00:00:00Z"),
       endsAt: new Date("2026-07-01T00:00:00Z"), branchId: null,
     })).toBeNull();
+  });
+
+  it("validates paired inclusive custom dates and rejects reversed or oversized periods", async () => {
+    expect(normalizeProfitLossDateRange("2026-02-28", "2026-02-29")).toBeNull();
+    expect(normalizeProfitLossDateRange("2026-01-10", undefined)).toBeNull();
+    expect(normalizeProfitLossDateRange("2026-01-11", "2026-01-10")).toBeNull();
+    expect(normalizeProfitLossDateRange("2020-01-01", "2026-01-01")).toBeNull();
+    expect(normalizeProfitLossDateRange("2026-01-10", "2026-01-10")).toMatchObject({
+      startDate: "2026-01-10", endDate: "2026-01-10",
+    });
+
+    const app = express();
+    app.use((req, _res, next) => {
+      req.staff = { user: { id: "owner-fixture", role: "owner" } as any, session: {} as any };
+      next();
+    });
+    registerProfitLossRoutes(app);
+    await request(app).get("/api/admin/profit-loss?start_date=2026-01-10").expect(400);
+    await request(app).get("/api/admin/profit-loss?start_date=2026-01-11&end_date=2026-01-10").expect(400);
+  });
+
+  it("filters partial invoice recognition by Brunei day and prorates depreciation by selected days", async () => {
+    const invoice = {
+      id: "invoice-partial",
+      amount_cents: 3_100,
+      period_start: "2026-01-01T00:00:00.000Z",
+      period_end: "2026-02-01T00:00:00.000Z",
+      payment_provider: "card",
+    };
+    const recognized = recognizeRevenueByBruneiDay({
+      amountCents: invoice.amount_cents,
+      mdrCents: mdrFeeForGroup(250, invoice.amount_cents),
+      startsAt: new Date(invoice.period_start),
+      endsAt: new Date(invoice.period_end),
+      branchId: null,
+    })!;
+    const selectedDaily = recognized.slice(9, 19); // Jan 10 through Jan 19, inclusive.
+    const fixture = mockCustomReportReads({
+      invoices: [invoice],
+      fees: [{ payment_method: "card", qr_provider: null, mdr_bps: 250 }],
+      expenses: [{ year: 2026, month: 1, cents: 101 }],
+      depreciation: [{ year: 2026, month: 1, branch_id: "1", cents: 3_100 }],
+    });
+    try {
+      const report = await getProfitLossReport(2026, "overall", {
+        startDate: "2026-01-10", endDate: "2026-01-19",
+      });
+      expect(report.dateRange).toEqual({ startDate: "2026-01-10", endDate: "2026-01-19" });
+      expect(report.totalLabel).toBe("Period total");
+      expect(report.months).toHaveLength(1);
+      expect(report.months[0]).toMatchObject({ year: 2026, month: 1, monthKey: "2026-01" });
+      expect(line(report.months[0], "recognized_subscription_revenue")).toBe(
+        selectedDaily.reduce((sum, entry) => sum + entry.subscriptionRecognizedGrossCents, 0),
+      );
+      expect(line(report.months[0], "merchant_discount_rate")).toBe(
+        selectedDaily.reduce((sum, entry) => sum + entry.mdrCents, 0),
+      );
+      expect(line(report.months[0], "depreciation")).toBe(1_000); // round(3100 * 10 / 31)
+      expect(report.ytd.revenue).toBe(line(report.months[0], "revenue"));
+      expect(report.ytd.profit_margin_bps).toBe(
+        Math.round((report.ytd.net_profit * 10_000) / report.ytd.revenue),
+      );
+      const expenseQuery = fixture.queries.find((query) =>
+        query.includes("SELECT extract(year FROM s.expense_date)"));
+      expect(expenseQuery).toContain("2026-01-10");
+      expect(expenseQuery).toContain("2026-01-20"); // exclusive upper bound
+      const posQuery = fixture.queries.find((query) =>
+        query.includes("SELECT extract(year FROM date("));
+      expect(posQuery).toContain("WHEN o.status = 'refunded' AND o.legacy_source IS NOT NULL THEN 0");
+      expect(posQuery).toContain("WHEN o.status = 'refunded' THEN o.total_cents");
+      expect(posQuery).toContain("ROUND(");
+      expect(selectedDaily.reduce(
+        (sum, entry) => sum + entry.subscriptionRecognizedGrossCents - entry.mdrCents, 0,
+      )).toBe(report.ytd.revenue - report.ytd.merchant_discount_rate);
+      expect(report.coverage.note).toContain("prorates configured monthly depreciation");
+    } finally {
+      fixture.execute.mockRestore();
+    }
+  });
+
+  it("keeps same-month custom buckets distinct across calendar years", async () => {
+    const fixture = mockCustomReportReads({
+      invoices: [
+        {
+          id: "december", amount_cents: 1_200,
+          period_start: "2025-12-31T00:00:00.000Z",
+          period_end: "2026-01-01T00:00:00.000Z", payment_provider: "card",
+        },
+        {
+          id: "january", amount_cents: 2_000,
+          period_start: "2026-01-01T00:00:00.000Z",
+          period_end: "2026-01-02T00:00:00.000Z", payment_provider: "card",
+        },
+      ],
+      fees: [{ payment_method: "card", qr_provider: null, mdr_bps: 0 }],
+      expenses: [
+        { year: 2025, month: 12, cents: 12 },
+        { year: 2026, month: 1, cents: 34 },
+      ],
+      depreciation: [
+        { year: 2025, month: 12, branch_id: "1", cents: 120 },
+        { year: 2026, month: 1, branch_id: "1", cents: 340 },
+      ],
+    });
+    try {
+      const report = await getProfitLossReport(2026, "overall", {
+        startDate: "2025-12-31", endDate: "2026-01-01",
+      });
+      expect(report.months.map((month) => month.monthKey)).toEqual(["2025-12", "2026-01"]);
+      expect(report.months.map((month) => month.year)).toEqual([2025, 2026]);
+      expect(line(report.months[0], "recognized_subscription_revenue")).toBe(1_200);
+      expect(line(report.months[1], "recognized_subscription_revenue")).toBe(2_000);
+      expect(line(report.months[0], "depreciation")).toBe(4);
+      expect(line(report.months[1], "depreciation")).toBe(11);
+      expect(report.ytd.revenue).toBe(3_200);
+      expect(report.ytd.net_profit).toBe(3_200 - 12 - 34 - 4 - 11);
+    } finally {
+      fixture.execute.mockRestore();
+    }
+  });
+
+  it("keeps early counter renewals out of their own sale month until prior recognition ends", async () => {
+    const fixture = mockCustomReportReads({
+      counter: [
+        {
+          id: "counter-first", branch_id: "1", vehicle_id: "vehicle-1",
+          total_cents: 3_000, payment_method: "cash", qr_provider: null,
+          created_at: "2026-01-01T00:00:00.000Z",
+        },
+        {
+          id: "counter-early-renewal", branch_id: "1", vehicle_id: "vehicle-1",
+          total_cents: 7_000, payment_method: "cash", qr_provider: null,
+          created_at: "2026-01-10T00:00:00.000Z",
+        },
+      ],
+      fees: [],
+    });
+    try {
+      const report = await getProfitLossReport(2026, "overall", {
+        startDate: "2026-01-10", endDate: "2026-01-20",
+      });
+      const firstRecognition = recognizeRevenueByBruneiDay({
+        amountCents: 3_000, mdrCents: 0,
+        startsAt: new Date("2026-01-01T00:00:00.000Z"),
+        branchId: "1",
+      })!;
+      const expected = firstRecognition.slice(9, 20)
+        .reduce((sum, entry) => sum + entry.subscriptionRecognizedGrossCents, 0);
+      expect(line(report.months[0], "recognized_subscription_revenue")).toBe(expected);
+      expect(report.coverage.note).toContain("custom period");
+    } finally {
+      fixture.execute.mockRestore();
+    }
+  });
+
+  it("uses exact custom dates for expense drilldown while preserving month mode", async () => {
+    const fixture = vi.spyOn(db, "execute").mockImplementation(((query: unknown) => {
+      const text = queryText(query);
+      return Promise.resolve({
+        rows: [{ submission_id: "inside", expense_date: "2026-01-10", cents: 101 }],
+      } as any);
+    }) as any);
+    const app = express();
+    app.use((req, _res, next) => {
+      req.staff = { user: { id: "owner-fixture", role: "owner" } as any, session: {} as any };
+      next();
+    });
+    registerProfitLossRoutes(app);
+    try {
+      const response = await request(app)
+        .get("/api/admin/profit-loss/expenses?start_date=2026-01-10&end_date=2026-01-19")
+        .expect(200);
+      expect(response.body).toMatchObject({
+        dateRange: { startDate: "2026-01-10", endDate: "2026-01-19" },
+        totalLabel: "Period total",
+      });
+      expect(response.body.entries).toEqual([
+        { submission_id: "inside", expense_date: "2026-01-10", cents: 101 },
+      ]);
+      const query = queryText(fixture.mock.calls[0][0]);
+      expect(query).toContain("2026-01-10");
+      expect(query).toContain("2026-01-20");
+      fixture.mockClear();
+      await request(app).get("/api/admin/profit-loss/expenses?year=2026&month=1").expect(200);
+      expect(queryText(fixture.mock.calls[0][0])).toContain("extract(year FROM s.expense_date)");
+    } finally {
+      fixture.mockRestore();
+    }
   });
 
   it("uses gross payment-group MDR rounding and excludes only legacy refund reversals", () => {
