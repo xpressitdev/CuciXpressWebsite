@@ -560,6 +560,88 @@ export const insertPaymentFeeRateSchema = createInsertSchema(paymentFeeRates).om
 export type PaymentFeeRate = typeof paymentFeeRates.$inferSelect;
 export type InsertPaymentFeeRate = z.infer<typeof insertPaymentFeeRateSchema>;
 
+// --- Owner Profit & Loss (Connecteam read-only expenses) -----
+// Only the sanitised accounting projection is modelled here. Receipt URLs,
+// account numbers, submitter identity, and arbitrary form answers are
+// deliberately excluded from this schema.
+export const connecteamExpenseSyncRuns = pgTable("connecteam_expense_sync_runs", {
+  id: bigserial("id", { mode: "number" }).primaryKey(),
+  form_id: text("form_id").notNull(),
+  started_at: timestamp("started_at", { withTimezone: true }).defaultNow().notNull(),
+  completed_at: timestamp("completed_at", { withTimezone: true }),
+  status: text("status").default("running").notNull(),
+  submissions_seen: integer("submissions_seen").default(0).notNull(),
+  error_code: text("error_code"),
+});
+
+export const connecteamExpenseSyncState = pgTable("connecteam_expense_sync_state", {
+  form_id: text("form_id").primaryKey(),
+  last_successful_run_id: bigserial("last_successful_run_id", { mode: "number" })
+    .references(() => connecteamExpenseSyncRuns.id),
+  last_successful_at: timestamp("last_successful_at", { withTimezone: true }),
+  last_attempt_at: timestamp("last_attempt_at", { withTimezone: true }),
+  last_attempt_status: text("last_attempt_status").default("never").notNull(),
+  last_error_code: text("last_error_code"),
+  expected_submission_count: integer("expected_submission_count"),
+  lease_token: text("lease_token"),
+  lease_expires_at: timestamp("lease_expires_at", { withTimezone: true }),
+  updated_at: timestamp("updated_at", { withTimezone: true }).defaultNow().notNull(),
+});
+
+export const connecteamExpenseSubmissions = pgTable("connecteam_expense_submissions", {
+  id: bigserial("id", { mode: "number" }).primaryKey(),
+  form_id: text("form_id").notNull(),
+  submission_id: text("submission_id").notNull(),
+  source_updated_at: timestamp("source_updated_at", { withTimezone: true }),
+  expense_date: date("expense_date"),
+  amount_cents: integer("amount_cents"),
+  currency: text("currency").default("BND").notNull(),
+  source_status: text("source_status"),
+  source_category: text("source_category"),
+  branch_choices: jsonb("branch_choices").$type<string[]>().default([]).notNull(),
+  is_eligible: boolean("is_eligible").default(false).notNull(),
+  is_present: boolean("is_present").default(true).notNull(),
+  last_seen_run_id: bigserial("last_seen_run_id", { mode: "number" })
+    .references(() => connecteamExpenseSyncRuns.id),
+  content_hash: text("content_hash").notNull(),
+  created_at: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
+  updated_at: timestamp("updated_at", { withTimezone: true }).defaultNow().notNull(),
+}, (t) => [
+  uniqueIndex("connecteam_expense_submissions_form_submission_uq").on(t.form_id, t.submission_id),
+]);
+export type ConnecteamExpenseSubmission = typeof connecteamExpenseSubmissions.$inferSelect;
+
+export const pnlExpenseAllocations = pgTable("pnl_expense_allocations", {
+  id: bigserial("id", { mode: "number" }).primaryKey(),
+  connecteam_expense_submission_id: bigserial("connecteam_expense_submission_id", { mode: "number" })
+    .references(() => connecteamExpenseSubmissions.id, { onDelete: "cascade" }).notNull(),
+  allocation_key: text("allocation_key").notNull(),
+  branch_id: integer("branch_id").references(() => branches.id),
+  pnl_category: text("pnl_category"),
+  allocation_status: text("allocation_status").notNull(),
+  cents: integer("cents").notNull(),
+  created_at: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
+  updated_at: timestamp("updated_at", { withTimezone: true }).defaultNow().notNull(),
+}, (t) => [
+  uniqueIndex("pnl_expense_allocations_submission_key_uq").on(
+    t.connecteam_expense_submission_id,
+    t.allocation_key,
+  ),
+]);
+export type PnlExpenseAllocation = typeof pnlExpenseAllocations.$inferSelect;
+
+export const pnlDepreciationSettings = pgTable("pnl_depreciation_settings", {
+  year: integer("year").notNull(),
+  month: integer("month").notNull(),
+  branch_id: integer("branch_id").references(() => branches.id).notNull(),
+  cents: integer("cents").notNull(),
+  updated_by_staff_id: text("updated_by_staff_id").references(() => staff.id),
+  updated_at: timestamp("updated_at", { withTimezone: true }).defaultNow().notNull(),
+}, (t) => [
+  uniqueIndex("pnl_depreciation_settings_year_month_branch_uq").on(t.year, t.month, t.branch_id),
+]);
+export type PnlDepreciationSetting = typeof pnlDepreciationSettings.$inferSelect;
+
 // --- Orders (POS transactions) -------------------------------
 // addons: jsonb array of { id: string, name: string, price_cents: number }
 // payment_method: 'cash' | 'card' | 'qr' | 'subscription' | 'voucher'

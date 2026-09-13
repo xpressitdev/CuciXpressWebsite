@@ -9,6 +9,7 @@ import { startSharePointOutboxWorker } from "./integrations/sharepointOutbox";
 import { startPendingPaymentSweeper } from "./integrations/pendingPaymentSweeper";
 import { startSubscriptionRenewalWorker } from "./subscriptions";
 import { startInteriorRefreshReminderWorker } from "./interiorRefreshReminders";
+import { startConnecteamExpenseSyncWorker } from "./profitLossService";
 
 // Fail-fast on missing or weak JWT_SECRET. Refuse to boot rather than
 // silently fall back to a hardcoded value. See docs/AUTH_AUDIT.md.
@@ -87,6 +88,7 @@ app.use((req, res, next) => {
   startPendingPaymentSweeper();
   startSubscriptionRenewalWorker();
   startInteriorRefreshReminderWorker();
+  startConnecteamExpenseSyncWorker();
 
   app.use((err: any, _req: Request, res: Response, _next: NextFunction) => {
     const status = err.status || err.statusCode || 500;

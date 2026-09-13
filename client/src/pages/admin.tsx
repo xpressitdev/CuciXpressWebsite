@@ -90,6 +90,7 @@ import { InteriorRefreshPanel } from "@/components/admin/InteriorRefreshPanel";
 import CategoriesSection from "@/components/admin/CategoriesSection";
 import { SendReceiptButton } from "@/components/admin/SendReceiptButton";
 import { CorrectPlateDialog } from "@/components/admin/CorrectPlateDialog";
+import ProfitLossTab from "@/components/admin/ProfitLossTab";
 import {
   AreaChart,
   Area,
@@ -382,6 +383,12 @@ export default function Admin() {
                 </TabsTrigger>
               )}
               {isOwner && (
+                 <TabsTrigger value="profit-loss" className="flex items-center gap-2" data-testid="tab-profit-loss">
+                   <BarChart3 className="w-4 h-4" />
+                   Profit &amp; Loss
+                 </TabsTrigger>
+               )}
+               {isOwner && (
                 <TabsTrigger value="plate-transfer" className="flex items-center gap-2" data-testid="tab-plate-transfer">
                   <Car className="w-4 h-4" />
                   Plate Transfer
@@ -500,6 +507,12 @@ export default function Admin() {
                   canOpenPlateTransfer={isOwner}
                   onOpenPlateTransfer={() => setActiveTab("plate-transfer")}
                 />
+              </TabsContent>
+            )}
+
+            {isOwner && (
+              <TabsContent value="profit-loss" className="mt-6">
+                <ProfitLossTab />
               </TabsContent>
             )}
 
