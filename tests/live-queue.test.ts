@@ -112,8 +112,12 @@ describe("live queue wash timing", () => {
       }],
     };
 
-    expect(liveQueueWaitSeconds(branch, serverTime, serverMs)).toBeNull();
+    expect(liveQueueWaitSeconds(branch, serverTime, serverMs)).toBe(480);
+    expect(liveQueueWaitSeconds(branch, serverTime, serverMs + 900_000)).toBe(480);
+    expect(liveQueueWaitSeconds({ ...branch, queued_count: 1 }, serverTime, serverMs)).toBe(960);
     expect(formatWashingState(branch.washing[0], serverTime, serverMs))
-      .toBe("Washing · time unavailable");
+      .toBe("Washing · ~8m estimated");
+    expect(formatWashingState({ ...branch.washing[0], washing_started_at: "invalid" }, serverTime, serverMs))
+      .toBe("Washing · ~8m estimated");
   });
 });

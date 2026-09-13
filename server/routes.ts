@@ -317,9 +317,8 @@ export async function registerRoutes(app: Express): Promise<Server> {
   //   queued  = orders today with status in ('paid','queued')
   //   washing = orders today with status = 'washing'
   //   today_total = orders today with status = 'done'
-  // Wait estimate: the earliest known washing lane release plus queued ×
-  // eight minutes. A washing row without a recorded start remains occupied,
-  // but has no fabricated ETA.
+  // Wait estimate: assign waiting cars to the earliest available washing lane.
+  // Missing starts use an eight-minute estimate without inventing timestamps.
   //
   // We use a single SELECT for active orders rather than one query per
   // branch, so this stays cheap even at 5 branches × 7s polling.
@@ -421,13 +420,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
         const remainingKnown = washingRows.map((o) =>
           remainingWashSeconds(o.washing_started_at, serverMs),
         );
-        const hasUnknownStart = remainingKnown.some((v) => v === null);
-        const activeRemaining = remainingKnown.length > 0 && !hasUnknownStart
-          ? (remainingKnown as number[])
-          : [];
-        const estWaitSeconds = hasUnknownStart
-          ? null
-          : estimateNextAvailableSeconds(activeRemaining, queuedRows.length);
+        const estWaitSeconds = estimateNextAvailableSeconds(remainingKnown, queuedRows.length);
 
         return {
           id: b.id,

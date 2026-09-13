@@ -29,8 +29,8 @@ export interface LiveQueueBranch {
  *
  * The server's estimate is useful for older snapshots, but an active wash is
  * recalculated locally so the display can tick once per second without
- * waiting for a network request. A missing start time is deliberately
- * unknown rather than inferred from created_at.
+ * waiting for a network request. Missing starts use the eight-minute default,
+ * rather than inventing a timestamp from created_at.
  */
 export function liveQueueWaitSeconds(
   branch: LiveQueueBranch,
@@ -60,12 +60,8 @@ export function liveQueueWaitSeconds(
     remainingWashSeconds(car.washing_started_at, anchoredNowMs),
   );
 
-  // An unknown historical start must never become "Open" due to a fabricated
-  // countdown. Keep the branch occupied and time unavailable instead.
-  if (remaining.some((seconds) => seconds === null)) return null;
-
   return estimateNextAvailableSeconds(
-    remaining as number[],
+    remaining,
     branch.queued_count,
   );
 }
@@ -86,17 +82,18 @@ export function formatWashingState(
   nowMs = Date.now(),
   snapshotReceivedAtMs?: number,
 ): string {
-  if (!car.washing_started_at) return "Washing · time unavailable";
+  if (!car.washing_started_at || !Number.isFinite(Date.parse(car.washing_started_at))) {
+    return "Washing · ~8m estimated";
+  }
   const serverMs = Date.parse(serverTime ?? "");
   if (!Number.isFinite(serverMs)) {
-    return "Washing · time unavailable";
+    return "Washing · ~8m estimated";
   }
   const anchoredNowMs =
     Number.isFinite(snapshotReceivedAtMs)
       ? serverMs + (nowMs - (snapshotReceivedAtMs as number))
       : nowMs;
   const remaining = remainingWashSeconds(car.washing_started_at, anchoredNowMs);
-  if (remaining === null) return "Washing · time unavailable";
   return remaining > 0
     ? `Washing · ${formatLiveWaitSeconds(remaining)}`
     : "Washing · finishing";

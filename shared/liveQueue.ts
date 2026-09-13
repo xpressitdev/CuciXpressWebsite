@@ -4,18 +4,18 @@ export type WashingStartedAt = string | Date | null | undefined;
 
 /**
  * Return the remaining duration for one active wash at a server-clock instant.
- * A missing/invalid start is deliberately unknown; callers must not infer one
- * from created_at or any other historical timestamp.
+ * Without a trustworthy start, use the default eight-minute estimate.
+ * Do not invent a start timestamp or treat an estimated wash as completed.
  */
 export function remainingWashSeconds(
   washingStartedAt: WashingStartedAt,
   serverNowMs: number,
-): number | null {
-  if (!washingStartedAt || !Number.isFinite(serverNowMs)) return null;
+): number {
+  if (!washingStartedAt || !Number.isFinite(serverNowMs)) return WASH_DURATION_SECONDS;
   const startedMs = washingStartedAt instanceof Date
     ? washingStartedAt.getTime()
     : Date.parse(String(washingStartedAt));
-  if (!Number.isFinite(startedMs)) return null;
+  if (!Number.isFinite(startedMs)) return WASH_DURATION_SECONDS;
   const elapsed = Math.max(0, Math.floor((serverNowMs - startedMs) / 1000));
   return Math.max(0, WASH_DURATION_SECONDS - elapsed);
 }

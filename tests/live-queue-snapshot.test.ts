@@ -141,8 +141,8 @@ describe("public live queue snapshot wash timing", () => {
     );
     const branch = await branchSnapshot();
     expect(branch.washing_count).toBe(1);
-    expect(branch.est_wait_seconds).toBeNull();
-    expect(branch.est_wait_minutes).toBeNull();
+    expect(branch.est_wait_seconds).toBe((branch.queued_count + 1) * 480);
+    expect(branch.est_wait_minutes).toBe((branch.queued_count + 1) * 8);
     expect(branch.washing[0].washing_started_at).toBeNull();
   });
 });
