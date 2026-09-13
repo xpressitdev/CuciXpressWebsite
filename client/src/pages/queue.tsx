@@ -180,10 +180,10 @@ export default function QueuePage() {
                   ? "Busy"
                   : occupied
                   ? waitSeconds === null
-                    ? "Washing · time unavailable"
+                    ? "~8m"
                     : waitSeconds > 0
-                    ? `Washing · ${formatLiveWaitSeconds(waitSeconds)}`
-                    : "Washing · finishing"
+                    ? formatLiveWaitSeconds(waitSeconds)
+                    : "Finishing"
                   : fmtWait(b.est_wait_minutes);
                 return (
                   <button
@@ -290,7 +290,7 @@ function BranchDetail({
     snapshotReceivedAtMs,
   );
   const headerText =
-    st === "open" ? (occupied ? "● Open · washing" : "● Open now")
+    st === "open" ? (occupied ? "● Open" : "● Open now")
     : st === "busy" ? "● Open · busy"
     : st === "maintenance" ? "Under maintenance"
     : "Closed";
@@ -327,7 +327,7 @@ function BranchDetail({
                 ? "Long"
                 : occupied
                 ? waitSeconds === null
-                  ? "Washing · time unavailable"
+                  ? "~8m"
                   : waitSeconds > 0
                   ? formatLiveWaitSeconds(waitSeconds)
                   : "Finishing"

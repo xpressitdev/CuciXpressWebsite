@@ -92,10 +92,10 @@ export default function LiveQueueWidget({ embedded = false }: { embedded?: boole
               {shortest.washing_count > 0
                 ? ` · ${
                     waitFor(shortest) === null
-                      ? "Washing · time unavailable"
+                      ? "~8m"
                       : waitFor(shortest)! > 0
                       ? formatLiveWaitSeconds(waitFor(shortest)!)
-                      : "Washing · finishing"
+                      : "Finishing"
                   }`
                 : shortest.queued_count > 0
                 ? ` · ${formatLiveWaitSeconds(waitFor(shortest))}`
@@ -132,10 +132,10 @@ export default function LiveQueueWidget({ embedded = false }: { embedded?: boole
                 ? "Busy"
                 : occupied
                 ? waitSeconds === null
-                  ? "Washing · time unavailable"
+                  ? "~8m"
                   : waitSeconds > 0
-                  ? `Washing · ${formatLiveWaitSeconds(waitSeconds)}`
-                  : "Washing · finishing"
+                  ? formatLiveWaitSeconds(waitSeconds)
+                  : "Finishing"
                 : quiet
                 ? "Open"
                 : formatLiveWaitSeconds(waitSeconds);
@@ -187,10 +187,10 @@ export default function LiveQueueWidget({ embedded = false }: { embedded?: boole
               </span>{" "}
               {shortest.washing_count > 0
                 ? waitFor(shortest) === null
-                  ? "· washing — time unavailable"
+                  ? "· ~8m"
                   : waitFor(shortest)! > 0
                   ? `· ${formatLiveWaitSeconds(waitFor(shortest)!)}`
-                  : "· washing — finishing"
+                  : "· finishing"
                 : "· drive in"}
             </span>
           ) : shortest ? (
