@@ -81,3 +81,31 @@ mtime_ms = 1790712051954
 storage_uri = "gcs://replit-rams-assets-pike/rams/assets/repl:a39e6913-24fd-4227-b04c-ff8317815489/0db6d104-047e-48ad-be78-e04bb44ddafb/dcf36836-6a62-4f61-8a40-47f4d918593f"
 storage_version_token = "1790712163695713"
 content_type = "image/png"
+
+[[outputs]]
+id = "qApgQKIdFOEZQpUIkwThz"
+uri = "file://screenshots/leaderboard-censored-names-mobile.png"
+type = "image"
+title = "Kamarul Ajimain — updated leaderboard"
+description = "Fresh screenshot showing censored names, masked plates, and the highlighted Your car entry."
+logical_id = "c44ba169-620e-4671-9677-96b1dd8902d9"
+content_hash = "sha256:6d43d91dcf54a21e47eb81dc126859fd2527cbdcd95b830e07e555e1344b19f5"
+size = 75407
+mtime_ms = 1790715477618
+storage_uri = "gcs://replit-rams-assets-pike/rams/assets/repl:a39e6913-24fd-4227-b04c-ff8317815489/c44ba169-620e-4671-9677-96b1dd8902d9/ada3f726-8be2-4246-a721-1a9352b042f4"
+storage_version_token = "1790715521485336"
+content_type = "image/png"
+
+[[outputs]]
+id = "zYpZlgdqWoM9LnPWv3lKb"
+uri = "file://screenshots/leaderboard-censored-names-settings.png"
+type = "image"
+title = "Leaderboard visibility setting"
+description = "The full-plate opt-in remains unchecked. No profile or preference changes were made."
+logical_id = "00419667-6bac-4228-a65f-667c939e02fd"
+content_hash = "sha256:dfe45c262d2ad2b6300cadc397d481428e14c098603f1af5dd407608ad71d812"
+size = 60712
+mtime_ms = 1790715477666
+storage_uri = "gcs://replit-rams-assets-pike/rams/assets/repl:a39e6913-24fd-4227-b04c-ff8317815489/00419667-6bac-4228-a65f-667c939e02fd/83b31aa4-8fe9-49c6-b2f2-221981d58e36"
+storage_version_token = "1790715522965213"
+content_type = "image/png"
