@@ -1,3 +1,15 @@
+## 2026-09-29 — Leaderboard plate privacy
+
+**Migration:** `migrations/manual/2026-09-29_01_leaderboard_plate_privacy.sql`
+
+- Adds `users.show_full_plate_on_leaderboard` with `NOT NULL DEFAULT FALSE`.
+- Existing and new customers remain opted out until they explicitly enable full
+  plate visibility; customer names are never displayed on the leaderboard.
+- Applied to staging first, then `DATABASE_URL`; verified boolean, non-null,
+  default false on both.
+
+---
+
 ## 2026-09-02 — Interior Refresh appointment reminders
 
 **Migration:** `migrations/manual/2026-09-02_01_interior_refresh_reminders.sql`

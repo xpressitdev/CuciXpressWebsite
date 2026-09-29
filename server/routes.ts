@@ -21,6 +21,7 @@ import { unifiedAuth } from "./unified-auth";
 import { lucia } from "./auth/lucia";
 import { staffLucia } from "./auth/staffLucia";
 import { requireLuciaUser, requireStaff, requireStaffRole, requireStaffOrPlateOwner } from "./auth/middleware";
+import { leaderboardPlate } from "./leaderboardPrivacy";
 import { registerProfitLossRoutes } from "./profitLossService";
 import { registerSubscriptionRoutes, activatePocketPaySubscription } from "./subscriptions";
 import { verifyInteriorRefreshQr } from "./interiorRefresh";
@@ -7181,12 +7182,16 @@ export async function registerRoutes(app: Express): Promise<Server> {
   // mirrors the same matching logic /api/customer/orders uses (orders
   // can be linked by customer_id, vehicle_id, or normalized plate) so
   // the rank a customer sees here lines up with the wash count on their
-  // own dashboard. Plates are intentionally NOT censored — the owner is
-  // happy to show them; only the surname is shortened to a single
-  // initial as a gentle privacy nod.
+  // own dashboard. Names never leave this endpoint; other customers'
+  // plates are masked unless they explicitly opt in.
   app.get('/api/customer/leaderboard', requireLuciaUser, async (req, res) => {
     const userId = Number(req.lucia!.user!.id);
+    res.set('Cache-Control', 'private, no-store');
     try {
+      const [preference] = (await db.execute(sql`
+        SELECT show_full_plate_on_leaderboard FROM users WHERE id = ${userId}
+      `)).rows as Array<{ show_full_plate_on_leaderboard: boolean }>;
+      if (!preference) return res.status(404).json({ error: 'Customer not found' });
       const rows = (await db.execute(sql`
         -- Exclude staff/admin users (is_admin = true). Each branch has a
         -- placeholder admin account (e.g. "Tutong Branch Admin") that the
@@ -7218,8 +7223,6 @@ export async function registerRoutes(app: Express): Promise<Server> {
         ),
         counts AS (
           SELECT u.id AS user_id,
-                 u.first_name,
-                 u.last_name,
                  COUNT(uo.order_id)::int AS total_washes
             FROM users u
             LEFT JOIN user_orders uo ON uo.user_id = u.id
@@ -7239,12 +7242,12 @@ export async function registerRoutes(app: Express): Promise<Server> {
         ),
         ranked AS (
           SELECT c.user_id,
-                 c.first_name,
-                 c.last_name,
                  c.total_washes,
                  tp.plate,
+                 u.show_full_plate_on_leaderboard,
                  RANK() OVER (ORDER BY c.total_washes DESC, c.user_id ASC) AS rank
             FROM counts c
+            JOIN users u ON u.id = c.user_id
             LEFT JOIN top_plate tp ON tp.user_id = c.user_id
            WHERE c.total_washes > 0
         ),
@@ -7263,10 +7266,9 @@ export async function registerRoutes(app: Express): Promise<Server> {
             END AS hi
         )
         SELECT r.user_id,
-               r.first_name,
-               r.last_name,
                r.total_washes,
                r.plate,
+               r.show_full_plate_on_leaderboard,
                r.rank::int AS rank,
                (r.user_id = ${userId}) AS is_me,
                (SELECT COUNT(*)::int FROM ranked) AS total_ranked
@@ -7275,10 +7277,9 @@ export async function registerRoutes(app: Express): Promise<Server> {
          ORDER BY r.rank
       `)).rows as Array<{
         user_id: number;
-        first_name: string | null;
-        last_name: string | null;
         total_washes: number;
         plate: string | null;
+        show_full_plate_on_leaderboard: boolean;
         rank: number;
         is_me: boolean;
         total_ranked: number;
@@ -7290,18 +7291,36 @@ export async function registerRoutes(app: Express): Promise<Server> {
         total_ranked: totalRanked,
         my_rank: myRow?.rank ?? null,
         my_washes: myRow?.total_washes ?? 0,
+        show_full_plate_on_leaderboard: preference.show_full_plate_on_leaderboard,
         entries: rows.map((r) => ({
           rank: r.rank,
-          first_name: r.first_name ?? '',
-          last_name: r.last_name ?? '',
-          plate: r.plate,
-          total_washes: r.total_washes,
+          plate: leaderboardPlate(r.plate, r.is_me, r.show_full_plate_on_leaderboard),
+          wash_count: r.total_washes,
           is_me: r.is_me,
         })),
       });
     } catch (err) {
       console.error('[customer/leaderboard] failed', err);
-      res.status(500).json({ entries: [], total_ranked: 0, my_rank: null, my_washes: 0 });
+      res.status(500).json({ error: 'Could not load leaderboard' });
+    }
+  });
+
+  app.patch('/api/customer/leaderboard/preference', requireLuciaUser, async (req, res) => {
+    res.set('Cache-Control', 'private, no-store');
+    const parsed = z.object({ show_full_plate_on_leaderboard: z.boolean() }).strict().safeParse(req.body);
+    if (!parsed.success) return res.status(400).json({ error: 'Expected a boolean show_full_plate_on_leaderboard' });
+    try {
+      const rows = (await db.execute(sql`
+        UPDATE users
+           SET show_full_plate_on_leaderboard = ${parsed.data.show_full_plate_on_leaderboard}
+         WHERE id = ${Number(req.lucia!.user!.id)}
+         RETURNING show_full_plate_on_leaderboard
+      `)).rows as Array<{ show_full_plate_on_leaderboard: boolean }>;
+      if (!rows.length) return res.status(404).json({ error: 'Customer not found' });
+      res.json({ show_full_plate_on_leaderboard: rows[0].show_full_plate_on_leaderboard });
+    } catch (err) {
+      console.error('[customer/leaderboard/preference] failed', err);
+      res.status(500).json({ error: 'Could not save leaderboard preference' });
     }
   });
 

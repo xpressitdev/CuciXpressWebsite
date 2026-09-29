@@ -1,13 +1,12 @@
-import { useQuery } from "@tanstack/react-query";
+import { useMutation, useQuery } from "@tanstack/react-query";
 import { motion } from "framer-motion";
 import { Trophy, Crown, Medal, Loader2 } from "lucide-react";
+import { apiRequest, queryClient } from "@/lib/queryClient";
 
 interface LeaderboardEntry {
   rank: number;
-  first_name: string;
-  last_name: string;
   plate: string | null;
-  total_washes: number;
+  wash_count: number;
   is_me: boolean;
 }
 
@@ -15,16 +14,8 @@ interface LeaderboardResp {
   total_ranked: number;
   my_rank: number | null;
   my_washes: number;
+  show_full_plate_on_leaderboard: boolean;
   entries: LeaderboardEntry[];
-}
-
-// Show "Hadi A." style — full first name, last initial only. Plates are
-// shown in full per the owner's call (it's a public-ish identifier and
-// most customers know each other's cars anyway in Brunei).
-function displayName(e: LeaderboardEntry) {
-  const first = e.first_name?.trim() || "Driver";
-  const lastInitial = e.last_name?.trim()?.[0];
-  return lastInitial ? `${first} ${lastInitial.toUpperCase()}.` : first;
 }
 
 function rankBadge(rank: number) {
@@ -35,8 +26,22 @@ function rankBadge(rank: number) {
 }
 
 export function Leaderboard() {
-  const { data, isLoading } = useQuery<LeaderboardResp>({
+  const { data, isLoading, error } = useQuery<LeaderboardResp>({
     queryKey: ["/api/customer/leaderboard"],
+  });
+  const preference = useMutation({
+    mutationFn: async (enabled: boolean) => {
+      const response = await apiRequest("PATCH", "/api/customer/leaderboard/preference", {
+        show_full_plate_on_leaderboard: enabled,
+      });
+      return response.json() as Promise<{ show_full_plate_on_leaderboard: boolean }>;
+    },
+    onSuccess: (result) => {
+      queryClient.setQueryData<LeaderboardResp>(["/api/customer/leaderboard"], (old) =>
+        old ? { ...old, show_full_plate_on_leaderboard: result.show_full_plate_on_leaderboard } : old,
+      );
+      void queryClient.invalidateQueries({ queryKey: ["/api/customer/leaderboard"] });
+    },
   });
 
   if (isLoading) {
@@ -47,13 +52,10 @@ export function Leaderboard() {
     );
   }
 
-  if (!data || data.entries.length === 0) {
+  if (!data) {
     return (
       <section className="bg-white border border-gray-200 rounded-3xl p-8 text-center">
-        <Trophy className="w-8 h-8 mx-auto text-gray-300 mb-2" />
-        <p className="text-sm text-gray-500">
-          The leaderboard fills up once a few customers get washing.
-        </p>
+        <p className="text-sm text-red-600">{error instanceof Error ? error.message : "Could not load leaderboard."}</p>
       </section>
     );
   }
@@ -92,12 +94,15 @@ export function Leaderboard() {
         )}
       </header>
 
+      {data.entries.length === 0 && (
+        <p className="p-6 text-sm text-gray-500 text-center">The leaderboard fills up once a few customers get washing.</p>
+      )}
       <ul className="divide-y divide-gray-100">
         {data.entries.map((e, i) => {
           const badge = rankBadge(e.rank);
           return (
             <motion.li
-              key={`${e.rank}-${e.first_name}`}
+              key={e.rank}
               initial={{ opacity: 0, x: -6 }}
               animate={{ opacity: 1, x: 0 }}
               transition={{ delay: Math.min(i * 0.02, 0.3) }}
@@ -129,7 +134,7 @@ export function Leaderboard() {
                 )}
               </div>
 
-              {/* Name + plate */}
+              {/* Plate only; customer names are never shown on the leaderboard. */}
               <div className="flex-1 min-w-0">
                 <p
                   className={
@@ -137,14 +142,9 @@ export function Leaderboard() {
                     (e.is_me ? "text-purple-900" : "text-gray-900")
                   }
                 >
-                  {e.is_me ? "You" : displayName(e)}
-                  {e.is_me && (
-                    <span className="ml-2 text-[10px] uppercase tracking-widest font-black bg-purple-600 text-white px-1.5 py-0.5 rounded">
-                      You
-                    </span>
-                  )}
+                  {e.is_me ? "Your car" : e.plate ?? "Car"}
                 </p>
-                {e.plate && (
+                {e.is_me && e.plate && (
                   <p className="text-[11px] font-mono text-gray-500 mt-0.5 truncate">
                     {e.plate}
                   </p>
@@ -159,7 +159,7 @@ export function Leaderboard() {
                     (e.is_me ? "text-purple-700" : "text-gray-900")
                   }
                 >
-                  {e.total_washes}
+                  {e.wash_count}
                 </p>
                 <p className="text-[10px] uppercase tracking-widest font-bold text-gray-400 mt-0.5">
                   washes
@@ -170,8 +170,20 @@ export function Leaderboard() {
         })}
       </ul>
 
-      <footer className="px-5 md:px-6 py-3 bg-gray-50 border-t border-gray-100 text-[11px] text-gray-500 text-center">
-        Updated live · climb the ranks with every wash
+      <footer className="px-5 md:px-6 py-3 bg-gray-50 border-t border-gray-100 text-[11px] text-gray-500">
+        <label className="flex items-center justify-center gap-2 cursor-pointer">
+          <input
+            type="checkbox"
+            checked={data.show_full_plate_on_leaderboard}
+            disabled={preference.isPending}
+            onChange={(event) => preference.mutate(event.target.checked)}
+            className="accent-purple-600"
+          />
+          Show my full plate on the leaderboard
+        </label>
+        <p className="text-center mt-1">Off by default. Your name is never shown; others see a masked plate unless you opt in.</p>
+        {preference.isPending && <p role="status" className="text-center mt-1">Saving preference…</p>}
+        {preference.isError && <p role="alert" className="text-center text-red-600 mt-1">Could not save preference. Please try again.</p>}
       </footer>
     </section>
   );

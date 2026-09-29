@@ -6,18 +6,21 @@ id = "_56_Mg7frYQB2QrrrmcDW"
 uri = "file://exports/merge_candidates_2026-05-06.csv"
 type = "table"
 title = "Phone duplicate merge candidates — 2026-05-06"
+logical_id = "fee9530b-1b5d-4f6e-b7e1-a72625bde24d"
 
 [[outputs]]
 id = "XyuV6gEH4NU_pX7uciGa7"
 uri = "file://Cuci_Xpress_POS_Cashier_Guide.md"
 type = "text"
 title = "Cuci Xpress — Cashier Guide (POS System)"
+logical_id = "97ea60df-d59a-4d26-bf6e-a57da8ce78a7"
 
 [[outputs]]
 id = "gMuDMIEFxUUbGkKJY8vj4"
 uri = "file://exports/legacy_accounts_never_otp.csv"
 type = "table"
 title = "Legacy accounts with wash history, never logged in via OTP (279)"
+logical_id = "c98455b5-aa0e-4777-8a22-5e3fa291a09d"
 
 [[outputs]]
 id = "JDjyOG_41rIhkgx72krs6"
@@ -25,6 +28,7 @@ uri = "file://brand-assets/cuci-xpress-brand-guidelines.pdf"
 type = "pdf"
 title = "Cuci Xpress Brand Guidelines"
 description = "One-page brand reference with exact colors, typography, gradient, and visual language."
+logical_id = "7845fb17-94d9-4f74-a0d2-9ef452cf1b89"
 
 [[outputs]]
 id = "wmTQJ3ExteO97RT4uWkwP"
@@ -32,6 +36,7 @@ uri = "file://brand-assets/cuci-xpress-wordmark.svg"
 type = "image"
 title = "Cuci Xpress Wordmark SVG"
 description = "Editable transparent-background Cuci Xpress wordmark using the website design-system colors."
+logical_id = "91cfcef9-0cf4-4fc7-ac2f-826696433717"
 
 [[outputs]]
 id = "2gqbFi9sbeGxJWxwN3N5a"
@@ -39,6 +44,7 @@ uri = "file://brand-assets/cuci-xpress-legacy-logo-transparent.png"
 type = "image"
 title = "Cuci Xpress Legacy Logo PNG"
 description = "Existing logo artwork converted from white background to transparent PNG for slide placement."
+logical_id = "e06df27e-e1e1-48f3-85a5-b277e74c2607"
 
 [[outputs]]
 id = "9kwZnrjtiB0eeYpFWLYYm"
@@ -46,3 +52,32 @@ uri = "file://brand-assets/cuci-xpress-wordmark.png"
 type = "image"
 title = "Cuci Xpress Wordmark PNG"
 description = "High-resolution transparent PNG export of the Cuci Xpress wordmark for slides and presentations."
+logical_id = "4e2a13b2-78ca-498c-802c-58cca61b78c8"
+
+[[outputs]]
+id = "meFHxWv9YAp61S73imZ0Y"
+uri = "file://screenshots/leaderboard-privacy-mobile.png"
+type = "image"
+title = "Kamarul Ajimain — updated leaderboard"
+description = "Actual mobile leaderboard view: names removed, other plates masked, and the customer's own entry highlighted as Your car."
+logical_id = "a27a9b4d-6620-440d-a2a1-bde19a0c1723"
+content_hash = "sha256:607e4efd36c9b154a9ecd74a58826f0822289f12d0f6c9613a2af318f5cb719f"
+size = 69937
+mtime_ms = 1790712110988
+storage_uri = "gcs://replit-rams-assets-pike/rams/assets/repl:a39e6913-24fd-4227-b04c-ff8317815489/a27a9b4d-6620-440d-a2a1-bde19a0c1723/d95a0d28-ead2-4bf8-b6d6-3be950bcdf39"
+storage_version_token = "1790712162189829"
+content_type = "image/png"
+
+[[outputs]]
+id = "U5VQD6GPwD5ABIbIEEepr"
+uri = "file://screenshots/leaderboard-privacy-settings.png"
+type = "image"
+title = "Leaderboard plate-visibility setting"
+description = "The optional full-plate setting is off by default. The customer's preference was not changed."
+logical_id = "0db6d104-047e-48ad-be78-e04bb44ddafb"
+content_hash = "sha256:f656526c0e04add562217eaec3169b24259555174ef79af4b7f6b08d7374f1a3"
+size = 58007
+mtime_ms = 1790712051954
+storage_uri = "gcs://replit-rams-assets-pike/rams/assets/repl:a39e6913-24fd-4227-b04c-ff8317815489/0db6d104-047e-48ad-be78-e04bb44ddafb/dcf36836-6a62-4f61-8a40-47f4d918593f"
+storage_version_token = "1790712163695713"
+content_type = "image/png"
