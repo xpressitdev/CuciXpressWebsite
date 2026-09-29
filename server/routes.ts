@@ -7183,7 +7183,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
   // can be linked by customer_id, vehicle_id, or normalized plate) so
   // the rank a customer sees here lines up with the wash count on their
   // own dashboard. Names never leave this endpoint; other customers'
-  // plates are masked unless they explicitly opt in.
+  // plates are shown unless their owner opts out.
   app.get('/api/customer/leaderboard', requireLuciaUser, async (req, res) => {
     const userId = Number(req.lucia!.user!.id);
     res.set('Cache-Control', 'private, no-store');

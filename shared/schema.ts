@@ -77,7 +77,7 @@ export const users = pgTable("users", {
   phone_number: text("phone_number"),
   address: text("address"),
   is_admin: boolean("is_admin").default(false), // ← REMOVED .notNull() to match DB
-  show_full_plate_on_leaderboard: boolean("show_full_plate_on_leaderboard").notNull().default(false),
+  show_full_plate_on_leaderboard: boolean("show_full_plate_on_leaderboard").notNull().default(true),
   points: integer("points").default(0), // ← REMOVED .notNull() to match DB
   level: integer("level").default(1), // ← REMOVED .notNull() to match DB
   created_at: timestamp("created_at").defaultNow(),

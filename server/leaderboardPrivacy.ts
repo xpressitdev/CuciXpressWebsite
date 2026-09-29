@@ -10,9 +10,9 @@ export function leaderboardName(first: string | null, last: string | null): stri
 }
 
 /** Only the leaderboard uses this formatter; garage and POS plates remain unchanged. */
-export function leaderboardPlate(plate: string | null, isMe: boolean, optedIn: boolean): string | null {
+export function leaderboardPlate(plate: string | null, isMe: boolean, showFullPlate: boolean): string | null {
   if (plate === null) return null;
-  if (isMe || optedIn) return plate;
+  if (isMe || showFullPlate) return plate;
   // Do not expose unusual whitespace or separators that might reveal a short plate.
   const normalized = plate.replace(/[^a-zA-Z0-9]/g, "").toUpperCase();
   if (!normalized) return "•••";

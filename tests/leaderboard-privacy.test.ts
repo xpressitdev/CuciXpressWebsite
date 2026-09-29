@@ -34,7 +34,7 @@ describe("customer leaderboard privacy", () => {
          VALUES ($1, $2, $3, 'x') RETURNING id, show_full_plate_on_leaderboard`,
         [`Private${suffix}${i}`, `Family${suffix}${i}`, `lb_${suffix}_${i}@test.local`],
       );
-      expect(user.rows[0].show_full_plate_on_leaderboard).toBe(false);
+      expect(user.rows[0].show_full_plate_on_leaderboard).toBe(true);
       users.push(user.rows[0].id);
       const car = await pool.query(
         `INSERT INTO cars (user_id, license_plate, last_seen_at)
@@ -70,37 +70,42 @@ describe("customer leaderboard privacy", () => {
     }
   });
 
-  it("never sends names or user IDs; keeps my row and masks everyone else by default", async () => {
+  it("never sends raw names or user IDs; shows everyone's plate by default", async () => {
     const response = await get();
     expect(response.status).toBe(200);
     expect(response.headers["cache-control"]).toBe("private, no-store");
-    expect(response.body.show_full_plate_on_leaderboard).toBe(false);
+    expect(response.body.show_full_plate_on_leaderboard).toBe(true);
     expect(JSON.stringify(response.body)).not.toContain(`Private${suffix}`);
     expect(JSON.stringify(response.body)).not.toContain(`Family${suffix}`);
     const me = response.body.entries.find((entry: any) => entry.is_me);
-    const other = response.body.entries.find((entry: any) => entry.plate === leaderboardPlate(plates[1], false, false));
+    const other = response.body.entries.find((entry: any) => entry.plate === plates[1]);
     expect(me).toEqual({ rank: expect.any(Number), masked_name: "P••• F•••", wash_count: 1, plate: plates[0], is_me: true });
-    expect(other).toEqual({ rank: expect.any(Number), masked_name: "P••• F•••", wash_count: 1, plate: leaderboardPlate(plates[1], false, false), is_me: false });
-    expect(JSON.stringify(response.body)).not.toContain(plates[1]);
+    expect(other).toEqual({ rank: expect.any(Number), masked_name: "P••• F•••", wash_count: 1, plate: plates[1], is_me: false });
     expect(response.body.my_rank).toBe(me.rank);
   });
 
-  it("accepts only a session-owned strict boolean, and opt-in/opt-out takes effect on next GET", async () => {
+  it("accepts only a session-owned strict boolean, and opt-out/opt-in takes effect on next GET", async () => {
     expect((await request(app).get("/api/customer/leaderboard")).status).toBe(401);
     expect((await request(app).patch("/api/customer/leaderboard/preference").send({ show_full_plate_on_leaderboard: true })).status).toBe(401);
     for (const invalid of ["true", 1, null]) {
       expect((await patch({ show_full_plate_on_leaderboard: invalid })).status).toBe(400);
     }
-    expect((await patch({ show_full_plate_on_leaderboard: true, user_id: users[0] })).status).toBe(400);
-    expect((await patch({ show_full_plate_on_leaderboard: true })).body)
-      .toEqual({ show_full_plate_on_leaderboard: true });
-    const on = await get();
-    expect(on.body.entries.find((entry: any) => entry.plate === plates[1])).toMatchObject({ is_me: false });
-    expect(on.body.show_full_plate_on_leaderboard).toBe(false);
+    expect((await patch({ show_full_plate_on_leaderboard: false, user_id: users[0] })).status).toBe(400);
     expect((await patch({ show_full_plate_on_leaderboard: false })).status).toBe(200);
     const off = await get();
     expect(JSON.stringify(off.body)).not.toContain(plates[1]);
-    expect(off.body.entries.find((entry: any) => entry.plate === leaderboardPlate(plates[1], false, false))).toBeTruthy();
+    expect(off.body.show_full_plate_on_leaderboard).toBe(true);
+    expect(off.body.entries.find((entry: any) => entry.plate === leaderboardPlate(plates[1], false, false)))
+      .toMatchObject({ masked_name: "P••• F•••", is_me: false });
+    expect(JSON.stringify(off.body)).not.toContain(`Private${suffix}`);
+    expect(JSON.stringify(off.body)).not.toContain(`Family${suffix}`);
+    expect((await pool.query("SELECT show_full_plate_on_leaderboard FROM users WHERE id = $1", [users[0]])).rows[0].show_full_plate_on_leaderboard).toBe(true);
+    expect((await patch({ show_full_plate_on_leaderboard: true })).body)
+      .toEqual({ show_full_plate_on_leaderboard: true });
+    const on = await get();
+    expect(on.body.entries.find((entry: any) => entry.plate === plates[1])).toMatchObject({ masked_name: "P••• F•••", is_me: false });
+    expect(JSON.stringify(on.body)).not.toContain(`Private${suffix}`);
+    expect(JSON.stringify(on.body)).not.toContain(`Family${suffix}`);
   });
 });
 

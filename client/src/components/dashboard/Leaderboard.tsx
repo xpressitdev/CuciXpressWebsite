@@ -135,21 +135,20 @@ export function Leaderboard() {
                 )}
               </div>
 
-              {/* Names arrive already censored by the server. */}
+              {/* Plates are primary; names arrive already censored by the server. */}
               <div className="flex-1 min-w-0">
-                <p
-                  className={
-                    "text-sm font-bold truncate " +
-                    (e.is_me ? "text-purple-900" : "text-gray-900")
-                  }
-                >
-                  {e.is_me ? "Your car" : e.masked_name}
-                </p>
-                {e.plate && (
-                  <p className="text-[11px] font-mono text-gray-500 mt-0.5 truncate">
-                    {e.plate}
+                <div className="flex items-center gap-2 min-w-0">
+                  <p
+                    className={
+                      "text-sm font-mono font-bold truncate " +
+                      (e.is_me ? "text-purple-900" : "text-gray-900")
+                    }
+                  >
+                    {e.plate ?? "No plate"}
                   </p>
-                )}
+                  {e.is_me && <span className="shrink-0 text-[10px] font-bold text-purple-700">Your car</span>}
+                </div>
+                <p className="text-[11px] text-gray-500 mt-0.5 truncate">{e.masked_name}</p>
               </div>
 
               {/* Wash count */}
@@ -182,7 +181,7 @@ export function Leaderboard() {
           />
           Show my full plate on the leaderboard
         </label>
-        <p className="text-center mt-1">Off by default. Your name is always censored; others see a masked plate unless you opt in.</p>
+        <p className="text-center mt-1">On by default. Turn off to mask your plate for others. Names are always censored.</p>
         {preference.isPending && <p role="status" className="text-center mt-1">Saving preference…</p>}
         {preference.isError && <p role="alert" className="text-center text-red-600 mt-1">Could not save preference. Please try again.</p>}
       </footer>
