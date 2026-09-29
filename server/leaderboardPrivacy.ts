@@ -1,3 +1,14 @@
+/** Censor on the server so the browser never receives the original name.
+ * Fixed-length masks avoid disclosing the lengths of customers' names.
+ */
+export function leaderboardName(first: string | null, last: string | null): string {
+  const parts = `${first ?? ""} ${last ?? ""}`.trim().split(/\s+/).filter(Boolean);
+  return parts.map((part) => {
+    const initial = Array.from(part)[0];
+    return new RegExp("^\\p{L}$", "u").test(initial) ? `${initial.toUpperCase()}•••` : "•••";
+  }).join(" ") || "Customer";
+}
+
 /** Only the leaderboard uses this formatter; garage and POS plates remain unchanged. */
 export function leaderboardPlate(plate: string | null, isMe: boolean, optedIn: boolean): string | null {
   if (plate === null) return null;

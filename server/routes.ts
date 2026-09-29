@@ -21,7 +21,7 @@ import { unifiedAuth } from "./unified-auth";
 import { lucia } from "./auth/lucia";
 import { staffLucia } from "./auth/staffLucia";
 import { requireLuciaUser, requireStaff, requireStaffRole, requireStaffOrPlateOwner } from "./auth/middleware";
-import { leaderboardPlate } from "./leaderboardPrivacy";
+import { leaderboardName, leaderboardPlate } from "./leaderboardPrivacy";
 import { registerProfitLossRoutes } from "./profitLossService";
 import { registerSubscriptionRoutes, activatePocketPaySubscription } from "./subscriptions";
 import { verifyInteriorRefreshQr } from "./interiorRefresh";
@@ -7244,6 +7244,8 @@ export async function registerRoutes(app: Express): Promise<Server> {
           SELECT c.user_id,
                  c.total_washes,
                  tp.plate,
+                 u.first_name,
+                 u.last_name,
                  u.show_full_plate_on_leaderboard,
                  RANK() OVER (ORDER BY c.total_washes DESC, c.user_id ASC) AS rank
             FROM counts c
@@ -7268,6 +7270,8 @@ export async function registerRoutes(app: Express): Promise<Server> {
         SELECT r.user_id,
                r.total_washes,
                r.plate,
+               r.first_name,
+               r.last_name,
                r.show_full_plate_on_leaderboard,
                r.rank::int AS rank,
                (r.user_id = ${userId}) AS is_me,
@@ -7283,6 +7287,8 @@ export async function registerRoutes(app: Express): Promise<Server> {
         rank: number;
         is_me: boolean;
         total_ranked: number;
+        first_name: string | null;
+        last_name: string | null;
       }>;
 
       const totalRanked = rows[0]?.total_ranked ?? 0;
@@ -7294,6 +7300,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
         show_full_plate_on_leaderboard: preference.show_full_plate_on_leaderboard,
         entries: rows.map((r) => ({
           rank: r.rank,
+          masked_name: leaderboardName(r.first_name, r.last_name),
           plate: leaderboardPlate(r.plate, r.is_me, r.show_full_plate_on_leaderboard),
           wash_count: r.total_washes,
           is_me: r.is_me,

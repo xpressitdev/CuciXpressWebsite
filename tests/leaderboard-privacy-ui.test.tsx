@@ -20,8 +20,8 @@ describe("leaderboard privacy controls", () => {
       my_washes: 1,
       show_full_plate_on_leaderboard: false,
       entries: [
-        { rank: 1, wash_count: 2, plate: "A•••45", is_me: false },
-        { rank: 2, wash_count: 1, plate: "ME12345", is_me: true },
+        { rank: 1, masked_name: "A••• B•••", wash_count: 2, plate: "A•••45", is_me: false },
+        { rank: 2, masked_name: "M•••", wash_count: 1, plate: "ME12345", is_me: true },
       ],
     };
     let saved = false;
@@ -37,9 +37,10 @@ describe("leaderboard privacy controls", () => {
     const toggle = await screen.findByRole("checkbox", { name: /show my full plate on the leaderboard/i });
     expect(toggle).not.toBeChecked();
     expect(screen.getByText("Your car")).toBeInTheDocument();
+    expect(screen.getByText("A••• B•••")).toBeInTheDocument();
     expect(screen.getByText("A•••45")).toBeInTheDocument();
     expect(screen.getByText("ME12345")).toBeInTheDocument();
-    expect(screen.getByText(/your name is never shown/i)).toBeInTheDocument();
+    expect(screen.getByText(/your name is always censored/i)).toBeInTheDocument();
     fireEvent.click(toggle);
     await waitFor(() => expect(toggle).toBeChecked());
     expect(fetchMock).toHaveBeenCalledWith("/api/customer/leaderboard/preference", expect.objectContaining({

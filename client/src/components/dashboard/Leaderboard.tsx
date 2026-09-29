@@ -5,6 +5,7 @@ import { apiRequest, queryClient } from "@/lib/queryClient";
 
 interface LeaderboardEntry {
   rank: number;
+  masked_name: string;
   plate: string | null;
   wash_count: number;
   is_me: boolean;
@@ -134,7 +135,7 @@ export function Leaderboard() {
                 )}
               </div>
 
-              {/* Plate only; customer names are never shown on the leaderboard. */}
+              {/* Names arrive already censored by the server. */}
               <div className="flex-1 min-w-0">
                 <p
                   className={
@@ -142,9 +143,9 @@ export function Leaderboard() {
                     (e.is_me ? "text-purple-900" : "text-gray-900")
                   }
                 >
-                  {e.is_me ? "Your car" : e.plate ?? "Car"}
+                  {e.is_me ? "Your car" : e.masked_name}
                 </p>
-                {e.is_me && e.plate && (
+                {e.plate && (
                   <p className="text-[11px] font-mono text-gray-500 mt-0.5 truncate">
                     {e.plate}
                   </p>
@@ -181,7 +182,7 @@ export function Leaderboard() {
           />
           Show my full plate on the leaderboard
         </label>
-        <p className="text-center mt-1">Off by default. Your name is never shown; others see a masked plate unless you opt in.</p>
+        <p className="text-center mt-1">Off by default. Your name is always censored; others see a masked plate unless you opt in.</p>
         {preference.isPending && <p role="status" className="text-center mt-1">Saving preference…</p>}
         {preference.isError && <p role="alert" className="text-center text-red-600 mt-1">Could not save preference. Please try again.</p>}
       </footer>

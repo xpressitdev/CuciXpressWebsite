@@ -4,7 +4,7 @@ import { Pool, neonConfig } from "@neondatabase/serverless";
 import ws from "ws";
 import type { Express } from "express";
 import { createTestApp } from "./helpers/app";
-import { leaderboardPlate } from "../server/leaderboardPrivacy";
+import { leaderboardName, leaderboardPlate } from "../server/leaderboardPrivacy";
 
 neonConfig.webSocketConstructor = ws as any;
 
@@ -79,8 +79,8 @@ describe("customer leaderboard privacy", () => {
     expect(JSON.stringify(response.body)).not.toContain(`Family${suffix}`);
     const me = response.body.entries.find((entry: any) => entry.is_me);
     const other = response.body.entries.find((entry: any) => entry.plate === leaderboardPlate(plates[1], false, false));
-    expect(me).toEqual({ rank: expect.any(Number), wash_count: 1, plate: plates[0], is_me: true });
-    expect(other).toEqual({ rank: expect.any(Number), wash_count: 1, plate: leaderboardPlate(plates[1], false, false), is_me: false });
+    expect(me).toEqual({ rank: expect.any(Number), masked_name: "P••• F•••", wash_count: 1, plate: plates[0], is_me: true });
+    expect(other).toEqual({ rank: expect.any(Number), masked_name: "P••• F•••", wash_count: 1, plate: leaderboardPlate(plates[1], false, false), is_me: false });
     expect(JSON.stringify(response.body)).not.toContain(plates[1]);
     expect(response.body.my_rank).toBe(me.rank);
   });
@@ -105,6 +105,13 @@ describe("customer leaderboard privacy", () => {
 });
 
 describe("short plate masking", () => {
+  it("censors every name part before serialization, including short and Unicode names", () => {
+    expect(leaderboardName("Kamarul", "Ajimain")).toBe("K••• A•••");
+    expect(leaderboardName(" A  B ", "Li")).toBe("A••• B••• L•••");
+    expect(leaderboardName("Élodie", "王")).toBe("É••• 王•••");
+    expect(leaderboardName(null, " ")).toBe("Customer");
+    expect(leaderboardName("<script>", null)).toBe("•••");
+  });
   it("mostly conceals short plates and never includes separator leaks", () => {
     expect(leaderboardPlate("A", false, false)).toBe("•");
     expect(leaderboardPlate("AB", false, false)).toBe("••");
