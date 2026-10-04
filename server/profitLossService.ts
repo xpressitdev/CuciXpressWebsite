@@ -2,6 +2,7 @@ import crypto from "node:crypto";
 import type { Express, Request, Response as ExpressResponse } from "express";
 import { sql } from "drizzle-orm";
 import { db } from "./db";
+import { expenseOnlyReport } from "./expenseViewer";
 import { requireStaff, requireStaffRole } from "./auth/middleware";
 import {
   allocateConnecteamExpense,
@@ -1408,7 +1409,8 @@ export function createConnecteamSyncHandler(
 }
 
 export function registerProfitLossRoutes(app: Express) {
-  app.get("/api/admin/profit-loss", requireStaff, requireStaffRole("owner"), async (req, res) => {
+  app.get("/api/admin/profit-loss", requireStaff, requireStaffRole("owner", "expense_viewer"), async (req, res) => {
+    res.set("Cache-Control", "private, no-store");
     const rawYear = typeof req.query.year === "string" ? req.query.year : undefined;
     const rawStart = typeof req.query.start_date === "string" ? req.query.start_date : undefined;
     const rawEnd = typeof req.query.end_date === "string" ? req.query.end_date : undefined;
@@ -1428,14 +1430,16 @@ export function registerProfitLossRoutes(app: Express) {
       return res.status(400).json({ error: "invalid_branch" });
     }
     try {
-      res.json(await getProfitLossReport(
+      const report = await getProfitLossReport(
         year, branchId,
         normalizedRange ? { startDate: normalizedRange.startDate, endDate: normalizedRange.endDate } : null,
-      ));
+      );
+      res.json((req.staff?.user as any)?.role === "expense_viewer" ? expenseOnlyReport(report) : report);
     }
     catch { res.status(503).json({ error: "profit_loss_unavailable" }); }
   });
-  app.get("/api/admin/profit-loss/expenses", requireStaff, requireStaffRole("owner"), async (req, res) => {
+  app.get("/api/admin/profit-loss/expenses", requireStaff, requireStaffRole("owner", "expense_viewer"), async (req, res) => {
+    res.set("Cache-Control", "private, no-store");
     const rawYear = typeof req.query.year === "string" ? req.query.year : undefined;
     const rawMonth = typeof req.query.month === "string" ? req.query.month : undefined;
     const rawStart = typeof req.query.start_date === "string" ? req.query.start_date : undefined;

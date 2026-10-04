@@ -4471,11 +4471,11 @@ export async function registerRoutes(app: Express): Promise<Server> {
     if (!parsed.success) return res.status(400).json({ error: 'invalid_body', details: parsed.error.flatten() });
     const { email, name, role, branch_id, password } = parsed.data;
     // Lane/cashier/manager are branch-bound; owner and investor are global.
-    if (role !== 'owner' && role !== 'investor' && branch_id == null) {
+    if (role !== 'owner' && role !== 'investor' && role !== 'expense_viewer' && branch_id == null) {
       return res.status(400).json({ error: 'branch_required_for_role' });
     }
     try {
-      const isGlobalRole = role === 'owner' || role === 'investor';
+      const isGlobalRole = role === 'owner' || role === 'investor' || role === 'expense_viewer';
       const id = await createStaff({ email, name, role, branchId: isGlobalRole ? null : branch_id, password });
       const row = (await db.execute(sql`
         SELECT s.id, s.email, s.name, s.role, s.branch_id, s.is_active, s.created_at,
@@ -4532,7 +4532,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
       const newRole = p.role ?? target.role;
       // Keep the branch rule consistent with create: owner and investor are global.
-      const isGlobalRole = newRole === 'owner' || newRole === 'investor';
+      const isGlobalRole = newRole === 'owner' || newRole === 'investor' || newRole === 'expense_viewer';
       const branchSql =
         p.branch_id !== undefined
           ? (isGlobalRole ? null : p.branch_id)

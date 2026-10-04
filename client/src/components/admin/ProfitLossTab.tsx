@@ -21,7 +21,7 @@ import {
   type RecurringExpenseReminder,
 } from "@shared/profitLoss";
 
-type Line = { key: string; label: string; cents: number };
+export type Line = { key: string; label: string; cents: number };
 type Report = {
   year?: number;
   branchId: string;
@@ -67,7 +67,7 @@ type CoverageRanges = {
   requested?: Record<string, string | null>;
   observed?: Record<string, CoverageObservedRange | null>;
 };
-type ExpenseEntry = {
+export type ExpenseEntry = {
   submission_id: string; expense_date: string; source_category: string | null;
   source_status: string | null; branch_id: number | null; pnl_category: string | null;
   allocation_status: string; cents: number;
@@ -77,18 +77,18 @@ type SyncResponse =
   | { status: "running"; message: string; pollAfterSeconds: number }
   | { status: "failed"; error: ConnecteamSyncErrorCode; message: string };
 
-const bnd = (cents: number) => new Intl.NumberFormat("en-BN", {
+export const bnd = (cents: number) => new Intl.NumberFormat("en-BN", {
   style: "currency", currency: "BND", minimumFractionDigits: 2,
 }).format(cents / 100);
 
-function queryUrl(year: number, branchId: string, dateRange: ProfitLossDateRange | null) {
+export function queryUrl(year: number, branchId: string, dateRange: ProfitLossDateRange | null) {
   if (dateRange) {
     return `/api/admin/profit-loss?start_date=${encodeURIComponent(dateRange.startDate)}&end_date=${encodeURIComponent(dateRange.endDate)}&branch_id=${encodeURIComponent(branchId)}`;
   }
   return `/api/admin/profit-loss?year=${year}&branch_id=${encodeURIComponent(branchId)}`;
 }
 
-function expensesQueryUrl(
+export function expensesQueryUrl(
   year: number,
   month: string,
   branchId: string,
@@ -146,7 +146,7 @@ function marginText(bps: number | undefined, revenueCents: number) {
   return `${(bps / 100).toFixed(2)}%`;
 }
 
-function monthKeyFor(
+export function monthKeyFor(
   month: { month: number; year?: number; monthKey?: string },
   fallbackYear: number,
 ) {
@@ -154,7 +154,7 @@ function monthKeyFor(
   return `${month.year ?? fallbackYear}-${String(month.month).padStart(2, "0")}`;
 }
 
-function monthHeading(
+export function monthHeading(
   month: { month: number; year?: number; monthKey?: string },
   fallbackYear: number,
   custom: boolean,

@@ -91,6 +91,7 @@ import CategoriesSection from "@/components/admin/CategoriesSection";
 import { SendReceiptButton } from "@/components/admin/SendReceiptButton";
 import { CorrectPlateDialog } from "@/components/admin/CorrectPlateDialog";
 import ProfitLossTab from "@/components/admin/ProfitLossTab";
+import ExpenseProfitLossTab from "@/components/admin/ExpenseProfitLossTab";
 import {
   AreaChart,
   Area,
@@ -263,6 +264,41 @@ export default function Admin() {
         <main className="pt-20 pb-16">
           <div className="max-w-md mx-auto px-4 sm:px-6 lg:px-8">
             <AdminLogin onLogin={handleLogin} />
+          </div>
+        </main>
+        <Footer />
+      </div>
+    );
+  }
+
+  // Mount only the read-only expense surface. In particular, DashboardTab
+  // and every other report/admin panel must never issue queries for this role.
+  // Top-level manager queries above are also disabled by their role allowlist.
+  if (staff?.role === "expense_viewer") {
+    return (
+      <div className="cuci-page-bg">
+        <Navigation />
+        <main className="pt-20 pb-16">
+          <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 space-y-8">
+            <div className="flex items-center justify-between flex-wrap gap-4">
+              <div>
+                <div className="cuci-eyebrow mb-2">Cuci Xpress · Staff console</div>
+                <h1 className="text-4xl md:text-5xl font-extrabold tracking-tight text-gray-900">
+                  Expense <span className="text-cuci-primary">dashboard</span>
+                </h1>
+                <p className="text-gray-600 mt-2 text-base">Profit &amp; Loss costs · COS and OPEX only.</p>
+                <div className="mt-4 inline-flex items-center gap-2 text-sm font-semibold text-gray-800 bg-white border-2 border-black rounded-full px-3 py-1.5">
+                  <ShieldCheck className="w-4 h-4 text-cuci-primary" />
+                  <span data-testid="text-staff-name">{staff.name}</span>
+                  <span className="text-gray-400">·</span>
+                  <span data-testid="text-staff-role">Expense viewer</span>
+                </div>
+              </div>
+              <button onClick={logout} className="cuci-cta bg-white text-gray-900 px-5 py-2.5 rounded-full inline-flex items-center gap-2 text-sm" data-testid="button-staff-logout">
+                <LogOut className="w-4 h-4" />Logout
+              </button>
+            </div>
+            <ExpenseProfitLossTab key={staff.id} staffId={staff.id} />
           </div>
         </main>
         <Footer />

@@ -28,7 +28,7 @@ import { db } from "../db";
 
 const USER_TYPE_STAFF = "staff" as const;
 
-type StaffRole = "owner" | "manager" | "lane" | "cashier" | "investor";
+type StaffRole = "owner" | "manager" | "lane" | "cashier" | "investor" | "expense_viewer";
 
 interface StaffDatabaseUserAttributes {
   email: string;

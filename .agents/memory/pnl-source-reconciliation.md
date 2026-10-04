@@ -26,3 +26,9 @@ New P&L exclusion statuses need persistence tests against the actual migrated da
 **Why:** The advance-salary change passed calculation tests but blocked live sync because both the allowed-status and branch/category-shape constraints still rejected the new allocation.
 
 **How to apply:** Verify the status and allocation shape can both be saved on staging before applying a new classification to live sync.
+
+Expenses-only staff access is read-only COS/OPEX visibility, not a general admin or investor grant.
+
+**Why:** The owner requested an account that can see expenses without revenue or profit. Existing broad staff-only and hybrid endpoints make merely hiding admin tabs insufficient.
+
+**How to apply:** Enforce an API allowlist for this role and return an explicitly limited expense payload. Do not activate a new restricted-role account before the live deployment enforces those restrictions.

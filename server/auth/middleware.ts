@@ -107,6 +107,13 @@ export async function attachStaffSession(
     req.staff = { user: null, session: null };
   }
 
+  if ((req.staff?.user as any)?.role === "expense_viewer" && req.path.startsWith("/api/")) {
+    const allowed = (req.method === "GET" && [
+      "/api/auth/staff/whoami", "/api/auth/whoami",
+      "/api/admin/profit-loss", "/api/admin/profit-loss/expenses",
+    ].includes(req.path)) || (req.method === "POST" && req.path === "/api/auth/staff/logout");
+    if (!allowed) return res.status(403).json({ error: "Expenses-only access" });
+  }
   next();
 }
 
@@ -125,7 +132,7 @@ export function requireStaff(
  * Stricter gate that requires the staff member to have one of the
  * allowed roles. Use for owner/manager-only endpoints.
  */
-export function requireStaffRole(...allowed: Array<"owner" | "manager" | "lane" | "cashier" | "investor">) {
+export function requireStaffRole(...allowed: Array<"owner" | "manager" | "lane" | "cashier" | "investor" | "expense_viewer">) {
   return (req: Request, res: Response, next: NextFunction) => {
     const user = req.staff?.user;
     if (!user) {
