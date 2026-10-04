@@ -5146,9 +5146,13 @@ export async function registerRoutes(app: Express): Promise<Server> {
               VALUES (${phoneStr}, ${fallbackName})
               ON CONFLICT (phone) DO UPDATE
                  SET updated_at = now()
-              RETURNING id
-            `)).rows as Array<{ id: number }>;
+              RETURNING id, user_id
+            `)).rows as Array<{ id: number; user_id: number | null }>;
             const customerId = cuRows[0]?.id ?? null;
+            // cars.customer_id references CRM customers, but orders.customer_id
+            // references login users. Never interchange these independent IDs.
+            // Guests have no login user; their order stays linked by vehicle_id.
+            const orderUserId = cuRows[0]?.user_id ?? null;
 
             // Upsert car by normalised plate, link it to the customer.
             // Same dedup ordering as the POS path so we hit the same row.
@@ -5192,7 +5196,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
                 payment_method, payment_ref, pocket_pay_success_indicator, qr_provider,
                 status, customer_name_walkin, customer_email
               ) VALUES (
-                ${orderId}, ${branchId}, ${plateUpper}, ${vehicleId}, ${customerId},
+                ${orderId}, ${branchId}, ${plateUpper}, ${vehicleId}, ${orderUserId},
                 ${packageId}, ${packageName}, ${priceCents},
                 '[]'::jsonb, ${priceCents}, ${priceCents},
                 'qr_code', ${result.order_id}, ${result.success_indicator ?? null}, 'pocket_pay',
