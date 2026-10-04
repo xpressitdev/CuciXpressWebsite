@@ -7,6 +7,7 @@ import {
   allocateConnecteamExpense,
   buildPnl,
   mapPnlExpenseCategory,
+  isInformationalPnlExpense,
   PNL_BRANCH_NAMES,
   inferRecurringExpenseReminders,
   connecteamSyncErrorMessage,
@@ -224,7 +225,8 @@ export function planConnecteamExpenseAllocations(
     allocationKey: allocation.branchId,
     branchId: allocation.branchId,
     pnlCategory: category ?? null,
-    allocationStatus: category ? "allocated" : "unmapped_category",
+    allocationStatus: isInformationalPnlExpense(entry.sourceCategory)
+      ? "excluded_advance_salary" : category ? "allocated" : "unmapped_category",
     cents: allocation.cents,
   }));
 }
@@ -683,7 +685,7 @@ async function getAnnualProfitLossReport(year: number, branchId: string | "overa
   const [expenseRows, warningRows, depreciationRows, branchesRows, stateRows, posRows, counterRows, invoiceRows, legacySubscriptionRows, feeRateRows, sourceRangeRows, recurringExpenseRows] = await Promise.all([
     db.execute(sql`
       SELECT extract(month FROM s.expense_date)::int AS month, a.branch_id::text AS branch_id,
-             a.pnl_category, a.allocation_status, a.cents
+             a.pnl_category, a.allocation_status, a.cents, s.source_category
       FROM pnl_expense_allocations a
       JOIN connecteam_expense_submissions s ON s.id = a.connecteam_expense_submission_id
       WHERE s.form_id = ${CONNECTEAM_FORM_ID} AND s.is_present AND s.is_eligible
@@ -887,7 +889,9 @@ async function getAnnualProfitLossReport(year: number, branchId: string | "overa
       branchId: null,
     }, "legacy_subscription_without_paid_invoice");
   }
-  const expenses: PnlExpenseInput[] = expenseRows.rows.map((row: any) => ({
+  const expenses: PnlExpenseInput[] = expenseRows.rows
+    .filter((row: any) => !isInformationalPnlExpense(row.source_category))
+    .map((row: any) => ({
     month: Number(row.month), branchId: row.branch_id ?? null,
     category: row.allocation_status === "allocated" ? row.pnl_category : undefined,
     unmappedReason: row.allocation_status === "allocated" ? undefined : row.allocation_status,
@@ -1044,7 +1048,7 @@ async function getCustomProfitLossReport(
     db.execute(sql`
       SELECT extract(year FROM s.expense_date)::int AS year,
         extract(month FROM s.expense_date)::int AS month, a.branch_id::text AS branch_id,
-        a.pnl_category, a.allocation_status, a.cents
+        a.pnl_category, a.allocation_status, a.cents, s.source_category
       FROM pnl_expense_allocations a
       JOIN connecteam_expense_submissions s ON s.id = a.connecteam_expense_submission_id
       WHERE s.form_id = ${CONNECTEAM_FORM_ID} AND s.is_present AND s.is_eligible
@@ -1237,7 +1241,9 @@ async function getCustomProfitLossReport(
       startsAt: new Date(row.created_at), branchId: null,
     }, "legacy_subscription_without_paid_invoice");
   }
-  const expenses: PnlExpenseInput[] = expenseRows.rows.map((row: any) => ({
+  const expenses: PnlExpenseInput[] = expenseRows.rows
+    .filter((row: any) => !isInformationalPnlExpense(row.source_category))
+    .map((row: any) => ({
     year: Number(row.year), month: Number(row.month), branchId: row.branch_id ?? null,
     category: row.allocation_status === "allocated" ? row.pnl_category : undefined,
     unmappedReason: row.allocation_status === "allocated" ? undefined : row.allocation_status,
@@ -1473,7 +1479,8 @@ export function registerProfitLossRoutes(app: Express) {
       ORDER BY s.expense_date, s.submission_id
     `);
     res.json({
-      entries: rows.rows,
+      entries: rows.rows.map((row: any) => isInformationalPnlExpense(row.source_category)
+        ? { ...row, pnl_category: null, allocation_status: "excluded_advance_salary" } : row),
       dateRange: normalizedRange
         ? { startDate: normalizedRange.startDate, endDate: normalizedRange.endDate } : null,
       totalLabel: normalizedRange ? "Period total" : "Month total",

@@ -166,7 +166,7 @@ registerCategory(
   "car wash supplies",
   "shampoo amarol wheel rim cleaner kleenson wax si plus wiper car wash cleaning tools equipments",
 );
-registerCategory("Staff Wages", "staff salary", "staff salaries", "gaji staff", "wages", "advance salary pg h approval", "full time staff salary admin only");
+registerCategory("Staff Wages", "staff salary", "staff salaries", "gaji staff", "wages", "full time staff salary admin only");
 registerCategory("Part-timer Wages", "part timer wages", "part time wages", "part timer", "gaji part time", "gaji hari part timer back up tidak termasuk bonus");
 registerCategory("Bonus", "staff bonus", "bonus pg h approval", "bonus pgh approval");
 registerCategory("Miscellaneous", "misc", "other cos", "others");
@@ -198,7 +198,12 @@ registerCategory(
  * must retain and expose it in an "Unmapped / invalid" audit bucket rather
  * than quietly dropping the expense.
  */
+export function isInformationalPnlExpense(sourceCategory: string | null | undefined): boolean {
+  return /\badvance\s+salary\b/.test(normalise(sourceCategory ?? ""));
+}
+
 export function mapPnlExpenseCategory(sourceCategory: string | null | undefined): PnlCategory | undefined {
+  if (isInformationalPnlExpense(sourceCategory)) return undefined;
   if (!sourceCategory) return undefined;
   return categoryByKey.get(normalise(sourceCategory));
 }
@@ -563,6 +568,7 @@ export function inferRecurringExpenseReminders(
   const groups = new Map<string, Group>();
   const observations = input.observations ?? input.records ?? [];
   for (const observation of observations) {
+    if (isInformationalPnlExpense(observation.sourceCategory)) continue;
     if (observation.isPresent === false) continue;
     const branchId = observation.branchId?.trim();
     if (!branchId || (selectedBranch !== null && branchId !== selectedBranch)) continue;

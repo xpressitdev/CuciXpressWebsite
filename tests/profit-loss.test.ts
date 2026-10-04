@@ -7,6 +7,7 @@ import {
   allocateConnecteamExpense,
   buildPnl,
   mapPnlExpenseCategory,
+  isInformationalPnlExpense,
   inferRecurringExpenseReminders,
   PNL_BRANCH_NAMES,
   splitCentsExactly,
@@ -654,6 +655,23 @@ describe("P&L accounting contract", () => {
       branchChoices: [], eligible: true,
     });
     expect(mapPnlExpenseCategory("Bonus *PgH approval*")).toBe("Bonus");
+  });
+
+  it("retains advance salary as informational, never wages or an unmapped expense", () => {
+    for (const label of ["Advance Salary", "Advance Salary *Pg H approval*", " ADVANCE SALARY "]) {
+      expect(isInformationalPnlExpense(label)).toBe(true);
+      expect(mapPnlExpenseCategory(label)).toBeUndefined();
+      const allocations = planConnecteamExpenseAllocations({
+        submissionId: "advance-fixture", sourceUpdatedAt: null, expenseDate: "2026-06-01",
+        amountCents: 10000, sourceStatus: "Approved", sourceCategory: label,
+        branchChoices: ["Tungku"], eligible: true, contentHash: "test",
+      }, [{ id: "1", name: "Tungku" }]);
+      expect(allocations).toEqual([{
+        allocationKey: "1", branchId: "1", pnlCategory: null,
+        allocationStatus: "excluded_advance_salary", cents: 10000,
+      }]);
+    }
+    expect(mapPnlExpenseCategory("Staff Salary")).toBe("Staff Wages");
   });
 
   it("keeps an unknown category split against its known branch for review", () => {

@@ -542,7 +542,7 @@ export default function ProfitLossTab() {
             <TableHeader><TableRow><TableHead className="whitespace-nowrap">Expense date</TableHead><TableHead className="whitespace-nowrap">Category</TableHead><TableHead className="whitespace-nowrap">Status</TableHead><TableHead className="whitespace-nowrap">Allocation</TableHead><TableHead className="whitespace-nowrap text-right">Amount</TableHead></TableRow></TableHeader>
             <TableBody>{visibleExpenseEntries.map((entry) => <TableRow key={`${entry.submission_id}-${entry.branch_id ?? entry.allocation_status}`}>
               <TableCell className="whitespace-nowrap">{entry.expense_date}</TableCell><TableCell>{entry.source_category ?? "Unmapped"}</TableCell>
-              <TableCell>{entry.source_status ?? "No status"}</TableCell><TableCell>{entry.pnl_category ?? entry.allocation_status}</TableCell>
+              <TableCell>{entry.source_status ?? "No status"}</TableCell><TableCell>{entry.allocation_status === "excluded_advance_salary" ? "Information only — excluded from expenses" : entry.pnl_category ?? entry.allocation_status}</TableCell>
               <TableCell className="whitespace-nowrap text-right">{bnd(entry.cents)}</TableCell>
             </TableRow>)}
             {!expensesQuery.isPending && !expensesQuery.isFetching && !expensesQuery.isError && expensesQuery.data

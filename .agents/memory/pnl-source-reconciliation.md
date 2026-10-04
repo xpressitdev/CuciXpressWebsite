@@ -8,3 +8,9 @@ Use the historical P&L workbook as a category/layout reference, not an authorita
 **Why:** Inspection found different June expense totals in the exported form entries, the P&L workbook, and the later live Connecteam data. Expenses can be submitted late or revised, and old POS revenue has separate source lineage. Adjusting figures merely to match the workbook would hide real differences.
 
 **How to apply:** Keep source IDs, expense dates, sync timestamps and review flags traceable. Show differences and incomplete configuration openly. Do not seed workbook expense totals alongside live submissions or silently add balancing adjustments.
+
+Advance Salary is informational only, not a P&L expense.
+
+**Why:** The owner explicitly said advance salary is just an indicator for them and must not be considered part of expenses.
+
+**How to apply:** Preserve the source entries for inspection, but exclude them from expense/profit calculations and recurring-expense expectations, including historical reports. Regular salary remains an expense.
