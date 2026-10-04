@@ -636,7 +636,10 @@ describe("P&L accounting contract", () => {
     }));
     await expect(fetchAllConnecteamSubmissions("not-a-real-key", partialFetch as typeof fetch))
       .rejects.toThrow("connecteam_invalid_paging");
-    expect(() => validateConnecteamSnapshot([{ formSubmissionId: "one", answers: [] }, { formSubmissionId: "one", answers: [] }]))
+    expect(validateConnecteamSnapshot([{ formSubmissionId: "one", answers: [] }, { formSubmissionId: "one", answers: [] }])).toHaveLength(1);
+    expect(() => validateConnecteamSnapshot([{ formSubmissionId: "one", answers: [] }, { formSubmissionId: "one", answers: [
+      { questionId: "e1952c17-91ee-e2da-5e88-090f05658828", selectedAnswers: [{ text: "Staff Salary" }] },
+    ] }]))
       .toThrow("connecteam_duplicate_submission");
     expect(() => validateConnecteamSnapshot([{ formSubmissionId: "one" }]))
       .toThrow("connecteam_invalid_response");

@@ -14,3 +14,15 @@ Advance Salary is informational only, not a P&L expense.
 **Why:** The owner explicitly said advance salary is just an indicator for them and must not be considered part of expenses.
 
 **How to apply:** Preserve the source entries for inspection, but exclude them from expense/profit calculations and recurring-expense expectations, including historical reports. Regular salary remains an expense.
+
+Connecteam may return identical duplicate submissions in a fully paginated response.
+
+**Why:** A live October 2026 sync returned two repeated IDs with identical sanitized content, causing an otherwise complete snapshot to be rejected.
+
+**How to apply:** Deduplicate identical sanitized content by submission ID before persistence; still reject conflicting duplicates and incomplete pagination. Do not count repeats as additional expenses.
+
+New P&L exclusion statuses need persistence tests against the actual migrated database constraints, not only allocation-planning unit tests.
+
+**Why:** The advance-salary change passed calculation tests but blocked live sync because both the allowed-status and branch/category-shape constraints still rejected the new allocation.
+
+**How to apply:** Verify the status and allocation shape can both be saved on staging before applying a new classification to live sync.

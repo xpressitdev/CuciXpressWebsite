@@ -192,12 +192,13 @@ export function validateConnecteamSnapshot(fetched: readonly ConnecteamSubmissio
   const sanitized = fetched.map(sanitizeConnecteamSubmission);
   if (sanitized.some((entry) => entry === null)) throw new Error("connecteam_invalid_response");
   const result = sanitized as SanitizedSubmission[];
-  const ids = new Set<string>();
+  const ids = new Map<string, SanitizedSubmission>();
   for (const entry of result) {
-    if (ids.has(entry.submissionId)) throw new Error("connecteam_duplicate_submission");
-    ids.add(entry.submissionId);
+    const previous = ids.get(entry.submissionId);
+    if (previous && previous.contentHash !== entry.contentHash) throw new Error("connecteam_duplicate_submission");
+    ids.set(entry.submissionId, entry);
   }
-  return result;
+  return Array.from(ids.values());
 }
 
 export function planConnecteamExpenseAllocations(
