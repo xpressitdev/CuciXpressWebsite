@@ -1,0 +1,338 @@
+import fs from "node:fs";
+import pptxgen from "pptxgenjs";
+
+const dir = ".local/outputs/q3-2026";
+const data = JSON.parse(fs.readFileSync(`${dir}/financial-snapshot.json`, "utf8"));
+const q = data.q3.ytd, p = data.q2.ytd;
+const months = data.q3.months.map(m => Object.fromEntries(m.lines.map(l => [l.key,l.cents])));
+const branches = data.branches;
+const C = { ink:"111722", purple:"9168E8", orange:"FF9900", bg:"F8F9FC",
+  lilac:"F0EAFB", cream:"FFF3E2", white:"FFFFFF", mute:"5C6472", grid:"DDDDE6", red:"AD3434", green:"087F66" };
+const money = (c, digits=0) => `${c<0?"−":""}B$${(Math.abs(c)/100).toLocaleString("en-US",{minimumFractionDigits:digits,maximumFractionDigits:digits})}`;
+const num = c => (c/100).toLocaleString("en-US",{minimumFractionDigits:2,maximumFractionDigits:2});
+const pct = (a,b) => `${(100*a/b).toFixed(1)}%`;
+const signMoney = c => `${c>0?"+":""}${money(c,2)}`;
+const change = (a,b) => `${a<b?"−":"+"}${Math.abs(100*(a-b)/b).toFixed(1)}%`;
+const pptx = new pptxgen();
+pptx.layout = "LAYOUT_WIDE";
+pptx.author = "Cuci Xpress";
+pptx.subject = "Q3 2026 investor performance — unaudited management accounts";
+pptx.title = "Cuci Xpress | Q3 2026 Investor Update";
+pptx.company = "Cuci Xpress";
+pptx.lang = "en-GB";
+pptx.theme = { headFontFace:"Inter", bodyFontFace:"Inter", lang:"en-GB" };
+const W=13.333333, H=7.5;
+const shape = pptx.ShapeType;
+let slideNo=0;
+const auditBounds=[];
+function txt(s,text,x,y,w,h,size=18,opts={}) {
+  auditBounds.push({slide:slideNo,text:typeof text==="string"?text.slice(0,70):"rich text",x,y,w,h});
+  s.addText(text,{x,y,w,h,fontFace:"Inter",fontSize:size,color:C.ink,margin:0,
+    breakLine:false, valign:"mid", paraSpaceAfterPt:0,...opts});
+}
+function rect(s,x,y,w,h,fill=C.white,stroke=C.ink,radius=true,shadow=false) {
+  if(shadow)s.addShape(radius?shape.roundRect:shape.rect,{x:x+.045,y:y+.055,w,h,rectRadius:.14,
+    radius:.14,line:{color:C.ink,width:1},fill:{color:C.ink}});
+  s.addShape(radius?shape.roundRect:shape.rect,{x,y,w,h,radius:.14,rectRadius:.14,
+    line:{color:stroke,width:stroke===fill?0:1.2},fill:{color:fill}});
+}
+function line(s,x1,y1,x2,y2,color=C.grid,width=1) {
+  s.addShape(shape.line,{x:x1,y:y1,w:x2-x1,h:y2-y1,line:{color,width}});
+}
+function brand(s,x=.55,y=.28,w=2.8) {
+  txt(s,[{text:"Cuci ",options:{color:C.purple,bold:true}},{text:"Xpress",options:{color:C.orange,bold:true}}],
+    x,y,w,.35,21);
+}
+function slide(title,section,sub="",foot="Source: Cuci Xpress Admin P&L • Snapshot: 6 Oct 2026, 04:43 BNT • Unaudited management accounts") {
+  const s=pptx.addSlide();slideNo++;
+  s.background={color:C.bg};brand(s);
+  txt(s,section.toUpperCase(),9.1,.3,3.65,.24,10,{align:"right",bold:true,color:C.mute,charSpacing:1.4});
+  txt(s,title,.55,.98,12.2,.83,30,{bold:true,breakLine:false});
+  if(sub)txt(s,sub,.57,1.87,12.1,.42,13,{color:C.mute});
+  line(s,.55,6.95,12.8,6.95);
+  txt(s,foot,.55,7.04,11.6,.2,8.5,{color:C.mute});
+  txt(s,String(slideNo).padStart(2,"0"),12.3,7.01,.5,.25,11,{bold:true,align:"right"});
+  s.addNotes(`CONFIDENTIAL — investor discussion. Reporting period 1 July–30 September 2026, inclusive, Asia/Brunei. Q2 comparison: 1 April–30 June 2026. Extracted ${data.extractedAt}. Source: current Cuci Xpress getProfitLossReport computation against the shared external Neon database, not invented figures or workbook balancing. All amounts BND. Full-precision data stored in financial-snapshot.json. Reported profit is the app's net_profit line: EBITDA less recorded depreciation, with no separate financing/tax lines; not a representation of audited statutory net income.`);
+  return s;
+}
+function pill(s,text,x,y,w,fill=C.lilac,color=C.purple) {
+  rect(s,x,y,w,.38,fill,fill);
+  txt(s,text,x+.12,y+.045,w-.24,.27,11,{bold:true,color});
+}
+function card(s,x,y,w,h,kicker,value,detail,fill=C.white) {
+  rect(s,x,y,w,h,fill,C.ink,true,true);
+  txt(s,kicker.toUpperCase(),x+.22,y+.2,w-.44,.35,11,{bold:true,color:C.mute,charSpacing:.8});
+  txt(s,value,x+.22,y+.7,w-.44,.67,w<3.1?25:31,{bold:true,wrap:false});
+  txt(s,detail,x+.22,y+1.48,w-.44,h-1.65,12,{color:C.mute,valign:"top"});
+}
+function bullet(s,title,body,x,y,w=5.5,color=C.purple) {
+  s.addShape(shape.ellipse,{x,y:y+.08,w:.12,h:.12,line:{color},fill:{color}});
+  txt(s,title,x+.27,y,w-.27,.4,17,{bold:true});
+  txt(s,body,x+.27,y+.46,w-.27,.75,13,{color:C.mute,valign:"top"});
+}
+function table(s,rows,x,y,widths,rowH=.43,opt={}) {
+  const total=widths.reduce((a,b)=>a+b,0);
+  rows.forEach((row,i)=>{
+    const fill=i===0?C.ink:(opt.highlight?.includes(i)?C.lilac:i%2?C.white:C.bg);
+    rect(s,x,y+i*rowH,total,rowH,fill,fill,false);
+    let dx=x;
+    row.forEach((cell,j)=>{
+      const value=typeof cell==="object"?cell.text:cell;
+      const bold=i===0||opt.bold?.includes(i);
+      const color=i===0?C.white:(typeof cell==="object"?cell.color:C.ink);
+      txt(s,String(value),dx+.12,y+i*rowH+.04,widths[j]-.24,rowH-.08,opt.size??13,
+        {bold,color,align:j?"right":"left"});
+      dx+=widths[j];
+    });
+  });
+}
+function sourceNotes(s,notes) {s.addNotes(notes);}
+function profitColor(c){return c<0?C.red:C.green;}
+
+// 01 — Brand-led cover.
+{
+  const s=slide("","Investor update");
+  pill(s,"1 JUL — 30 SEP 2026",.62,1.18,2.48);
+  txt(s,"Q3 2026",.6,1.9,7.5,1.03,60,{bold:true});
+  txt(s,"Performance\n& priorities.",.6,3.05,7.25,1.67,42,{bold:true});
+  txt(s,"Five branches. One operating view.",.65,5.15,7,.45,21,{color:C.mute});
+  pill(s,"CONFIDENTIAL • INVESTOR DISCUSSION",.65,6.06,4.65,C.cream,C.ink);
+  rect(s,8.38,1.34,4.32,4.96,C.white,C.ink,true,true);
+  txt(s,"REVENUE",8.7,1.76,3.6,.3,12,{bold:true,color:C.mute,charSpacing:1.2});
+  txt(s,money(q.revenue),8.7,2.28,3.6,.8,39,{bold:true,color:C.purple});
+  line(s,8.7,3.32,12.34,3.32);
+  txt(s,"Reported profit¹",8.7,3.63,3.6,.4,16,{color:C.mute});
+  txt(s,money(q.net_profit,2),8.7,4.13,3.6,.65,31,{bold:true});
+  txt(s,`${pct(q.net_profit,q.revenue)} margin • ${change(q.revenue,p.revenue)} revenue QoQ`,8.7,5.14,3.6,.58,14);
+  sourceNotes(s,"¹ Reported profit is EBITDA less recorded depreciation, on the application's management-reporting basis. It is not audited statutory net income. See methodology appendix.");
+}
+
+// 02 — Executive summary.
+{
+  const s=slide("Profit recovered; the quarter ended softer.","Executive summary",
+    "Q3 2026 • BND • Compared with Q2 2026 on the same application reporting basis");
+  const metrics=[
+    ["Revenue",money(q.revenue),`${change(q.revenue,p.revenue)} QoQ\nB$957.91 below Q2`,C.white],
+    ["Gross margin",pct(q.gross_profit,q.revenue),`Q2: ${pct(p.gross_profit,p.revenue)}\nLower COS supported margin`,C.lilac],
+    ["EBITDA",money(q.ebitda,2),`${pct(q.ebitda,q.revenue)} of revenue\n+${money(q.ebitda-p.ebitda,2)} QoQ`,C.white],
+    ["Reported profit¹",money(q.net_profit,2),`${pct(q.net_profit,q.revenue)} margin\nQ2: ${money(p.net_profit,2)}`,C.cream],
+  ];
+  metrics.forEach((m,i)=>card(s,.6+i*3.13,2.58,2.93,2.38,...m));
+  bullet(s,"Three branches profitable","Bengkurong was the largest reported-profit contributor.",.7,5.43,5.75);
+  bullet(s,"September requires attention",`${money(months[2].net_profit,2)} reported result; revenue fell ${Math.abs(100*(months[2].revenue/months[1].revenue-1)).toFixed(1)}% from August.`,7.0,5.43,5.4,C.orange);
+}
+
+// 03 — Quarter-on-quarter accounts.
+{
+  const s=slide("Lower service costs drove the profit improvement.","Financial scorecard",
+    "BND • Expense figures shown as positive costs; change is Q3 minus Q2");
+  const labels=[["Revenue","revenue"],["Cost of services","cost_of_services"],["Gross profit","gross_profit"],
+    ["Operating expenses","operating_expense"],["EBITDA","ebitda"],["Recorded depreciation","depreciation"],["Reported profit¹","net_profit"]];
+  const rows=[["Metric","Q2 2026","Q3 2026","Change"],
+    ...labels.map(([label,k])=>[label,num(p[k]),num(q[k]),`${q[k]-p[k]>0?"+":""}${num(q[k]-p[k])}`]),
+    ["Gross margin",pct(p.gross_profit,p.revenue),pct(q.gross_profit,q.revenue),`${(100*q.gross_profit/q.revenue-100*p.gross_profit/p.revenue).toFixed(1)} pp`],
+    ["Reported profit margin¹",pct(p.net_profit,p.revenue),pct(q.net_profit,q.revenue),`${(100*q.net_profit/q.revenue-100*p.net_profit/p.revenue).toFixed(1)} pp`]];
+  table(s,rows,.6,2.55,[4.3,2.45,2.45,2.9],.365,{size:12.5,bold:[1,5,7],highlight:[5,7]});
+  txt(s,"COS decreased B$3,941.33 (7.9%). OPEX decreased B$271.09 (0.8%). Depreciation was unchanged.",
+    .72,6.43,11.9,.3,12,{color:C.mute});
+}
+
+// 04 — Native editable revenue chart, no dual-axis ambiguity.
+{
+  const s=slide("August was the high point; September reversed it.","Monthly performance",
+    "Revenue trend (B$ thousands) • Exact monthly figures below • Straight lines, not a forecast");
+  s.addChart(pptx.ChartType.line,[{name:"Revenue",labels:["July","August","September"],values:months.map(m=>m.revenue/100000)}],{
+    x:.62,y:2.4,w:7.6,h:3.02,showLegend:false,showTitle:false,showValue:true,
+    chartColors:[C.purple],showMarker:true,markerSize:7,lineSize:3,
+    valAxisMinVal:0,valAxisMaxVal:35,valAxisMajorUnit:10,
+    valAxisLabelFontFace:"Inter",valAxisLabelFontSize:11,catAxisLabelFontFace:"Inter",catAxisLabelFontSize:12,
+    showCatName:false,showSerName:false,dataLabelColor:C.ink,dataLabelFormatCode:"0.0",
+    dataLabelPosition:"t",dataLabelBkgrdColor:C.white,
+    catAxisLineShow:false,valAxisLineShow:false,valGridLine:{color:C.grid,width:.6},
+    showBorder:false,showCatName:false,showShadow:false,
+  });
+  rect(s,8.72,2.52,3.93,2.72,C.cream,C.ink,true,true);
+  txt(s,"SEPTEMBER VS AUGUST",8.98,2.78,3.38,.3,11,{bold:true});
+  txt(s,change(months[2].revenue,months[1].revenue),8.98,3.3,3.38,.7,36,{bold:true});
+  txt(s,"Revenue declined B$6,336.20.\nCOS fell only B$469.59;\nOPEX rose B$223.56.",8.98,4.15,3.38,.8,13,{color:C.mute});
+  table(s,[["BND","July","August","September"],
+    ["Revenue",...months.map(m=>num(m.revenue))],
+    ["EBITDA",...months.map(m=>({text:num(m.ebitda),color:profitColor(m.ebitda)}))],
+    ["Reported profit¹",...months.map(m=>({text:num(m.net_profit),color:profitColor(m.net_profit)}))]],
+    .65,5.43,[3.4,2.93,2.93,2.73],.32,{size:12});
+}
+
+// 05 — Signed, zero-anchored waterfall in editable native shapes.
+{
+  const s=slide("A B$3,254.51 improvement versus Q2.","Profit bridge",
+    "Reported profit¹ bridge • BND • Positive bars are improvements; negative bars are reductions");
+  const steps=[
+    {label:"Q2 profit",start:0,end:p.net_profit/100,color:C.ink,total:true,value:p.net_profit},
+    {label:"Lower revenue",start:p.net_profit/100,end:(p.net_profit+q.revenue-p.revenue)/100,color:C.orange,value:q.revenue-p.revenue},
+    {label:"Lower COS",start:(p.net_profit+q.revenue-p.revenue)/100,end:(p.net_profit+q.revenue-p.revenue+p.cost_of_services-q.cost_of_services)/100,color:C.purple,value:p.cost_of_services-q.cost_of_services},
+    {label:"Lower OPEX",start:(q.net_profit-p.operating_expense+q.operating_expense)/100,end:q.net_profit/100,color:C.purple,value:p.operating_expense-q.operating_expense},
+    {label:"Q3 profit",start:0,end:q.net_profit/100,color:C.ink,total:true,value:q.net_profit},
+  ];
+  const top=2.77,chartH=2.63,min=-2100,max=2800, y=v=>top+(max-v)/(max-min)*chartH;
+  line(s,.9,y(0),12.3,y(0),C.mute,.8);
+  txt(s,"0",.62,y(0)-.1,.22,.2,10,{color:C.mute});
+  steps.forEach((st,i)=>{
+    const x=1.18+i*2.37,yy=y(Math.max(st.start,st.end)),h=Math.abs(y(st.start)-y(st.end));
+    rect(s,x,yy,1.38,Math.max(.015,h),st.color,st.color,false);
+    txt(s,`${st.total?"":st.value>0?"+":""}${money(st.value,2)}`,x-.38,
+      st.end>=st.start?yy-.38:yy+h+.06,2.15,.31,13,{bold:true,align:"center"});
+    txt(s,st.label,x-.35,5.72,2.08,.43,13,{bold:true,align:"center"});
+    if(i<steps.length-2)line(s,x+1.38,y(st.end),x+2.37,y(st.end),C.grid,.8);
+  });
+  pill(s,"RECORDED DEPRECIATION UNCHANGED",.8,6.29,4.8);
+  txt(s,"Lower miscellaneous COS contributed B$3,371.02 of the B$3,941.33 COS reduction.",
+    5.89,6.27,6.65,.47,11.5,{color:C.mute});
+  sourceNotes(s,"Bridge: Q2 reported profit -855.48; revenue delta -957.91; COS saving +3941.33; OPEX saving +271.09; depreciation delta 0; Q3 reported profit 2399.03. Miscellaneous COS dropped from 4606.02 to 1235.00. This is an observed cost-category movement, not proof of recurring operational efficiency.");
+}
+
+// 06 — Expense concentration.
+{
+  const s=slide("Payroll and rent absorb 74.8% of revenue.","Cost structure",
+    "Q3 cost of services + OPEX: B$78,618.32 • Excludes B$2,125.05 recorded depreciation");
+  const payroll=q["expense:Staff Wages"]+q["expense:Part-timer Wages"]+q["expense:Bonus"];
+  const groups=[
+    ["Wages, part-time & bonus",payroll],
+    ["Rent",q["expense:Total Units Rental"]],
+    ["Wash chemicals",q["expense:Car Wash Shampoo & Tyre Shine + Car Wax"]],
+    ["Management fee",q["expense:Management Fee"]],
+    ["Water, electricity & Wi-Fi",q["expense:Water Bill"]+q["expense:Electricity Bill"]+q["expense:Wifi Internet"]],
+    ["SPK",q["expense:SPK"]],
+  ];
+  const other=q.cost_of_services+q.operating_expense-groups.reduce((n,g)=>n+g[1],0);
+  groups.push(["All other operating costs",other]);
+  groups.forEach(([label,v],i)=>{
+    const yy=2.57+i*.48;
+    txt(s,label,.66,yy,3.12,.33,12.5);
+    rect(s,3.97,yy+.05,5.25*v/payroll,.22,i<2?C.purple:"C4ACEF",i<2?C.purple:"C4ACEF",false);
+    txt(s,money(v,2),9.5,yy,2.88,.33,13,{bold:true,align:"right"});
+  });
+  rect(s,.64,6.22,12.04,.48,C.lilac,C.lilac);
+  txt(s,`Payroll ${pct(payroll,q.revenue)} of revenue  +  rent ${pct(q["expense:Total Units Rental"],q.revenue)}  =  ${pct(payroll+q["expense:Total Units Rental"],q.revenue)} before other operating costs.`,
+    .87,6.29,11.55,.27,13,{bold:true});
+  sourceNotes(s,"Payroll here means Staff Wages + Part-timer Wages + Bonus. SPK is separately presented to avoid double counting. Other includes miscellaneous, maintenance, Connecteam, supplies and MDR; all groups reconcile to COS + OPEX.");
+}
+
+// 07 — Full branch reconciliation.
+{
+  const s=slide("Bengkurong leads; two branches dilute returns.","Branch contribution",
+    "Q3 2026 • BND • Branch contribution includes allocated operating costs and recorded depreciation");
+  const rows=[["Branch / scope","Revenue","EBITDA","Reported profit¹","Margin"]];
+  for(const b of branches)rows.push([b.name,num(b.totals.revenue),
+    {text:num(b.totals.ebitda),color:profitColor(b.totals.ebitda)},
+    {text:num(b.totals.net_profit),color:profitColor(b.totals.net_profit)},pct(b.totals.net_profit,b.totals.revenue)]);
+  const sum=k=>branches.reduce((n,b)=>n+b.totals[k],0);
+  rows.push(["Central / unassigned",num(q.revenue-sum("revenue")),num(q.ebitda-sum("ebitda")),num(q.net_profit-sum("net_profit")),"—"]);
+  rows.push(["Overall",num(q.revenue),num(q.ebitda),num(q.net_profit),pct(q.net_profit,q.revenue)]);
+  table(s,rows,.65,2.56,[3.06,2.17,2.17,2.63,2.0],.45,{size:13,bold:[7],highlight:[7]});
+  txt(s,"Central / unassigned = B$837.00 voucher sales + B$706.40 subscription revenue, less B$24.81 MDR.",
+    .72,6.34,11.95,.33,12,{color:C.mute});
+  sourceNotes(s,"Central/unassigned rows reconcile all branches to Overall. No unassigned voucher sales are arbitrarily spread among branches. Subscription revenue may be unallocated until a branch is attributable. Central margin is intentionally not shown because no branch operating-cost allocation is applied to this line.");
+}
+
+// 08 — Targeted operational priorities grounded in actual amounts.
+{
+  const s=slide("Focus branch recovery on Salar and Lambak.","Operating priorities",
+    "Combined Q3 reported loss: B$5,311.17 • Recommendations, not approved budgets or forecasts");
+  const loss=branches.filter(b=>["Salar","Lambak"].includes(b.name));
+  loss.forEach((b,i)=>{
+    const x=.64+i*6.4;
+    rect(s,x,2.55,6.03,3.93,i?C.cream:C.white,C.ink,true,true);
+    txt(s,b.name,x+.25,2.83,5.5,.4,24,{bold:true});
+    txt(s,money(b.totals.net_profit,2),x+.25,3.4,5.5,.58,32,{bold:true,color:C.red});
+    txt(s,`${pct(b.totals.net_profit,b.totals.revenue)} margin • Revenue ${money(b.totals.revenue,2)}`,x+.25,4.09,5.5,.35,13);
+    const payroll=b.totals["expense:Staff Wages"]+b.totals["expense:Part-timer Wages"]+b.totals["expense:Bonus"];
+    txt(s,`Wages / part-time / bonus: ${money(payroll,2)}\nRent: ${money(b.totals["expense:Total Units Rental"],2)}\nTogether: ${pct(payroll+b.totals["expense:Total Units Rental"],b.totals.revenue)} of branch revenue`,
+      x+.25,4.72,5.5,1.08,15,{color:C.mute,breakLine:false});
+    pill(s,i?"Review demand and shift coverage":"Review rent burden and staffing",x+.25,5.95,5.42,C.lilac,C.ink);
+  });
+  sourceNotes(s,"Salar payroll 6638.72 and rent 6600.00 versus revenue 13371.00. Lambak payroll 5456.75 and rent 3000.00 versus revenue 8747.00. No staffing reduction, rent renegotiation or demand-growth assumption is represented as an approved action.");
+}
+
+// 09 — Commercial streams and explicit revenue policy.
+{
+  const s=slide("POS remains the core; prepaid channels are small.","Revenue composition",
+    "The three streams below reconcile to Q3 reported revenue of B$83,142.40");
+  card(s,.65,2.56,3.93,2.39,"POS, net of refunds",money(q.pos_net_revenue,2),`${pct(q.pos_net_revenue,q.revenue)} of Q3 revenue\nIncludes app + historical POS lineage`);
+  card(s,4.87,2.56,3.73,2.39,"Paid voucher sales",money(q.voucher_sales_revenue,2),`${pct(q.voucher_sales_revenue,q.revenue)} of Q3 revenue\n93 vouchers • 5 bulk sales`,C.cream);
+  card(s,8.9,2.56,3.73,2.39,"Subscription revenue",money(q.recognized_subscription_revenue,2),`${pct(q.recognized_subscription_revenue,q.revenue)} of Q3 revenue\nRecognized over service periods`,C.lilac);
+  bullet(s,"Voucher policy: revenue at sale","Owner-directed management policy. B$450 in July, B$36 in August and B$351 in September.",.78,5.33,5.95,C.orange);
+  bullet(s,"No second revenue at redemption","Use the existing B$0 voucher-redemption package. Serial-level reconciliation is not yet implemented.",7.02,5.33,5.45);
+  sourceNotes(s,"Voucher revenue is recognized fully on original sale dates at the owner's direction, not deferred until service. This policy may differ from statutory/accrual treatment and should be reviewed with the accountant before external financial reliance. No buyer names or voucher serials are disclosed in the investor deck.");
+}
+
+// 10 — Confidence / caveats without burying them in notes.
+{
+  const s=slide("Recorded coverage is complete; these are not audited accounts.","Reporting confidence",
+    "As at 6 October 2026 • Coverage means records are available, not independently verified completeness");
+  card(s,.65,2.54,3.93,2.12,"Depreciation coverage","15 / 15","Five branches × three months",C.lilac);
+  card(s,4.87,2.54,3.73,2.12,"Recorded depreciation",money(q.depreciation,2),"B$708.35 per month",C.white);
+  card(s,8.9,2.54,3.73,2.12,"Unmapped expense value","B$0.00","Within the recorded Q3 dataset",C.white);
+  bullet(s,"Connecteam expenses","Latest successful sync: 6 Oct, 04:42 BNT. Advance salary is informational and excluded from P&L.",.78,5.07,5.9);
+  bullet(s,"Important limits","No independent audit, cash-flow reconciliation, tax calculation or asset-life validation is included.",7.02,5.07,5.4,C.orange);
+  sourceNotes(s,`Live report status at extraction: ${data.q3.coverage.status}. Depreciation missing months: ${JSON.stringify(data.q3.coverage.depreciationMissingMonths)}. Informational excluded advance salary allocations: ${JSON.stringify(data.q3.coverage.warnings)}. Such allocations are not unique submission counts. No savings claim is made from their exclusion.`);
+}
+
+// 11 — Actionable, clearly labelled recommendations.
+{
+  const s=slide("Q4 focus: protect contribution before pursuing scale.","Recommended priorities",
+    "Discussion points for management and investors • No fundraising terms or forecast assumptions supplied");
+  const actions=[
+    ["01","Recover loss-making branch contribution","Review Salar’s rent/staffing burden and Lambak’s demand/shift coverage. Track weekly branch results."],
+    ["02","Understand September’s revenue decline","Compare branch-level sales, operating days and wash activity before assigning a cause."],
+    ["03","Validate whether lower costs are repeatable","Review the B$3,371.02 drop in miscellaneous COS and expense timing before projecting savings."],
+    ["04","Complete investor-grade reporting controls","Reconcile vouchers, bank/cash and taxes; validate depreciation schedules and document revenue policies."],
+  ];
+  actions.forEach((a,i)=>{
+    const y=2.53+i*.99;
+    pill(s,a[0],.68,y+.08,.63,i%2?C.cream:C.lilac,C.ink);
+    txt(s,a[1],1.61,y,10.9,.37,18,{bold:true});
+    txt(s,a[2],1.61,y+.43,10.86,.43,13,{color:C.mute});
+  });
+}
+
+// 12 — Exact monthly appendix for traceability.
+{
+  const s=slide("Appendix A — Q3 monthly management P&L","Financial detail",
+    "BND • Full precision • Expenses shown as positive costs");
+  const keys=[["POS revenue, net refunds","pos_net_revenue"],["Subscription revenue","recognized_subscription_revenue"],
+    ["Voucher sales revenue","voucher_sales_revenue"],["Total revenue","revenue"],["Cost of services","cost_of_services"],
+    ["Gross profit","gross_profit"],["Operating expenses","operating_expense"],["Unmapped expenses","unmapped_expenses"],
+    ["EBITDA","ebitda"],["Recorded depreciation","depreciation"],["Reported profit¹","net_profit"]];
+  table(s,[["Metric","July","August","September","Q3"],
+    ...keys.map(([label,k])=>[label,...months.map(m=>num(m[k])),num(q[k])])],
+    .64,2.48,[3.96,2.02,2.02,2.02,1.98],.335,{size:11.5,bold:[4,9,11],highlight:[4,9,11]});
+}
+
+// 13 — Investor-shareable basis and cautions.
+{
+  const s=slide("Appendix B — Sources, policies and limitations","Basis of preparation",
+    "Read alongside the figures • Snapshot, not a forecast • Prepared 6 October 2026");
+  const sections=[
+    ["Scope & currency","1 July–30 September 2026; Q2 comparison is 1 April–30 June. Inclusive Brunei calendar dates. BND (B$). Numbers may differ from older exports as source records are revised."],
+    ["Revenue","POS net of refunds under the app’s realization-day rules; subscriptions recognized over service periods. Paid physical vouchers recognized at sale by owner policy; redemption must not add revenue again."],
+    ["Expenses & allocation","Connecteam eligible expenses follow expense dates. “All” expenses split equally across five branches. Advance salary is excluded. Unknown-branch voucher sales remain central/unassigned."],
+    ["Profit & depreciation","Reported profit¹ = EBITDA less recorded depreciation. No separate financing or income-tax lines are modelled; this is not audited statutory net income. Depreciation is owner-entered, not an independently assessed asset schedule."],
+    ["Evidence & limits","Source: current Admin P&L computation and saved database snapshot, extracted 6 Oct 2026 at 04:43 BNT. Latest expense sync: 04:42 BNT. No cash-flow, balance-sheet, budget, valuation or audited verification was supplied."],
+  ];
+  sections.forEach(([a,b],i)=>{
+    const yy=2.44+i*.82;
+    txt(s,a,.72,yy,2.3,.35,14,{bold:true,color:C.purple});
+    txt(s,b,3.17,yy,9.35,.63,12,{color:C.mute,valign:"top"});
+  });
+  sourceNotes(s,"Investor presentation generated from a frozen aggregate data snapshot. Underlying customer, buyer and employee identities have not been included. Past performance and management recommendations are not forecasts. Consider accountant review of voucher revenue timing and statutory financial reporting before external reliance.");
+}
+
+// Sanity checks on both the financial model and slide geometry.
+for(const r of [q,p,...months,...branches.map(b=>b.totals)]) {
+  if(r.revenue !== r.pos_net_revenue+r.recognized_subscription_revenue+r.voucher_sales_revenue)throw Error("Revenue does not reconcile");
+  if(r.ebitda !== r.revenue-r.cost_of_services-r.operating_expense-r.unmapped_expenses)throw Error("EBITDA does not reconcile");
+  if(r.net_profit !== r.ebitda-r.depreciation)throw Error("Profit does not reconcile");
+}
+for(const box of auditBounds)if(box.x<0||box.y<0||box.x+box.w>W+.01||box.y+box.h>H+.01)throw Error(`Out of bounds: ${JSON.stringify(box)}`);
+await pptx.writeFile({fileName:`${dir}/Cuci-Xpress-Q3-2026-Investor-Update.pptx`});
+console.log(`Created ${slideNo} slides; all financial identities and text bounds validated.`);

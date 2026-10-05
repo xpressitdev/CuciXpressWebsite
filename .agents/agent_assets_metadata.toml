@@ -137,3 +137,31 @@ mtime_ms = 1790720765542
 storage_uri = "gcs://replit-rams-assets-pike/rams/assets/repl:a39e6913-24fd-4227-b04c-ff8317815489/c43bdd8b-3387-4cc5-a422-bd7c4420c068/f6d9d916-e813-41e3-9c20-199b77fdbbe8"
 storage_version_token = "1790720818150808"
 content_type = "image/png"
+
+[[outputs]]
+id = "dkp9HY5PWjjELQcZOooyZ"
+uri = "file://.local/outputs/q3-2026/Cuci-Xpress-Q3-2026-Investor-Update.pptx"
+type = "slides"
+title = "Cuci Xpress — Q3 2026 Investor Presentation"
+description = "13 editable PowerPoint slides matching the web app’s visual style. Includes Q2 comparisons, monthly and branch performance, costs, Q4 priorities and reporting disclosures."
+logical_id = "89ca697b-d1fc-4da5-a790-fb504dbe4ca3"
+content_hash = "sha256:ae97c08f8977632440e72f20d41e9d13322b8dbeedb46e397fa838f1bb3098e9"
+size = 481965
+mtime_ms = 1791233493118
+storage_uri = "gcs://replit-rams-assets-pike/rams/assets/repl:a39e6913-24fd-4227-b04c-ff8317815489/89ca697b-d1fc-4da5-a790-fb504dbe4ca3/59eb3032-8314-4c4b-ae92-c8fd606c7274"
+storage_version_token = "1791233561370190"
+content_type = "application/vnd.openxmlformats-officedocument.presentationml.presentation"
+
+[[outputs]]
+id = "HusDdz-foD6hH5OtR8_ly"
+uri = "file://.local/outputs/q3-2026/Cuci-Xpress-Q3-2026-Investor-Update.pdf"
+type = "pdf"
+title = "Q3 2026 Investor Presentation — PDF"
+description = "Rendered PDF copy for review and sharing. Based on the 6 October 2026 financial snapshot; unaudited management accounts."
+logical_id = "7930d79b-0b57-4a5f-a1ea-6ca7367c2b5e"
+content_hash = "sha256:030bf301f650022e7ebb6233500341a96d8e653bb609b0d4a7a29fd3993fef59"
+size = 181506
+mtime_ms = 1791233515750
+storage_uri = "gcs://replit-rams-assets-pike/rams/assets/repl:a39e6913-24fd-4227-b04c-ff8317815489/7930d79b-0b57-4a5f-a1ea-6ca7367c2b5e/51bdd628-acdd-4074-81b7-bd6feff63619"
+storage_version_token = "1791233563287832"
+content_type = "application/pdf"

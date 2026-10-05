@@ -83,6 +83,7 @@
     "nodemailer": "^10.0.9",
     "openid-client": "^6.6.4",
     "oslo": "^1.2.1",
+    "pptxgenjs": "^4.0.1",
     "protobufjs": "^8.8.0",
     "qrcode": "^1.5.4",
     "qs": "^6.15.2",
