@@ -193,3 +193,31 @@ mtime_ms = 1791234949090
 storage_uri = "gcs://replit-rams-assets-pike/rams/assets/repl:a39e6913-24fd-4227-b04c-ff8317815489/120b5c19-5578-42e2-ac38-85a378acf560/b071d712-2fc1-4ab0-ae13-0218fb0e9d77"
 storage_version_token = "1791234977958946"
 content_type = "application/pdf"
+
+[[outputs]]
+id = "FF1yCRzM6_IGMyzPLve3s"
+uri = "file://.local/outputs/q3-2026/Cuci-Xpress-Q3-2026-Shareholder-Update-With-Brand-Momentum.pptx"
+type = "slides"
+title = "Q3 Shareholder Update — With Brand Momentum"
+description = "Updated 14-slide PowerPoint including corporate and institutional trust, CEO marketing efforts and a message of confidence to shareholders."
+logical_id = "e700f505-7281-4373-8286-6cf0c87c9ed5"
+content_hash = "sha256:1a6af67425aa7587efa6ddb57c08936557ceab88bac2ca298bd22f39b6e7d52d"
+size = 509390
+mtime_ms = 1791235578550
+storage_uri = "gcs://replit-rams-assets-pike/rams/assets/repl:a39e6913-24fd-4227-b04c-ff8317815489/e700f505-7281-4373-8286-6cf0c87c9ed5/5d9fc334-2e7b-49f5-874c-77ebfa4b80af"
+storage_version_token = "1791235609543210"
+content_type = "application/vnd.openxmlformats-officedocument.presentationml.presentation"
+
+[[outputs]]
+id = "bAh1xPcx11_uVy7m7UZgb"
+uri = "file://.local/outputs/q3-2026/Cuci-Xpress-Q3-2026-Shareholder-Update-With-Brand-Momentum.pdf"
+type = "pdf"
+title = "Updated Shareholder Presentation — PDF"
+description = "Includes the new “Building trust. Growing our reputation.” slide. All financial figures remain unchanged."
+logical_id = "f3428644-5931-4a3f-98bb-96498e966532"
+content_hash = "sha256:fe0128b1455fb90bd25820e0edc60a62325a946cd40e2a70eeb334246e85f12c"
+size = 193858
+mtime_ms = 1791235596625
+storage_uri = "gcs://replit-rams-assets-pike/rams/assets/repl:a39e6913-24fd-4227-b04c-ff8317815489/f3428644-5931-4a3f-98bb-96498e966532/e8e9b318-9a92-4f2e-9152-54df6232d0bc"
+storage_version_token = "1791235611561686"
+content_type = "application/pdf"

@@ -277,7 +277,33 @@ function profitColor(c){return c<0?C.red:C.green;}
   sourceNotes(s,`Live report status at extraction: ${data.q3.coverage.status}. Depreciation missing months: ${JSON.stringify(data.q3.coverage.depreciationMissingMonths)}. Informational excluded advance salary allocations: ${JSON.stringify(data.q3.coverage.warnings)}. Such allocations are not unique submission counts. No savings claim is made from their exclusion.`);
 }
 
-// 11 — Actionable, clearly labelled recommendations.
+// 11 — Management-supplied brand-building update for existing shareholders.
+{
+  const s=slide("Building trust. Growing our reputation.","Brand momentum",
+    "Corporate and institutional trust • CEO-led marketing • Building for the long term",
+    "Source: Management update • Brand-building activities to date • Financial results unchanged");
+  rect(s,.65,2.52,5.92,2.81,C.white,C.ink,true,true);
+  txt(s,"Trusted by recognised organisations",.92,2.77,5.38,.42,19,{bold:true});
+  txt(s,"Examples highlighted by management:",.92,3.25,5.38,.32,12,{color:C.mute});
+  [
+    ["BSM",.92,3.77,2.43],
+    ["Takaful",3.59,3.77,2.43],
+    ["Progresif",.92,4.27,2.43],
+    ["Bruhealth",3.59,4.27,2.43],
+    ["Job Centre",.92,4.77,2.43],
+  ].forEach(([label,x,y,w])=>pill(s,label,x,y,w,C.lilac,C.ink));
+  rect(s,6.87,2.52,5.77,2.81,C.cream,C.ink,true,true);
+  txt(s,"CEO-led brand visibility",7.14,2.77,5.23,.42,19,{bold:true});
+  bullet(s,"Podcast with Posh Qifly","Sharing the Cuci Xpress story with a wider audience.",7.15,3.38,5.08);
+  bullet(s,"Progresif Ding adverts","An appearance that brings further visibility to Cuci Xpress.",7.15,4.35,5.08,C.orange);
+  rect(s,.65,5.63,11.99,1.08,C.lilac,C.lilac);
+  txt(s,"Profit is modest today; our commitment is long-term growth.",.92,5.77,11.45,.32,18,{bold:true});
+  txt(s,"We are building trust and visibility while working to improve profitability. Thank you for believing in Cuci Xpress.\nInsyaAllah, we are moving in the right direction.",
+    .92,6.15,11.45,.43,12.5,{color:C.ink});
+  sourceNotes(s,"Management reports growing trust in Cuci Xpress from BSM, Takaful, Progresif, Bruhealth and Job Centre, alongside CEO-led marketing including a podcast with Posh Qifly and an appearance in Progresif Ding adverts. These examples are a qualitative brand-building update to date; activity dates were not specified, so they are not attributed specifically to Q3. No formal partnership, endorsement, contract value, audience reach or measured financial return is asserted. The long-term message expresses management's direction and commitment, not a guarantee of future profits.");
+}
+
+// 12 — Actionable, clearly labelled recommendations.
 {
   const s=slide("Q4 focus: protect contribution before pursuing scale.","Recommended priorities",
     "Proposed priorities for management and shareholder discussion");
@@ -295,7 +321,7 @@ function profitColor(c){return c<0?C.red:C.green;}
   });
 }
 
-// 12 — Exact monthly appendix for traceability.
+// 13 — Exact monthly appendix for traceability.
 {
   const s=slide("Appendix A — Q3 monthly management P&L","Financial detail",
     "BND • Full precision • Expenses shown as positive costs");
@@ -308,7 +334,7 @@ function profitColor(c){return c<0?C.red:C.green;}
     .64,2.48,[3.96,2.02,2.02,2.02,1.98],.335,{size:11.5,bold:[4,9,11],highlight:[4,9,11]});
 }
 
-// 13 — Investor-shareable basis and cautions.
+// 14 — Investor-shareable basis and cautions.
 {
   const s=slide("Appendix B — Reporting basis and accounting policies","Basis of preparation",
     "Q3 2026 shareholder update • Prepared 6 October 2026");
@@ -334,5 +360,5 @@ for(const r of [q,p,...months,...branches.map(b=>b.totals)]) {
   if(r.net_profit !== r.ebitda-r.depreciation)throw Error("Profit does not reconcile");
 }
 for(const box of auditBounds)if(box.x<0||box.y<0||box.x+box.w>W+.01||box.y+box.h>H+.01)throw Error(`Out of bounds: ${JSON.stringify(box)}`);
-await pptx.writeFile({fileName:`${dir}/Cuci-Xpress-Q3-2026-Shareholder-Update.pptx`});
+await pptx.writeFile({fileName:`${dir}/Cuci-Xpress-Q3-2026-Shareholder-Update-With-Brand-Momentum.pptx`});
 console.log(`Created ${slideNo} slides; all financial identities and text bounds validated.`);
