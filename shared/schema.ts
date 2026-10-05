@@ -62,6 +62,27 @@ import { sql } from "drizzle-orm";
 import { createInsertSchema } from "drizzle-zod";
 import { z } from "zod";
 
+// Offline paid vouchers: sale-date revenue, separate from POS wash orders/drawers.
+export const voucherSales = pgTable("voucher_sales", {
+  id: text("id").primaryKey(),
+  idempotency_key: text("idempotency_key").notNull().unique(),
+  request_hash: text("request_hash").notNull(),
+  sale_date: date("sale_date").notNull(),
+  buyer: text("buyer").notNull(),
+  quantity: integer("quantity").notNull(),
+  unit_price_cents: integer("unit_price_cents").notNull(),
+  total_cents: integer("total_cents").notNull(),
+  branch_id: integer("branch_id").references(() => branches.id),
+  payment_method: text("payment_method").notNull().default("unspecified"),
+  reference: text("reference"),
+  notes: text("notes"),
+  status: text("status").notNull().default("active"),
+  void_reason: text("void_reason"),
+  created_by: text("created_by"),
+  created_at: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  updated_at: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+});
+
 // ============================================================
 // USERS — adjusted to match LiveQue's actual DB
 // ============================================================

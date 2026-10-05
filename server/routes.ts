@@ -23,6 +23,7 @@ import { staffLucia } from "./auth/staffLucia";
 import { requireLuciaUser, requireStaff, requireStaffRole, requireStaffOrPlateOwner } from "./auth/middleware";
 import { leaderboardName, leaderboardPlate } from "./leaderboardPrivacy";
 import { registerProfitLossRoutes } from "./profitLossService";
+import { registerVoucherSalesRoutes } from "./voucherSales";
 import { registerSubscriptionRoutes, activatePocketPaySubscription } from "./subscriptions";
 import { verifyInteriorRefreshQr } from "./interiorRefresh";
 import { getSubscriptionPlan } from "@shared/subscriptionPlans";
@@ -246,6 +247,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
   // Owner P&L lives in a focused module so this legacy route file remains the
   // authoritative home of POS accounting helpers without duplicating sync code.
   registerProfitLossRoutes(app);
+  registerVoucherSalesRoutes(app);
   // Revenue/queue is realized on the day a wash is CLAIMED, not the day it was
   // paid or when its QR was generated. Prepaid QR orders create the order row
   // up front and are only redeemed when staff scan the QR at the lane

@@ -416,6 +416,10 @@ export default function ProfitLossTab() {
           </div>}
         </div>}
         <p className="text-muted-foreground">
+          Physical voucher sales are recognized in full on the original sale date, not at redemption or as POS wash revenue.
+          Unspecified voucher branches appear only in Overall P&amp;L; voucher sales never enter today's cash drawer.
+        </p>
+        <p className="text-muted-foreground">
           Connecteam: <b>{report.sync.status}</b>
           {report.sync.lastSuccessfulAt ? ` · last complete sync ${new Date(report.sync.lastSuccessfulAt).toLocaleString()}` : ""}
         </p>

@@ -92,6 +92,7 @@ import { SendReceiptButton } from "@/components/admin/SendReceiptButton";
 import { CorrectPlateDialog } from "@/components/admin/CorrectPlateDialog";
 import ProfitLossTab from "@/components/admin/ProfitLossTab";
 import ExpenseProfitLossTab from "@/components/admin/ExpenseProfitLossTab";
+import VoucherSalesTab from "@/components/admin/VoucherSalesTab";
 import {
   AreaChart,
   Area,
@@ -419,6 +420,12 @@ export default function Admin() {
                 </TabsTrigger>
               )}
               {isOwner && (
+                <TabsTrigger value="voucher-sales" className="flex items-center gap-2" data-testid="tab-voucher-sales">
+                  <Tag className="w-4 h-4" />
+                  Voucher Sales
+                </TabsTrigger>
+              )}
+              {isOwner && (
                  <TabsTrigger value="profit-loss" className="flex items-center gap-2" data-testid="tab-profit-loss">
                    <BarChart3 className="w-4 h-4" />
                    Profit &amp; Loss
@@ -543,6 +550,12 @@ export default function Admin() {
                   canOpenPlateTransfer={isOwner}
                   onOpenPlateTransfer={() => setActiveTab("plate-transfer")}
                 />
+              </TabsContent>
+            )}
+
+            {isOwner && (
+              <TabsContent value="voucher-sales" className="mt-6">
+                <VoucherSalesTab />
               </TabsContent>
             )}
 

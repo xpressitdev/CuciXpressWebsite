@@ -3,6 +3,7 @@ import type { Express, Request, Response as ExpressResponse } from "express";
 import { sql } from "drizzle-orm";
 import { db } from "./db";
 import { expenseOnlyReport } from "./expenseViewer";
+import { voucherRevenue } from "./voucherSales";
 import { requireStaff, requireStaffRole } from "./auth/middleware";
 import {
   allocateConnecteamExpense,
@@ -684,6 +685,7 @@ export function deriveCoverageStatus(
 }
 
 async function getAnnualProfitLossReport(year: number, branchId: string | "overall") {
+  const voucherRows = await voucherRevenue(`${year}-01-01`, `${year}-12-31`);
   const [expenseRows, warningRows, depreciationRows, branchesRows, stateRows, posRows, counterRows, invoiceRows, legacySubscriptionRows, feeRateRows, sourceRangeRows, recurringExpenseRows] = await Promise.all([
     db.execute(sql`
       SELECT extract(month FROM s.expense_date)::int AS month, a.branch_id::text AS branch_id,
@@ -827,6 +829,7 @@ async function getAnnualProfitLossReport(year: number, branchId: string | "overa
     month: Number(row.month), branchId: row.branch_id ?? null,
     posNetRevenueCents: Number(row.pos_net_cents), subscriptionRecognizedGrossCents: 0, mdrCents: Number(row.mdr_cents),
   }));
+  revenue.push(...voucherRows);
   const revenueWarnings: Array<{ code: string; count: number }> = [];
   const addRevenueWarning = (code: string) => {
     const existing = revenueWarnings.find((warning) => warning.code === code);
@@ -917,7 +920,7 @@ async function getAnnualProfitLossReport(year: number, branchId: string | "overa
     : sync.last_attempt_status === "failed" || sync.last_attempt_status === "incomplete" ? "error"
       : !Number.isFinite(lastSuccessMs) || Date.now() - lastSuccessMs > 15 * 60_000 ? "stale"
         : "live";
-  const revenueCoverage = posRows.rows.length > 0 ? "available" : "not_available";
+  const revenueCoverage = posRows.rows.length > 0 || voucherRows.some(r => branchId === "overall" || r.branchId === branchId) ? "available" : "not_available";
   const juneLiveExpenseCents = expenses
     .filter((entry) => entry.month === 6)
     .reduce((total, entry) => total + entry.cents, 0);
@@ -993,7 +996,7 @@ async function getAnnualProfitLossReport(year: number, branchId: string | "overa
       status: coverageStatus,
       note: `Connecteam expenses are live only after a complete sync. ${revenueCoverage === "available"
         ? "Historical POS coverage follows KedaiPOS lineage and may differ from the reference workbook."
-        : "No POS rows are available for this filter/year, so revenue is provisional rather than asserted as zero."}${referenceNote}`,
+        : "No POS or voucher-sale rows are available for this filter/year, so revenue is provisional rather than asserted as zero."}${referenceNote} Paid vouchers are recognized on their sale date; unspecified-branch sales appear only in Overall.`,
       unallocatedOnlineRevenueCents: months.reduce((total, month) => total + lineValue(month, "recognized_subscription_revenue"), 0),
       depreciationMissingMonths: months.filter((month) => !month.depreciationConfigured).map((month) => month.month),
       staleAfterSeconds: DISTRIBUTED_SYNC_LEASE_MS / 1000,
@@ -1045,6 +1048,7 @@ async function getCustomProfitLossReport(
   const endSql = sql`${endExclusive}::date`;
   const startYear = Number(range.startDate.slice(0, 4));
   const endYear = Number(range.endDate.slice(0, 4));
+  const voucherRows = await voucherRevenue(range.startDate, range.endDate);
   const [expenseRows, warningRows, depreciationRows, branchesRows, stateRows, posRows,
     counterRows, invoiceRows, legacyRows, feeRows, sourceRows, recurringRows] = await Promise.all([
     db.execute(sql`
@@ -1185,6 +1189,7 @@ async function getCustomProfitLossReport(
     posNetRevenueCents: Number(row.pos_net_cents), subscriptionRecognizedGrossCents: 0,
     mdrCents: Number(row.mdr_cents),
   }));
+  revenue.push(...voucherRows);
   const revenueWarnings: Array<{ code: string; count: number }> = [];
   const addRevenueWarning = (code: string) => {
     const existing = revenueWarnings.find((warning) => warning.code === code);
@@ -1286,7 +1291,7 @@ async function getCustomProfitLossReport(
   const hasAccountingWarnings = !branchMappingValid
     || (warningRows.rows as any[]).some((row) => accountingWarningStatuses.has(String(row.allocation_status)))
     || revenueWarnings.length > 0 || months.some((month) => !month.depreciationConfigured);
-  const coverageStatus = deriveCoverageStatus(syncHealth, posRows.rows.length > 0, hasAccountingWarnings);
+  const coverageStatus = deriveCoverageStatus(syncHealth, posRows.rows.length > 0 || voucherRows.some(r => branchId === "overall" || r.branchId === branchId), hasAccountingWarnings);
   const observedRanges = Object.fromEntries((sourceRows.rows as any[]).map((row) => [
     row.source, { firstDate: row.first_date ?? null, lastDate: row.last_date ?? null },
   ]));

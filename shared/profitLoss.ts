@@ -278,6 +278,8 @@ export interface PnlRevenueInput {
   posNetRevenueCents: number;
   /** Gross recognized subscription revenue, not net of MDR. */
   subscriptionRecognizedGrossCents: number;
+  /** Paid physical voucher sales recognized in full on the original sale date. */
+  voucherSalesRevenueCents?: number;
   /** MDR for both POS digital sales and recognized subscription revenue. */
   mdrCents: number;
 }
@@ -364,6 +366,7 @@ export function buildPnl(input: PnlBuildInput): PnlMonth[] {
 
     const netPosRevenue = sum(revenue.map((entry) => entry.posNetRevenueCents));
     const recognizedSubscriptions = sum(revenue.map((entry) => entry.subscriptionRecognizedGrossCents));
+    const voucherSalesRevenue = sum(revenue.map((entry) => entry.voucherSalesRevenueCents ?? 0));
     const mdr = sum(revenue.map((entry) => entry.mdrCents));
     const categoryCents = (category: PnlCategory) =>
       sum(expenses.filter((entry) => entry.category === category).map((entry) => entry.cents));
@@ -374,7 +377,7 @@ export function buildPnl(input: PnlBuildInput): PnlMonth[] {
     const opexWithoutMdr = sum(PNL_CATEGORIES
       .filter((entry) => entry.section === "operating_expense" && entry.category !== "Merchant Discount Rate (MDR)")
       .map((entry) => categoryCents(entry.category)));
-    const revenueTotal = netPosRevenue + recognizedSubscriptions;
+    const revenueTotal = netPosRevenue + recognizedSubscriptions + voucherSalesRevenue;
     const grossProfit = revenueTotal - cos;
     const configuredMdr = categoryCents("Merchant Discount Rate (MDR)");
     const operatingExpenses = opexWithoutMdr + mdr + configuredMdr;
@@ -385,6 +388,7 @@ export function buildPnl(input: PnlBuildInput): PnlMonth[] {
     const lines: PnlLine[] = [
       { key: "pos_net_revenue", label: "POS Revenue (net refunds)", cents: netPosRevenue },
       { key: "recognized_subscription_revenue", label: "Recognized Subscription Revenue", cents: recognizedSubscriptions },
+      { key: "voucher_sales_revenue", label: "Voucher Sales Revenue", cents: voucherSalesRevenue },
       { key: "revenue", label: "Revenue", cents: revenueTotal },
       ...PNL_CATEGORIES
         .filter((entry) => entry.section === "cost_of_services")
