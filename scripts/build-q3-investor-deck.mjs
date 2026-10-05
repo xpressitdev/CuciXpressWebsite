@@ -16,8 +16,8 @@ const change = (a,b) => `${a<b?"−":"+"}${Math.abs(100*(a-b)/b).toFixed(1)}%`;
 const pptx = new pptxgen();
 pptx.layout = "LAYOUT_WIDE";
 pptx.author = "Cuci Xpress";
-pptx.subject = "Q3 2026 investor performance — unaudited management accounts";
-pptx.title = "Cuci Xpress | Q3 2026 Investor Update";
+pptx.subject = "Q3 2026 shareholder performance — unaudited management accounts";
+pptx.title = "Cuci Xpress | Q3 2026 Shareholder Update";
 pptx.company = "Cuci Xpress";
 pptx.lang = "en-GB";
 pptx.theme = { headFontFace:"Inter", bodyFontFace:"Inter", lang:"en-GB" };
@@ -52,7 +52,7 @@ function slide(title,section,sub="",foot="Source: Cuci Xpress Admin P&L • Snap
   line(s,.55,6.95,12.8,6.95);
   txt(s,foot,.55,7.04,11.6,.2,8.5,{color:C.mute});
   txt(s,String(slideNo).padStart(2,"0"),12.3,7.01,.5,.25,11,{bold:true,align:"right"});
-  s.addNotes(`CONFIDENTIAL — investor discussion. Reporting period 1 July–30 September 2026, inclusive, Asia/Brunei. Q2 comparison: 1 April–30 June 2026. Extracted ${data.extractedAt}. Source: current Cuci Xpress getProfitLossReport computation against the shared external Neon database, not invented figures or workbook balancing. All amounts BND. Full-precision data stored in financial-snapshot.json. Reported profit is the app's net_profit line: EBITDA less recorded depreciation, with no separate financing/tax lines; not a representation of audited statutory net income.`);
+  s.addNotes(`CONFIDENTIAL — existing-shareholder update. Reporting period 1 July–30 September 2026, inclusive, Asia/Brunei. Q2 comparison: 1 April–30 June 2026. Source: Cuci Xpress management P&L records, snapshot extracted ${data.extractedAt}. All amounts BND. Reported profit is EBITDA less recorded depreciation; financing and income tax are not separately modelled. Figures are unaudited management accounts. See Appendix B for accounting policies.`);
   return s;
 }
 function pill(s,text,x,y,w,fill=C.lilac,color=C.purple) {
@@ -91,12 +91,12 @@ function profitColor(c){return c<0?C.red:C.green;}
 
 // 01 — Brand-led cover.
 {
-  const s=slide("","Investor update");
+  const s=slide("","Shareholder update");
   pill(s,"1 JUL — 30 SEP 2026",.62,1.18,2.48);
   txt(s,"Q3 2026",.6,1.9,7.5,1.03,60,{bold:true});
   txt(s,"Performance\n& priorities.",.6,3.05,7.25,1.67,42,{bold:true});
   txt(s,"Five branches. One operating view.",.65,5.15,7,.45,21,{color:C.mute});
-  pill(s,"CONFIDENTIAL • INVESTOR DISCUSSION",.65,6.06,4.65,C.cream,C.ink);
+  pill(s,"CONFIDENTIAL • SHAREHOLDER UPDATE",.65,6.06,4.65,C.cream,C.ink);
   rect(s,8.38,1.34,4.32,4.96,C.white,C.ink,true,true);
   txt(s,"REVENUE",8.7,1.76,3.6,.3,12,{bold:true,color:C.mute,charSpacing:1.2});
   txt(s,money(q.revenue),8.7,2.28,3.6,.8,39,{bold:true,color:C.purple});
@@ -104,7 +104,7 @@ function profitColor(c){return c<0?C.red:C.green;}
   txt(s,"Reported profit¹",8.7,3.63,3.6,.4,16,{color:C.mute});
   txt(s,money(q.net_profit,2),8.7,4.13,3.6,.65,31,{bold:true});
   txt(s,`${pct(q.net_profit,q.revenue)} margin • ${change(q.revenue,p.revenue)} revenue QoQ`,8.7,5.14,3.6,.58,14);
-  sourceNotes(s,"¹ Reported profit is EBITDA less recorded depreciation, on the application's management-reporting basis. It is not audited statutory net income. See methodology appendix.");
+  sourceNotes(s,"¹ Reported profit is EBITDA less recorded depreciation, on the management-reporting basis described in Appendix B. Financing and income tax are not separately modelled.");
 }
 
 // 02 — Executive summary.
@@ -140,7 +140,7 @@ function profitColor(c){return c<0?C.red:C.green;}
 // 04 — Native editable revenue chart, no dual-axis ambiguity.
 {
   const s=slide("August was the high point; September reversed it.","Monthly performance",
-    "Revenue trend (B$ thousands) • Exact monthly figures below • Straight lines, not a forecast");
+    "Revenue trend (B$ thousands) • July–September actuals • Exact monthly figures below");
   s.addChart(pptx.ChartType.line,[{name:"Revenue",labels:["July","August","September"],values:months.map(m=>m.revenue/100000)}],{
     x:.62,y:2.4,w:7.6,h:3.02,showLegend:false,showTitle:false,showValue:true,
     chartColors:[C.purple],showMarker:true,markerSize:7,lineSize:3,
@@ -237,7 +237,7 @@ function profitColor(c){return c<0?C.red:C.green;}
 // 08 — Targeted operational priorities grounded in actual amounts.
 {
   const s=slide("Focus branch recovery on Salar and Lambak.","Operating priorities",
-    "Combined Q3 reported loss: B$5,311.17 • Recommendations, not approved budgets or forecasts");
+    "Combined Q3 reported loss: B$5,311.17 • Proposed areas for management review");
   const loss=branches.filter(b=>["Salar","Lambak"].includes(b.name));
   loss.forEach((b,i)=>{
     const x=.64+i*6.4;
@@ -257,35 +257,35 @@ function profitColor(c){return c<0?C.red:C.green;}
 {
   const s=slide("POS remains the core; prepaid channels are small.","Revenue composition",
     "The three streams below reconcile to Q3 reported revenue of B$83,142.40");
-  card(s,.65,2.56,3.93,2.39,"POS, net of refunds",money(q.pos_net_revenue,2),`${pct(q.pos_net_revenue,q.revenue)} of Q3 revenue\nIncludes app + historical POS lineage`);
+  card(s,.65,2.56,3.93,2.39,"POS, net of refunds",money(q.pos_net_revenue,2),`${pct(q.pos_net_revenue,q.revenue)} of Q3 revenue\nCurrent and historical POS records`);
   card(s,4.87,2.56,3.73,2.39,"Paid voucher sales",money(q.voucher_sales_revenue,2),`${pct(q.voucher_sales_revenue,q.revenue)} of Q3 revenue\n93 vouchers • 5 bulk sales`,C.cream);
   card(s,8.9,2.56,3.73,2.39,"Subscription revenue",money(q.recognized_subscription_revenue,2),`${pct(q.recognized_subscription_revenue,q.revenue)} of Q3 revenue\nRecognized over service periods`,C.lilac);
-  bullet(s,"Voucher policy: revenue at sale","Owner-directed management policy. B$450 in July, B$36 in August and B$351 in September.",.78,5.33,5.95,C.orange);
-  bullet(s,"No second revenue at redemption","Use the existing B$0 voucher-redemption package. Serial-level reconciliation is not yet implemented.",7.02,5.33,5.45);
+  bullet(s,"Voucher policy: revenue at sale","Management reporting recognises sales in full: B$450 in July, B$36 in August and B$351 in September.",.78,5.33,5.95,C.orange);
+  bullet(s,"Redemption treatment","The B$0 redemption package avoids recognising the sale twice. Serial-level reconciliation remains a proposed control.",7.02,5.33,5.45);
   sourceNotes(s,"Voucher revenue is recognized fully on original sale dates at the owner's direction, not deferred until service. This policy may differ from statutory/accrual treatment and should be reviewed with the accountant before external financial reliance. No buyer names or voucher serials are disclosed in the investor deck.");
 }
 
 // 10 — Confidence / caveats without burying them in notes.
 {
-  const s=slide("Recorded coverage is complete; these are not audited accounts.","Reporting confidence",
-    "As at 6 October 2026 • Coverage means records are available, not independently verified completeness");
+  const s=slide("Q3 reporting includes all 15 depreciation entries.","Reporting overview",
+    "Five branches × three months • Recorded management P&L coverage as at 6 October 2026");
   card(s,.65,2.54,3.93,2.12,"Depreciation coverage","15 / 15","Five branches × three months",C.lilac);
   card(s,4.87,2.54,3.73,2.12,"Recorded depreciation",money(q.depreciation,2),"B$708.35 per month",C.white);
   card(s,8.9,2.54,3.73,2.12,"Unmapped expense value","B$0.00","Within the recorded Q3 dataset",C.white);
   bullet(s,"Connecteam expenses","Latest successful sync: 6 Oct, 04:42 BNT. Advance salary is informational and excluded from P&L.",.78,5.07,5.9);
-  bullet(s,"Important limits","No independent audit, cash-flow reconciliation, tax calculation or asset-life validation is included.",7.02,5.07,5.4,C.orange);
+  bullet(s,"Reporting basis","Quarterly revenue, costs and branch profitability from management records. Accounting policies are set out in Appendix B.",7.02,5.07,5.4,C.orange);
   sourceNotes(s,`Live report status at extraction: ${data.q3.coverage.status}. Depreciation missing months: ${JSON.stringify(data.q3.coverage.depreciationMissingMonths)}. Informational excluded advance salary allocations: ${JSON.stringify(data.q3.coverage.warnings)}. Such allocations are not unique submission counts. No savings claim is made from their exclusion.`);
 }
 
 // 11 — Actionable, clearly labelled recommendations.
 {
   const s=slide("Q4 focus: protect contribution before pursuing scale.","Recommended priorities",
-    "Discussion points for management and investors • No fundraising terms or forecast assumptions supplied");
+    "Proposed priorities for management and shareholder discussion");
   const actions=[
     ["01","Recover loss-making branch contribution","Review Salar’s rent/staffing burden and Lambak’s demand/shift coverage. Track weekly branch results."],
     ["02","Understand September’s revenue decline","Compare branch-level sales, operating days and wash activity before assigning a cause."],
     ["03","Validate whether lower costs are repeatable","Review the B$3,371.02 drop in miscellaneous COS and expense timing before projecting savings."],
-    ["04","Complete investor-grade reporting controls","Reconcile vouchers, bank/cash and taxes; validate depreciation schedules and document revenue policies."],
+    ["04","Strengthen quarterly shareholder reporting","Include cash position, significant liabilities and use of invested funds once reconciled figures are available."],
   ];
   actions.forEach((a,i)=>{
     const y=2.53+i*.99;
@@ -310,21 +310,21 @@ function profitColor(c){return c<0?C.red:C.green;}
 
 // 13 — Investor-shareable basis and cautions.
 {
-  const s=slide("Appendix B — Sources, policies and limitations","Basis of preparation",
-    "Read alongside the figures • Snapshot, not a forecast • Prepared 6 October 2026");
+  const s=slide("Appendix B — Reporting basis and accounting policies","Basis of preparation",
+    "Q3 2026 shareholder update • Prepared 6 October 2026");
   const sections=[
     ["Scope & currency","1 July–30 September 2026; Q2 comparison is 1 April–30 June. Inclusive Brunei calendar dates. BND (B$). Numbers may differ from older exports as source records are revised."],
-    ["Revenue","POS net of refunds under the app’s realization-day rules; subscriptions recognized over service periods. Paid physical vouchers recognized at sale by owner policy; redemption must not add revenue again."],
+    ["Revenue","POS net of refunds under the app’s realization-day rules; subscriptions recognized over service periods. Paid physical vouchers recognized in full at sale under management policy, rather than deferred to redemption."],
     ["Expenses & allocation","Connecteam eligible expenses follow expense dates. “All” expenses split equally across five branches. Advance salary is excluded. Unknown-branch voucher sales remain central/unassigned."],
-    ["Profit & depreciation","Reported profit¹ = EBITDA less recorded depreciation. No separate financing or income-tax lines are modelled; this is not audited statutory net income. Depreciation is owner-entered, not an independently assessed asset schedule."],
-    ["Evidence & limits","Source: current Admin P&L computation and saved database snapshot, extracted 6 Oct 2026 at 04:43 BNT. Latest expense sync: 04:42 BNT. No cash-flow, balance-sheet, budget, valuation or audited verification was supplied."],
+    ["Profit & depreciation","Reported profit¹ = EBITDA less recorded depreciation. Financing and income tax are not separately modelled. Depreciation uses management-entered monthly amounts across all five branches."],
+    ["Reporting basis","This quarterly update summarises July–September revenue, expenses and branch profitability, based on management records as at 6 October 2026. Figures are unaudited and use the accounting policies described above."],
   ];
   sections.forEach(([a,b],i)=>{
     const yy=2.44+i*.82;
     txt(s,a,.72,yy,2.3,.35,14,{bold:true,color:C.purple});
     txt(s,b,3.17,yy,9.35,.63,12,{color:C.mute,valign:"top"});
   });
-  sourceNotes(s,"Investor presentation generated from a frozen aggregate data snapshot. Underlying customer, buyer and employee identities have not been included. Past performance and management recommendations are not forecasts. Consider accountant review of voucher revenue timing and statutory financial reporting before external reliance.");
+  sourceNotes(s,"Existing-shareholder update based on a fixed aggregate snapshot of Cuci Xpress management P&L records, extracted 6 October 2026 at 04:43 BNT; latest expense sync 04:42 BNT. The presentation addresses quarterly operating performance. Recommended actions are proposals for discussion, not approved commitments. Voucher revenue-at-sale treatment is a management-reporting policy and may differ from applicable statutory accounting treatment. Reported profit is not a measure of cash available for distribution.");
 }
 
 // Sanity checks on both the financial model and slide geometry.
@@ -334,5 +334,5 @@ for(const r of [q,p,...months,...branches.map(b=>b.totals)]) {
   if(r.net_profit !== r.ebitda-r.depreciation)throw Error("Profit does not reconcile");
 }
 for(const box of auditBounds)if(box.x<0||box.y<0||box.x+box.w>W+.01||box.y+box.h>H+.01)throw Error(`Out of bounds: ${JSON.stringify(box)}`);
-await pptx.writeFile({fileName:`${dir}/Cuci-Xpress-Q3-2026-Investor-Update.pptx`});
+await pptx.writeFile({fileName:`${dir}/Cuci-Xpress-Q3-2026-Shareholder-Update.pptx`});
 console.log(`Created ${slideNo} slides; all financial identities and text bounds validated.`);

@@ -165,3 +165,31 @@ mtime_ms = 1791233515750
 storage_uri = "gcs://replit-rams-assets-pike/rams/assets/repl:a39e6913-24fd-4227-b04c-ff8317815489/7930d79b-0b57-4a5f-a1ea-6ca7367c2b5e/51bdd628-acdd-4074-81b7-bd6feff63619"
 storage_version_token = "1791233563287832"
 content_type = "application/pdf"
+
+[[outputs]]
+id = "e-BIc0N1-Jg8FLJBazAmS"
+uri = "file://.local/outputs/q3-2026/Cuci-Xpress-Q3-2026-Shareholder-Update.pptx"
+type = "slides"
+title = "Cuci Xpress Q3 2026 — Revised Shareholder Update"
+description = "Editable 13-slide PowerPoint, revised for existing shareholders. Financial figures unchanged; clearer reporting basis and retained accounting disclosures."
+logical_id = "2a11e176-1455-431b-852d-39ef01ef3292"
+content_hash = "sha256:29a4ffad54b6a484b01aacfbdece644c5b4ffc3bcc85601df8c9fdbac42364e8"
+size = 480429
+mtime_ms = 1791234925405
+storage_uri = "gcs://replit-rams-assets-pike/rams/assets/repl:a39e6913-24fd-4227-b04c-ff8317815489/2a11e176-1455-431b-852d-39ef01ef3292/ccdedb0d-94b0-4bfb-a373-8dd9a59dba6f"
+storage_version_token = "1791234975990046"
+content_type = "application/vnd.openxmlformats-officedocument.presentationml.presentation"
+
+[[outputs]]
+id = "n71dcc8PfWlfhmy9pt6Co"
+uri = "file://.local/outputs/q3-2026/Cuci-Xpress-Q3-2026-Shareholder-Update.pdf"
+type = "pdf"
+title = "Revised Shareholder Update — PDF"
+description = "Checked PDF copy of the revised presentation, including the rewritten Appendix B."
+logical_id = "120b5c19-5578-42e2-ac38-85a378acf560"
+content_hash = "sha256:3a3ffc0ecc703e34491a0ee4d2fa6241163445f5a599f278849e3b4cb4a2b077"
+size = 181430
+mtime_ms = 1791234949090
+storage_uri = "gcs://replit-rams-assets-pike/rams/assets/repl:a39e6913-24fd-4227-b04c-ff8317815489/120b5c19-5578-42e2-ac38-85a378acf560/b071d712-2fc1-4ab0-ae13-0218fb0e9d77"
+storage_version_token = "1791234977958946"
+content_type = "application/pdf"

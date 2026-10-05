@@ -1,4 +1,5 @@
 - [P&L source reconciliation](pnl-source-reconciliation.md) — workbook is a historical reference, not a balancing target; live Connecteam revisions and POS lineage can differ legitimately.
+- [Shareholder reporting tone](shareholder-reporting-tone.md) — updates address existing investors; describe reporting scope without implying unsupplied records are company deficiencies.
 - [Auth session cookies](auth-session-cookies.md) — customer login dropping on mobile? Check Lucia `sessionCookie.expires` (true=persistent, false=dies on tab close), not session-expiry bugs.
 - [Lane queue ordering](queue-ordering.md) — queue ordered by queue_position NULLS LAST then created_at; the 3 readers (snapshot SQL, LaneControl sort, today route SELECT) must stay in lockstep.
 - [Prepaid-QR day bucketing](prepaid-qr-day-bucketing.md) — every prepaid-QR provider (pocket_pay, loyalty, membership) must bucket by claim/scan day in bizDay() AND queue/snapshot, or a wash whose QR was generated one day and scanned another vanishes from that day's queue + sales log.
