@@ -26,3 +26,9 @@ The user maintains a separate investor website at https://cucixpress-investors.r
 **Why:** The user wants investors to obtain current business-performance updates from the main Cuci Xpress app without manual duplication.
 
 **How to apply:** Limit public reporting to aggregate financial results; this approval does not cover customer, employee or transaction-level records. Keep previously issued reports separate from the live feed. Future private access must protect both the source feed and the investor website, not merely hide its dashboard. A published URL alone does not provide edit access to the separate investor project.
+
+Do not present development/preview data-quality warnings as confirmed production deficiencies.
+
+**Why:** The user corrected a statement that Q4 depreciation was incomplete, saying it was already completed in live production; that statement had been based only on the preview API.
+
+**How to apply:** Verify the deployed reporting endpoint and its actual environment before asserting missing production records. If the new endpoint is not yet available in production, say production coverage remains unverified. Do not ask the owner to re-enter completed production settings based solely on a preview result.
