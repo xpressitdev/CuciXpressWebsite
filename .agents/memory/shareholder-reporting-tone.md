@@ -32,3 +32,9 @@ Do not present development/preview data-quality warnings as confirmed production
 **Why:** The user corrected a statement that Q4 depreciation was incomplete, saying it was already completed in live production; that statement had been based only on the preview API.
 
 **How to apply:** Verify the deployed reporting endpoint and its actual environment before asserting missing production records. If the new endpoint is not yet available in production, say production coverage remains unverified. Do not ask the owner to re-enter completed production settings based solely on a preview result.
+
+Investor updates are monthly, not a five-minute live dashboard.
+
+**Why:** The user said the investor link is updated every month and questioned the cost of five-minute fetching.
+
+**How to apply:** Use durable monthly snapshots for visitors rather than polling the operational API. Preserve actual reporting cutoff and generation timestamps; do not label a monthly snapshot as live.
