@@ -13,7 +13,7 @@ Quarterly comparisons must distinguish previously reported shareholder figures f
 
 **Why:** The user identified a Q2 revenue mismatch between the prior investor presentation (supported by its historical workbook) and the recalculated Q2 baseline used in the Q3 deck.
 
-**How to apply:** Check the previously issued report before claiming quarter-on-quarter changes. Show an explicit reconciliation for revised historical figures; do not silently substitute them or assume a difference is caused by refunds or revisions without transaction evidence. Historical workbook totals remain references, not targets for database adjustments.
+**How to apply:** Check the previously issued report before claiming quarter-on-quarter changes. The user approved retaining previously reported Q2 revenue as the shareholder benchmark while showing the unresolved recalculation separately and withholding unreconciled profit-recovery claims. Show an explicit reconciliation for revised historical figures; do not silently substitute them or assume a difference is caused by refunds or revisions without transaction evidence. Historical workbook totals remain references, not targets for database adjustments.
 
 Shareholder updates should also explain reputation-building alongside modest current profits. The user reports trust from BSM, Takaful, Progresif, Bruhealth and Job Centre, and CEO marketing efforts including a podcast with Posh Qifly and an appearance in Progresif Ding adverts.
 

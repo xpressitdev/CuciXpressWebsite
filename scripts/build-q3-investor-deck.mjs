@@ -4,6 +4,8 @@ import pptxgen from "pptxgenjs";
 const dir = ".local/outputs/q3-2026";
 const data = JSON.parse(fs.readFileSync(`${dir}/financial-snapshot.json`, "utf8"));
 const q = data.q3.ytd, p = data.q2.ytd;
+// Previously issued Q2 presentation: rounded revenue; supporting workbook retains cents.
+const priorRevenue = 8493000;
 const months = data.q3.months.map(m => Object.fromEntries(m.lines.map(l => [l.key,l.cents])));
 const branches = data.branches;
 const C = { ink:"111722", purple:"9168E8", orange:"FF9900", bg:"F8F9FC",
@@ -103,19 +105,19 @@ function profitColor(c){return c<0?C.red:C.green;}
   line(s,8.7,3.32,12.34,3.32);
   txt(s,"Reported profit¹",8.7,3.63,3.6,.4,16,{color:C.mute});
   txt(s,money(q.net_profit,2),8.7,4.13,3.6,.65,31,{bold:true});
-  txt(s,`${pct(q.net_profit,q.revenue)} margin • ${change(q.revenue,p.revenue)} revenue QoQ`,8.7,5.14,3.6,.58,14);
+  txt(s,`${pct(q.net_profit,q.revenue)} margin • ${change(q.revenue,priorRevenue)} revenue\nvs Q2 previously reported`,8.7,5.14,3.6,.58,13);
   sourceNotes(s,"¹ Reported profit is EBITDA less recorded depreciation, on the management-reporting basis described in Appendix B. Financing and income tax are not separately modelled.");
 }
 
 // 02 — Executive summary.
 {
-  const s=slide("Profit recovered; the quarter ended softer.","Executive summary",
-    "Q3 2026 • BND • Compared with Q2 2026 on the same application reporting basis");
+  const s=slide("Q3 was profitable; September ended softer.","Executive summary",
+    "Q3 management results • Revenue benchmark: Q2 previously reported • See reconciliation on slide 5");
   const metrics=[
-    ["Revenue",money(q.revenue),`${change(q.revenue,p.revenue)} QoQ\nB$957.91 below Q2`,C.white],
-    ["Gross margin",pct(q.gross_profit,q.revenue),`Q2: ${pct(p.gross_profit,p.revenue)}\nLower COS supported margin`,C.lilac],
-    ["EBITDA",money(q.ebitda,2),`${pct(q.ebitda,q.revenue)} of revenue\n+${money(q.ebitda-p.ebitda,2)} QoQ`,C.white],
-    ["Reported profit¹",money(q.net_profit,2),`${pct(q.net_profit,q.revenue)} margin\nQ2: ${money(p.net_profit,2)}`,C.cream],
+    ["Revenue",money(q.revenue),`${change(q.revenue,priorRevenue)} vs reported Q2\nQ2 benchmark: B$84,930`,C.white],
+    ["Gross margin",pct(q.gross_profit,q.revenue),"Q3 gross profit\nB$37,090.70",C.lilac],
+    ["EBITDA",money(q.ebitda,2),`${pct(q.ebitda,q.revenue)} of Q3 revenue\nBefore depreciation`,C.white],
+    ["Reported profit¹",money(q.net_profit,2),`${pct(q.net_profit,q.revenue)} Q3 margin\nAfter recorded depreciation`,C.cream],
   ];
   metrics.forEach((m,i)=>card(s,.6+i*3.13,2.58,2.93,2.38,...m));
   bullet(s,"Three branches profitable","Bengkurong was the largest reported-profit contributor.",.7,5.43,5.75);
@@ -124,16 +126,16 @@ function profitColor(c){return c<0?C.red:C.green;}
 
 // 03 — Quarter-on-quarter accounts.
 {
-  const s=slide("Lower service costs drove the profit improvement.","Financial scorecard",
-    "BND • Expense figures shown as positive costs; change is Q3 minus Q2");
+  const s=slide("Q3 financial scorecard","Financial scorecard",
+    "BND • Q3 management accounts • Expense figures shown as positive costs");
   const labels=[["Revenue","revenue"],["Cost of services","cost_of_services"],["Gross profit","gross_profit"],
     ["Operating expenses","operating_expense"],["EBITDA","ebitda"],["Recorded depreciation","depreciation"],["Reported profit¹","net_profit"]];
-  const rows=[["Metric","Q2 2026","Q3 2026","Change"],
-    ...labels.map(([label,k])=>[label,num(p[k]),num(q[k]),`${q[k]-p[k]>0?"+":""}${num(q[k]-p[k])}`]),
-    ["Gross margin",pct(p.gross_profit,p.revenue),pct(q.gross_profit,q.revenue),`${(100*q.gross_profit/q.revenue-100*p.gross_profit/p.revenue).toFixed(1)} pp`],
-    ["Reported profit margin¹",pct(p.net_profit,p.revenue),pct(q.net_profit,q.revenue),`${(100*q.net_profit/q.revenue-100*p.net_profit/p.revenue).toFixed(1)} pp`]];
-  table(s,rows,.6,2.55,[4.3,2.45,2.45,2.9],.365,{size:12.5,bold:[1,5,7],highlight:[5,7]});
-  txt(s,"COS decreased B$3,941.33 (7.9%). OPEX decreased B$271.09 (0.8%). Depreciation was unchanged.",
+  const rows=[["Metric","Q3 2026"],
+    ...labels.map(([label,k])=>[label,num(q[k])]),
+    ["Gross margin",pct(q.gross_profit,q.revenue)],
+    ["Reported profit margin¹",pct(q.net_profit,q.revenue)]];
+  table(s,rows,.6,2.55,[7.3,4.8],.365,{size:13,bold:[1,5,7],highlight:[5,7]});
+  txt(s,"Q2 profit and cost comparisons are held pending reconciliation with the previously issued report.",
     .72,6.43,11.9,.3,12,{color:C.mute});
 }
 
@@ -162,32 +164,23 @@ function profitColor(c){return c<0?C.red:C.green;}
     .65,5.43,[3.4,2.93,2.93,2.73],.32,{size:12});
 }
 
-// 05 — Signed, zero-anchored waterfall in editable native shapes.
+// 05 — Separate, unresolved historical reconciliation; not a restatement.
 {
-  const s=slide("A B$3,254.51 improvement versus Q2.","Profit bridge",
-    "Reported profit¹ bridge • BND • Positive bars are improvements; negative bars are reductions");
-  const steps=[
-    {label:"Q2 profit",start:0,end:p.net_profit/100,color:C.ink,total:true,value:p.net_profit},
-    {label:"Lower revenue",start:p.net_profit/100,end:(p.net_profit+q.revenue-p.revenue)/100,color:C.orange,value:q.revenue-p.revenue},
-    {label:"Lower COS",start:(p.net_profit+q.revenue-p.revenue)/100,end:(p.net_profit+q.revenue-p.revenue+p.cost_of_services-q.cost_of_services)/100,color:C.purple,value:p.cost_of_services-q.cost_of_services},
-    {label:"Lower OPEX",start:(q.net_profit-p.operating_expense+q.operating_expense)/100,end:q.net_profit/100,color:C.purple,value:p.operating_expense-q.operating_expense},
-    {label:"Q3 profit",start:0,end:q.net_profit/100,color:C.ink,total:true,value:q.net_profit},
-  ];
-  const top=2.77,chartH=2.63,min=-2100,max=2800, y=v=>top+(max-v)/(max-min)*chartH;
-  line(s,.9,y(0),12.3,y(0),C.mute,.8);
-  txt(s,"0",.62,y(0)-.1,.22,.2,10,{color:C.mute});
-  steps.forEach((st,i)=>{
-    const x=1.18+i*2.37,yy=y(Math.max(st.start,st.end)),h=Math.abs(y(st.start)-y(st.end));
-    rect(s,x,yy,1.38,Math.max(.015,h),st.color,st.color,false);
-    txt(s,`${st.total?"":st.value>0?"+":""}${money(st.value,2)}`,x-.38,
-      st.end>=st.start?yy-.38:yy+h+.06,2.15,.31,13,{bold:true,align:"center"});
-    txt(s,st.label,x-.35,5.72,2.08,.43,13,{bold:true,align:"center"});
-    if(i<steps.length-2)line(s,x+1.38,y(st.end),x+2.37,y(st.end),C.grid,.8);
-  });
-  pill(s,"RECORDED DEPRECIATION UNCHANGED",.8,6.29,4.8);
-  txt(s,"Lower miscellaneous COS contributed B$3,371.02 of the B$3,941.33 COS reduction.",
-    5.89,6.27,6.65,.47,11.5,{color:C.mute});
-  sourceNotes(s,"Bridge: Q2 reported profit -855.48; revenue delta -957.91; COS saving +3941.33; OPEX saving +271.09; depreciation delta 0; Q3 reported profit 2399.03. Miscellaneous COS dropped from 4606.02 to 1235.00. This is an observed cost-category movement, not proof of recurring operational efficiency.");
+  const s=slide("Q2 reference figures: reconciliation remains open.","Historical reconciliation",
+    "Previously reported revenue remains the shareholder benchmark • No historical restatement is asserted",
+    "Sources: Previously issued Q2 presentation and supporting workbook • App snapshot: 6 Oct 2026 • BND");
+  table(s,[
+    ["Q2 revenue","Prior workbook","App recalculation","Difference"],
+    ["April","34,646.86","34,444.56","−202.30"],
+    ["May","24,179.57","23,569.96","−609.61"],
+    ["June","26,103.49","26,085.79","−17.70"],
+    ["Total","84,929.92","84,100.31","−829.61"],
+  ],.65,2.5,[3.0,3.0,3.05,3.0],.43,{size:13,bold:[4],highlight:[4]});
+  txt(s,"Prior presentation: B$84,930 (rounded). Q3 revenue is 2.1% below that previously reported benchmark.",
+    .76,4.82,11.8,.4,13,{bold:true});
+  bullet(s,"Profit comparison held","Prior Q2 presentation: B$3,235 profit.\nApp recalculation: B$855.48 loss.",.78,5.39,5.78);
+  bullet(s,"Next reconciliation step","Match underlying sales and expense records. The transaction-level cause of the differences is not yet established.",7.0,5.39,5.48,C.orange);
+  sourceNotes(s,"The prior Q2 workbook gives revenue 84,929.92 and profit 3,234.72; the issued deck rounds these to 84,930 and 3,235. The application snapshot recalculates revenue 84,100.31 and profit -855.48. The exact workbook-to-app revenue difference is -829.61; using the rounded presentation number gives -829.69. These differences are unresolved, not approved adjustments. No cause is attributed to refunds, revisions or accounting policy without transaction evidence. Q3 83,142.40 versus previously reported 84,930 is -2.1048%, displayed -2.1%. Quarter-on-quarter profit, margin and cost improvement claims have been removed.");
 }
 
 // 06 — Expense concentration.
@@ -310,7 +303,7 @@ function profitColor(c){return c<0?C.red:C.green;}
   const actions=[
     ["01","Recover loss-making branch contribution","Review Salar’s rent/staffing burden and Lambak’s demand/shift coverage. Track weekly branch results."],
     ["02","Understand September’s revenue decline","Compare branch-level sales, operating days and wash activity before assigning a cause."],
-    ["03","Validate whether lower costs are repeatable","Review the B$3,371.02 drop in miscellaneous COS and expense timing before projecting savings."],
+    ["03","Reconcile Q2 before drawing profit trends","Match the previously reported figures to current records before making cost-saving or profit-growth claims."],
     ["04","Strengthen quarterly shareholder reporting","Include cash position, significant liabilities and use of invested funds once reconciled figures are available."],
   ];
   actions.forEach((a,i)=>{
@@ -339,7 +332,7 @@ function profitColor(c){return c<0?C.red:C.green;}
   const s=slide("Appendix B — Reporting basis and accounting policies","Basis of preparation",
     "Q3 2026 shareholder update • Prepared 6 October 2026");
   const sections=[
-    ["Scope & currency","1 July–30 September 2026; Q2 comparison is 1 April–30 June. Inclusive Brunei calendar dates. BND (B$). Numbers may differ from older exports as source records are revised."],
+    ["Scope & currency","Q3: 1 July–30 September 2026, Brunei calendar dates; BND (B$). Revenue comparison uses Q2 previously reported: B$84,930. Q2 recalculations remain unreconciled (slide 5); profit comparisons are held."],
     ["Revenue","POS net of refunds under the app’s realization-day rules; subscriptions recognized over service periods. Paid physical vouchers recognized in full at sale under management policy, rather than deferred to redemption."],
     ["Expenses & allocation","Connecteam eligible expenses follow expense dates. “All” expenses split equally across five branches. Advance salary is excluded. Unknown-branch voucher sales remain central/unassigned."],
     ["Profit & depreciation","Reported profit¹ = EBITDA less recorded depreciation. Financing and income tax are not separately modelled. Depreciation uses management-entered monthly amounts across all five branches."],
@@ -360,5 +353,5 @@ for(const r of [q,p,...months,...branches.map(b=>b.totals)]) {
   if(r.net_profit !== r.ebitda-r.depreciation)throw Error("Profit does not reconcile");
 }
 for(const box of auditBounds)if(box.x<0||box.y<0||box.x+box.w>W+.01||box.y+box.h>H+.01)throw Error(`Out of bounds: ${JSON.stringify(box)}`);
-await pptx.writeFile({fileName:`${dir}/Cuci-Xpress-Q3-2026-Shareholder-Update-With-Brand-Momentum.pptx`});
+await pptx.writeFile({fileName:`${dir}/Cuci-Xpress-Q3-2026-Shareholder-Update-Reported-Q2-Benchmark.pptx`});
 console.log(`Created ${slideNo} slides; all financial identities and text bounds validated.`);
