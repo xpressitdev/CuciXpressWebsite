@@ -22,7 +22,8 @@ import { lucia } from "./auth/lucia";
 import { staffLucia } from "./auth/staffLucia";
 import { requireLuciaUser, requireStaff, requireStaffRole, requireStaffOrPlateOwner } from "./auth/middleware";
 import { leaderboardName, leaderboardPlate } from "./leaderboardPrivacy";
-import { registerProfitLossRoutes } from "./profitLossService";
+import { getProfitLossReport, registerProfitLossRoutes } from "./profitLossService";
+import { registerInvestorPerformanceRoutes } from "./investorPerformance";
 import { registerVoucherSalesRoutes } from "./voucherSales";
 import { registerSubscriptionRoutes, activatePocketPaySubscription } from "./subscriptions";
 import { verifyInteriorRefreshQr } from "./interiorRefresh";
@@ -247,6 +248,17 @@ export async function registerRoutes(app: Express): Promise<Server> {
   // Owner P&L lives in a focused module so this legacy route file remains the
   // authoritative home of POS accounting helpers without duplicating sync code.
   registerProfitLossRoutes(app);
+  registerInvestorPerformanceRoutes(app, async (year, branch, range) => {
+    const report = await getProfitLossReport(year, branch, range);
+    return {
+      ...report,
+      coverage: {
+        ...report.coverage,
+        depreciationMissingMonths: report.coverage.depreciationMissingMonths.map(month =>
+          typeof month === "number" ? `${year}-${String(month).padStart(2, "0")}` : month),
+      },
+    };
+  });
   registerVoucherSalesRoutes(app);
   // Revenue/queue is realized on the day a wash is CLAIMED, not the day it was
   // paid or when its QR was generated. Prepaid QR orders create the order row

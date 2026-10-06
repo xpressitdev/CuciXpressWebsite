@@ -20,3 +20,9 @@ Shareholder updates should also explain reputation-building alongside modest cur
 **Why:** The user wants existing investors to understand these efforts and remain confident in the company's direction: “keep the faith, believe in the company, and insyaAllah we are moving in the right direction.”
 
 **How to apply:** Attribute these qualitative examples to management. Activity dates, contract terms and measured returns were not specified; do not invent formal partnerships, endorsements, Q3 dates or guaranteed financial outcomes.
+
+The user maintains a separate investor website at https://cucixpress-investors.replit.app and explicitly approved public aggregate live financial reporting for now. They said: “currently the investor website is not access limited, people who has the link can access the data. in the future i want to make it more secure.”
+
+**Why:** The user wants investors to obtain current business-performance updates from the main Cuci Xpress app without manual duplication.
+
+**How to apply:** Limit public reporting to aggregate financial results; this approval does not cover customer, employee or transaction-level records. Keep previously issued reports separate from the live feed. Future private access must protect both the source feed and the investor website, not merely hide its dashboard. A published URL alone does not provide edit access to the separate investor project.
