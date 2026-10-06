@@ -1,0 +1,111 @@
+Yes—detailed financial data would let the dashboard show Q3 using the same categories and reporting structure as earlier periods, rather than treating Q3 expenses as a single total.
+
+I’ll pause the dashboard integration here. The request should be for **complete, read-only financial reporting access**, not unrestricted public access to customer details, credentials or operational controls.
+
+Copy this prompt to the **cucixpress.com agent**:
+
+---
+
+## Provide complete financial data for the investor website
+
+Our separate investor website currently imports:
+
+`https://cucixpress.com/api/public/investor-performance?year=2026&quarter=3`
+
+This endpoint now correctly covers **1 July–30 September 2026**, but its aggregated totals are insufficient to reproduce the detailed accounting dashboard and expense breakdowns used in our earlier reports.
+
+Extend the integration to provide complete, reconcilable financial reporting data—not just performance totals.
+
+### 1. Provide detailed financial reporting access
+
+Supply the available underlying data needed for:
+
+- Monthly and quarterly P&L statements.
+- Revenue breakdowns by branch and stream: POS net sales, refunds, subscriptions and vouchers.
+- Cost of services/sales and operating expenses by stable accounting code, category, subcategory, month and branch.
+- Individual financial transactions supporting those totals, with stable IDs, effective/accounting dates, amounts, account mappings and source references.
+- Unmapped expenses, corrections, reversals and unallocated/central amounts.
+- Chart of accounts and accounting-category mappings.
+- Journal entries and balanced debit/credit lines, **if actual journal records exist**.
+- Opening balances, period movements and closing balances needed for a trial balance and balance sheet.
+- Cash/bank movements and supporting classifications needed for cash-flow reporting.
+- Fixed assets, acquisition dates, costs, residual values, useful lives, depreciation policies, depreciation charges and accumulated depreciation.
+
+Only supply records actually held by the source. If journal entries, opening balances, asset details or cash-flow classifications do not exist, explicitly mark them as unavailable. **Do not invent balancing entries, asset records or accounting classifications to make a report look complete.**
+
+### 2. Preserve accounting meaning and reconcile totals
+
+For Q3 2026, include exactly **1 July–30 September**, with separate July, August and September results. Exclude Q4.
+
+Provide consistent account codes and documented mappings so the investor website can present Q3 in the same reporting structure as its existing January–June dataset.
+
+Do not silently rewrite historical reports or force source figures to match them. Document differences in classification, recognition policy or reported versus calculated profit.
+
+Ensure:
+
+- Transaction details reconcile to category totals.
+- Category and monthly totals reconcile to the quarterly totals.
+- Branch amounts plus central/unallocated amounts reconcile to company totals.
+- Depreciation and reported-profit calculations are explained.
+- Unmapped expenses and reconciliation differences are explicitly disclosed.
+- Central amounts remain separate unless a documented allocation policy applies.
+
+Where exact reconciliation is not possible, return the discrepancy and reason rather than a fabricated adjustment.
+
+### 3. Use a stable, documented export contract
+
+Keep the existing public summary endpoint backward-compatible. Add a **protected, read-only financial export endpoint** for the investor website’s server.
+
+Include:
+
+- Schema version and export ID.
+- Requested period and actual data coverage.
+- Generation timestamp and latest successful expense-sync timestamp.
+- Currency `BND` and financial amounts as integer cents.
+- Stable record IDs and revision/update information.
+- Reporting policies, provisional warnings and reconciliation results.
+- Explicit availability/completeness indicators for each dataset.
+
+Preserve `null` for unavailable profit, depreciation or balances. Never replace unavailable values with zero.
+
+If pagination is necessary, all pages must belong to the same consistent export snapshot. Document how to retrieve the complete export without missing or duplicating records.
+
+### 4. Protect detailed data
+
+Use authenticated server-to-server access with a dedicated, revocable, read-only integration credential.
+
+Do not expose detailed financial exports publicly or place credentials in browser code. Configure credentials through secure secret storage; do not print them in chat or logs.
+
+Exclude unnecessary customer/employee personal information, investor identity numbers, passwords, payment credentials and other unrelated sensitive data. Financial references should support reconciliation without exposing private documents or personal records.
+
+The existing public summary may remain public.
+
+### 5. Preserve owner-triggered monthly publishing
+
+The investor website publishes approved monthly updates; it is **not a live dashboard**.
+
+The integration must support:
+
+1. An owner manually requests an export.
+2. The investor server validates and saves a dated snapshot.
+3. The owner reviews and approves that snapshot.
+4. Visitors see only the saved, approved data.
+
+Do not introduce polling, public refresh/import controls, or upstream fetching on visitor page loads. Ignore `refreshAfterSeconds` for scheduling.
+
+### 6. Verify and provide a handoff
+
+Test the actual Q3 export and confirm its reporting dates, completeness and reconciliation against the existing summary endpoint.
+
+Provide:
+
+- Endpoint paths and authentication instructions, without revealing secrets.
+- The response schema and pagination/export-consistency rules.
+- Accounting definitions and category mappings.
+- Q3 reconciliation results.
+- A clear list of unavailable datasets or unresolved differences.
+- Instructions for the investor website agent to consume the export securely.
+
+Do not claim the export supports complete BDAS financial statements unless the necessary underlying accounting records are actually available.
+
+---
