@@ -221,3 +221,31 @@ mtime_ms = 1791235596625
 storage_uri = "gcs://replit-rams-assets-pike/rams/assets/repl:a39e6913-24fd-4227-b04c-ff8317815489/f3428644-5931-4a3f-98bb-96498e966532/e8e9b318-9a92-4f2e-9152-54df6232d0bc"
 storage_version_token = "1791235611561686"
 content_type = "application/pdf"
+
+[[outputs]]
+id = "zIwbKuUO9GMNzLC8HiLCO"
+uri = "file://.local/outputs/q3-2026/Cuci-Xpress-Q3-2026-Shareholder-Update-Reported-Q2-Benchmark.pptx"
+type = "slides"
+title = "Cuci Xpress Q3 — Revised Q2 Comparison"
+description = "14-slide editable PowerPoint using previously reported Q2 revenue of B$84,930. Unresolved historical differences are shown separately; Q3 financials and brand-momentum slide retained."
+logical_id = "69e2cbe2-47a8-4797-b7c7-51bad3e19968"
+content_hash = "sha256:f972dcaddaeb28d3f756476c95e81f57a9a1a5fefc3faf4f6e125973760e3d43"
+size = 503052
+mtime_ms = 1791288206925
+storage_uri = "gcs://replit-rams-assets-pike/rams/assets/repl:a39e6913-24fd-4227-b04c-ff8317815489/69e2cbe2-47a8-4797-b7c7-51bad3e19968/096034b0-bda7-439e-ae86-01012caf5462"
+storage_version_token = "1791289180929474"
+content_type = "application/vnd.openxmlformats-officedocument.presentationml.presentation"
+
+[[outputs]]
+id = "LRHtt67YzwH4293wDiIv4"
+uri = "file://.local/outputs/q3-2026/Cuci-Xpress-Q3-2026-Shareholder-Update-Reported-Q2-Benchmark.pdf"
+type = "pdf"
+title = "Revised Q3 Shareholder Report — PDF"
+description = "Checked PDF version with the corrected revenue benchmark and a separate unresolved-reconciliation slide."
+logical_id = "b55f950b-3994-47a0-9d5a-d2bee2998a7c"
+content_hash = "sha256:0ab5fdcbee8cba138a541302279b4371a7885449192e88d4f9e719a422fd2b97"
+size = 192199
+mtime_ms = 1791288225292
+storage_uri = "gcs://replit-rams-assets-pike/rams/assets/repl:a39e6913-24fd-4227-b04c-ff8317815489/b55f950b-3994-47a0-9d5a-d2bee2998a7c/3b7ae5ef-f6d3-4ea2-979d-f9fe782e3b30"
+storage_version_token = "1791289183430422"
+content_type = "application/pdf"
