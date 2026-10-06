@@ -74,8 +74,8 @@ export async function createVoucherSale(input: unknown, idempotencyKey: string, 
   });
 }
 
-export async function voucherRevenue(start: string, end: string): Promise<PnlRevenueInput[]> {
-  const result = await db.execute(sql`SELECT extract(year FROM sale_date)::int AS year,
+export async function voucherRevenue(start: string, end: string, reader: Pick<typeof db, "execute"> = db): Promise<PnlRevenueInput[]> {
+  const result = await reader.execute(sql`SELECT extract(year FROM sale_date)::int AS year,
     extract(month FROM sale_date)::int AS month,branch_id::text AS branch_id,sum(total_cents)::bigint AS cents
     FROM voucher_sales WHERE status='active' AND sale_date BETWEEN ${start}::date AND ${end}::date
     GROUP BY 1,2,3`);

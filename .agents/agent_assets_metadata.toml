@@ -249,3 +249,17 @@ mtime_ms = 1791288225292
 storage_uri = "gcs://replit-rams-assets-pike/rams/assets/repl:a39e6913-24fd-4227-b04c-ff8317815489/b55f950b-3994-47a0-9d5a-d2bee2998a7c/3b7ae5ef-f6d3-4ea2-979d-f9fe782e3b30"
 storage_version_token = "1791289183430422"
 content_type = "application/pdf"
+
+[[outputs]]
+id = "aIh_9N4I58Bulu0upx_K_"
+uri = "file://docs/INVESTOR_FINANCIAL_EXPORT.md"
+type = "text"
+title = "Investor financial export — connection guide"
+description = "Attach this guide to the investor app’s Replit Agent. Includes protected endpoint, secret setup, schema, accounting mappings, Q3 reconciliation and owner approval workflow. No credentials included."
+logical_id = "cb16202a-3a00-48a5-b28b-9545e829f65c"
+content_hash = "sha256:ca95835692113cdd20cbcde0c74dfbed533c3d81dd76ad0e70b4795d64919c1a"
+size = 12504
+mtime_ms = 1791322455883
+storage_uri = "gcs://replit-rams-assets-pike/rams/assets/repl:a39e6913-24fd-4227-b04c-ff8317815489/cb16202a-3a00-48a5-b28b-9545e829f65c/794f74e5-bbf9-4e49-b196-59659503de59"
+storage_version_token = "1791322486817848"
+content_type = "text/markdown"

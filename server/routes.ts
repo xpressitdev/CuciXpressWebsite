@@ -24,6 +24,8 @@ import { requireLuciaUser, requireStaff, requireStaffRole, requireStaffOrPlateOw
 import { leaderboardName, leaderboardPlate } from "./leaderboardPrivacy";
 import { getProfitLossReport, registerProfitLossRoutes } from "./profitLossService";
 import { registerInvestorPerformanceRoutes } from "./investorPerformance";
+import { registerFinancialExportRoutes } from "./financialExportRoutes";
+import { generateFinancialExport } from "./financialExportService";
 import { registerVoucherSalesRoutes } from "./voucherSales";
 import { registerSubscriptionRoutes, activatePocketPaySubscription } from "./subscriptions";
 import { verifyInteriorRefreshQr } from "./interiorRefresh";
@@ -248,6 +250,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
   // Owner P&L lives in a focused module so this legacy route file remains the
   // authoritative home of POS accounting helpers without duplicating sync code.
   registerProfitLossRoutes(app);
+  registerFinancialExportRoutes(app, generateFinancialExport);
   registerInvestorPerformanceRoutes(app, async (year, branch, range) => {
     const report = await getProfitLossReport(year, branch, range);
     return {

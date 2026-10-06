@@ -44,3 +44,9 @@ The investor API integration was requested for Q3 2026 (1 July–30 September), 
 **Why:** The user explicitly corrected their original Q4 instruction: “what i meant was Q3, Q4 is not yet complete.”
 
 **How to apply:** Keep the requested report pinned to Q3 and preserve previously published snapshots. Do not silently advance an existing report into an unfinished quarter.
+
+Detailed investor reporting is authorized through a protected, read-only server connection, not through the public summary or unrestricted database access.
+
+**Why:** The user requested the attached complete-financial-reporting brief, including supporting transactions and reconciliation, while explicitly excluding personal records, credentials and operational controls.
+
+**How to apply:** Keep raw financial exports private in the investor server; public visitors see owner-approved aggregate snapshots. Supply only actually held accounting records. Reporting category mappings and monthly depreciation charges must not be presented as a statutory chart of accounts, balanced journal ledger or fixed-asset register.

@@ -1,5 +1,9 @@
 # Cuci Xpress → investor website: public aggregate performance feed
 
+For protected transaction/category-level financial reporting, see
+`docs/INVESTOR_FINANCIAL_EXPORT.md`. The public summary below remains unchanged;
+never add detailed records or the integration credential to its response.
+
 ## Status and access
 
 The Cuci Xpress side is implemented in `server/investorPerformance.ts`.

@@ -1038,17 +1038,33 @@ async function getAnnualProfitLossReport(year: number, branchId: string | "overa
  * path keeps calendar dates through recognition and only then buckets them by
  * year/month.
  */
+export type PnlReadConnection = Pick<typeof db, "execute">;
+export interface FinancialRecognition {
+  sourceType: string;
+  sourceId: string;
+  accountingDate: string;
+  branchId: string | null;
+  revenueCents: number;
+  mdrCents: number;
+  sourceAmountCents: number;
+  serviceStartAt: string;
+  serviceEndAt: string | null;
+}
+
 async function getCustomProfitLossReport(
   year: number,
   branchId: string | "overall",
   range: NormalizedDateRange,
+  connection: PnlReadConnection,
+  onRecognition?: (entry: FinancialRecognition) => void,
 ) {
+  const db = connection;
   const startSql = sql`${range.startDate}::date`;
   const endExclusive = ymdFromDayNumber(range.endDay + 1);
   const endSql = sql`${endExclusive}::date`;
   const startYear = Number(range.startDate.slice(0, 4));
   const endYear = Number(range.endDate.slice(0, 4));
-  const voucherRows = await voucherRevenue(range.startDate, range.endDate);
+  const voucherRows = await voucherRevenue(range.startDate, range.endDate, db);
   const [expenseRows, warningRows, depreciationRows, branchesRows, stateRows, posRows,
     counterRows, invoiceRows, legacyRows, feeRows, sourceRows, recurringRows] = await Promise.all([
     db.execute(sql`
@@ -1196,7 +1212,7 @@ async function getCustomProfitLossReport(
     if (existing) existing.count += 1;
     else revenueWarnings.push({ code, count: 1 });
   };
-  const addRecognition = (input: RecognitionInput, warningCode: string) => {
+  const addRecognition = (input: RecognitionInput, warningCode: string, sourceType: string, sourceId: string) => {
     const recognized = recognizeRevenueByBruneiDay(input);
     if (!recognized) {
       addRevenueWarning(warningCode);
@@ -1207,6 +1223,15 @@ async function getCustomProfitLossReport(
       const recognizedDate = ymdFromDayNumber(firstDay + index);
       if (recognizedDate >= range.startDate && recognizedDate <= range.endDate) {
         revenue.push({ ...entry, year: entry.year });
+        onRecognition?.({
+          sourceType, sourceId, accountingDate: recognizedDate,
+          branchId: entry.branchId,
+          revenueCents: entry.subscriptionRecognizedGrossCents,
+          mdrCents: entry.mdrCents,
+          sourceAmountCents: input.amountCents,
+          serviceStartAt: input.startsAt.toISOString(),
+          serviceEndAt: input.endsAt?.toISOString() ?? null,
+        });
       }
     });
   };
@@ -1224,7 +1249,7 @@ async function getCustomProfitLossReport(
     addRecognition({
       amountCents: gross, mdrCents: mdrFeeForGroup(bps, gross),
       startsAt: new Date(startDay * 86_400_000), branchId: row.branch_id ?? null,
-    }, "invalid_counter_subscription");
+    }, "invalid_counter_subscription", "counter_subscription_order", String(row.id));
   }
   for (const row of invoiceRows.rows as any[]) {
     if (!row.period_start || !row.period_end || !Number.isSafeInteger(Number(row.amount_cents))) {
@@ -1237,7 +1262,7 @@ async function getCustomProfitLossReport(
       amountCents: gross,
       mdrCents: mdrFeeForGroup(feeRates.get(pocketPay ? "qr_code|pocket_pay" : "card|") ?? 0, gross),
       startsAt: new Date(row.period_start), endsAt: new Date(row.period_end), branchId: null,
-    }, "invalid_subscription_invoice_period");
+    }, "invalid_subscription_invoice_period", "subscription_invoice", String(row.id));
   }
   for (const row of legacyRows.rows as any[]) {
     const pocketPay = row.payment_provider === "pocket_pay";
@@ -1246,7 +1271,7 @@ async function getCustomProfitLossReport(
       amountCents: gross,
       mdrCents: mdrFeeForGroup(feeRates.get(pocketPay ? "qr_code|pocket_pay" : "card|") ?? 0, gross),
       startsAt: new Date(row.created_at), branchId: null,
-    }, "legacy_subscription_without_paid_invoice");
+    }, "legacy_subscription_without_paid_invoice", "legacy_subscription", String(row.id));
   }
   const expenses: PnlExpenseInput[] = expenseRows.rows
     .filter((row: any) => !isInformationalPnlExpense(row.source_category))
@@ -1385,7 +1410,17 @@ export async function getProfitLossReport(
   }
   const range = normalizeProfitLossDateRange(requestedDateRange.startDate, requestedDateRange.endDate);
   if (!range) throw new Error("invalid_date_range");
-  return getCustomProfitLossReport(year, branchId, range);
+  return getCustomProfitLossReport(year, branchId, range, db);
+}
+
+/** Same P&L calculation, using the export's repeatable-read transaction. */
+export async function getFinancialProfitLossReport(
+  year: number, branchId: string, dates: ProfitLossDateRange,
+  connection: PnlReadConnection, onRecognition?: (entry: FinancialRecognition) => void,
+) {
+  const range = normalizeProfitLossDateRange(dates.startDate, dates.endDate);
+  if (!range) throw new Error("invalid_date_range");
+  return getCustomProfitLossReport(year, branchId, range, connection, onRecognition);
 }
 
 export function createConnecteamSyncHandler(
