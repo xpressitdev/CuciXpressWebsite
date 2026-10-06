@@ -13,11 +13,14 @@ submissions are shared. Existing owner/admin access controls are unchanged.
 
 Production source URL verified from deployment metadata:
 
-`https://cucixpress.com/api/public/investor-performance?year=2026&quarter=4`
+`https://cucixpress.com/api/public/investor-performance?year=2026&quarter=3`
 
-Omit both selectors to request the current Brunei quarter. Supply both to request
-a started quarter from Q4 2026 onward. Old Q1–Q3 reports are deliberately outside
-this feed, preserving previously disclosed figures and the open Q2 reconciliation.
+Omit both selectors to request the latest completed Brunei quarter. For this
+report, explicitly request Q3 2026 (1 July–30 September), not Q4-to-date.
+Supply both selectors to request a started quarter from Q3 2026 onward.
+Old Q1–Q2 reports are deliberately outside this feed, preserving previously
+disclosed figures and the open Q2 reconciliation. A newly imported Q3 snapshot
+must not silently overwrite any previously issued Q3 report.
 Future quarters, arbitrary dates, individual branches and unknown query keys are rejected.
 
 ## Recommended connection
@@ -39,10 +42,10 @@ would leave the original public feed readable.
 
 ## Dashboard requirements
 
-- Add a **Q4 2026 — Quarter to date** page and home-page card, leaving old reports intact.
+- Add a **Q3 2026 — July–September** page and home-page card, leaving old reports intact.
 - Show the returned `period.startDate`, `period.endDate` and `period.timezone`.
   Use `period.status`, not the calendar title alone, to distinguish an open quarter
-  from a completed period. Q4 ends 31 December; it is not final while still open.
+  from a completed period. Q3 ended 30 September; do not include October/Q4 data.
 - Financial fields end in `Cents`: divide by 100 only for display, formatting as BND/B$.
 - Display revenue, gross profit, EBITDA, recorded depreciation, reported profit
   and profit margin from `totals`; show `months` and `branches`.
@@ -111,13 +114,14 @@ Source CORS permits the published investor site's exact origin:
 ## Ready-to-paste request for the investor project's Replit Agent
 
 Connect this investor website to the public aggregate performance API at
-https://cucixpress.com/api/public/investor-performance?year=2026&quarter=4.
+https://cucixpress.com/api/public/investor-performance?year=2026&quarter=3.
 First verify the source endpoint returns schemaVersion 1 (the source app must
 be republished before it is available). Import once when the owner prepares each
 monthly update using a secured owner action or server maintenance command.
 Persist dated, validated snapshots in durable storage and serve the latest
 approved snapshot at /api/performance. No polling, public refresh action, or
-upstream fetches on visitor page loads. Add a Q4-to-date dashboard/home card using the returned
+upstream fetches on visitor page loads. Add a Q3 2026 (1 July–30 September)
+dashboard/home card, not Q4-to-date, using the returned
 totals, monthly results and branch results. Keep existing published quarterly
 reports unchanged. Format integer cents as BND. Show the reporting date range,
 report-generation timestamp, expense-sync timestamp, provisional warnings,

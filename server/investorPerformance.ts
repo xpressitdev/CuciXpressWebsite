@@ -25,7 +25,7 @@ const POLICY = [
   "Subscription revenue is recognised over service periods.",
   "Reported profit is EBITDA less configured depreciation; financing and income tax are not separately modelled.",
   "Depreciation is prorated through the reporting cutoff. Advance salary is informational, not a P&L expense.",
-  "Previously published quarters remain separate snapshots; this feed begins with Q4 2026.",
+  "Previously published quarters remain separate snapshots; this feed begins with Q3 2026.",
 ];
 
 export function investorPeriod(rawYear: unknown, rawQuarter: unknown, now = new Date()) {
@@ -34,11 +34,13 @@ export function investorPeriod(rawYear: unknown, rawQuarter: unknown, now = new 
   }).format(now);
   const currentYear = Number(today.slice(0, 4));
   const currentQuarter = Math.ceil(Number(today.slice(5, 7)) / 3);
+  const completedYear = currentQuarter === 1 ? currentYear - 1 : currentYear;
+  const completedQuarter = currentQuarter === 1 ? 4 : currentQuarter - 1;
   if ((rawYear === undefined) !== (rawQuarter === undefined)) throw Error("invalid_period");
-  const year = rawYear === undefined ? currentYear : typeof rawYear === "string" && /^\d{4}$/.test(rawYear) ? Number(rawYear) : NaN;
-  const quarter = rawQuarter === undefined ? currentQuarter : typeof rawQuarter === "string" && /^[1-4]$/.test(rawQuarter) ? Number(rawQuarter) : NaN;
+  const year = rawYear === undefined ? completedYear : typeof rawYear === "string" && /^\d{4}$/.test(rawYear) ? Number(rawYear) : NaN;
+  const quarter = rawQuarter === undefined ? completedQuarter : typeof rawQuarter === "string" && /^[1-4]$/.test(rawQuarter) ? Number(rawQuarter) : NaN;
   if (!Number.isInteger(year) || !Number.isInteger(quarter) ||
-      year < 2026 || (year === 2026 && quarter < 4) ||
+      year < 2026 || (year === 2026 && quarter < 3) ||
       year > currentYear || (year === currentYear && quarter > currentQuarter)) throw Error("invalid_period");
   const startMonth = (quarter - 1) * 3 + 1;
   const startDate = `${year}-${String(startMonth).padStart(2, "0")}-01`;
@@ -182,7 +184,7 @@ export function registerInvestorPerformanceRoutes(app: Express, read: ReportRead
       if (Object.keys(req.query).some(k => !["year", "quarter"].includes(k))) throw Error("invalid_period");
       period = investorPeriod(req.query.year, req.query.quarter, clock());
     } catch {
-      return res.status(400).json({ error: "invalid_period", message: "Use year and quarter together. Only started quarters from Q4 2026 onward are supported." });
+      return res.status(400).json({ error: "invalid_period", message: "Use year and quarter together. Only started quarters from Q3 2026 onward are supported; the default is the latest completed quarter." });
     }
     try {
       const payload = await feed(period);

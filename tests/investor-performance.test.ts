@@ -16,11 +16,11 @@ const values = {
 function fixture(): InvestorSourceReport {
   return {
     ytd: { ...values },
-    months: [{ year: 2026, month: 10, lines: Object.entries(values).map(([key, cents]) => ({ key, cents })) }],
+    months: [{ year: 2026, month: 9, lines: Object.entries(values).map(([key, cents]) => ({ key, cents })) }],
     branches: [{ id: 1, name: "Tungku" }],
     coverage: {
       status: "live", depreciationMissingMonths: [], warnings: [],
-      ranges: { observed: { pos: { firstDate: "2026-10-01", lastDate: "2026-10-06" } } },
+      ranges: { observed: { pos: { firstDate: "2026-09-01", lastDate: "2026-09-30" } } },
     },
     sync: { status: "succeeded", lastSuccessfulAt: "2026-10-05T19:59:00Z" },
   };
@@ -31,8 +31,15 @@ function appFor(reader = vi.fn(async () => fixture()), clock = () => NOW) {
   return { app, reader };
 }
 describe("public investor performance", () => {
-  it("uses Brunei quarter-to-date with the correct full-quarter end", () => {
+  it("defaults to the last completed Brunei quarter and permits explicit quarter-to-date requests", () => {
     expect(investorPeriod(undefined, undefined, NOW)).toMatchObject({
+      label: "Q3 2026", startDate: "2026-07-01", endDate: "2026-09-30",
+      quarterEndDate: "2026-09-30", status: "completed_period",
+    });
+    expect(investorPeriod(undefined, undefined, new Date("2027-01-01T00:00:00Z"))).toMatchObject({
+      label: "Q4 2026", endDate: "2026-12-31", status: "completed_period",
+    });
+    expect(investorPeriod("2026", "4", NOW)).toMatchObject({
       label: "Q4 2026", startDate: "2026-10-01", endDate: "2026-10-06",
       quarterEndDate: "2026-12-31", status: "quarter_to_date",
     });
@@ -60,7 +67,7 @@ describe("public investor performance", () => {
       unallocated: { revenueCents: 1100, ebitdaCents: 1100 },
     });
     expect(JSON.stringify(res.body)).not.toMatch(/private@example|private staff|expenseRows|"id"/);
-    expect(reader).toHaveBeenCalledWith(2026, "overall", { startDate: "2026-10-01", endDate: "2026-10-06" });
+    expect(reader).toHaveBeenCalledWith(2026, "overall", { startDate: "2026-07-01", endDate: "2026-09-30" });
   });
   it("supports CORS for the investor site without advertising credentials", async () => {
     const { app } = appFor();
@@ -80,7 +87,7 @@ describe("public investor performance", () => {
   });
   it("hides incomplete depreciation/profit rather than asserting a zero charge", async () => {
     const source = fixture();
-    source.coverage.depreciationMissingMonths = ["2026-10"];
+    source.coverage.depreciationMissingMonths = ["2026-09"];
     const { app } = appFor(vi.fn(async () => source));
     const res = await request(app).get(INVESTOR_PATH).expect(200);
     expect(res.body.totals.depreciationCents).toBeNull();
@@ -107,7 +114,7 @@ describe("public investor performance", () => {
     let now = NOW;
     const reader = vi.fn(async () => fixture());
     const feed = createInvestorFeed(reader, () => now);
-    const period = investorPeriod(undefined, undefined, now);
+    const period = investorPeriod("2026", "4", now);
     await Promise.all([feed(period), feed(period)]);
     expect(reader).toHaveBeenCalledTimes(2); // Overall + one branch, not twice each.
     await feed(period);
@@ -116,7 +123,7 @@ describe("public investor performance", () => {
     await feed(period);
     expect(reader).toHaveBeenCalledTimes(4);
     now = new Date("2026-10-06T20:00:00Z");
-    await feed(investorPeriod(undefined, undefined, now));
+    await feed(investorPeriod("2026", "4", now));
     expect(reader).toHaveBeenCalledTimes(6);
   });
   it("returns a sanitized retryable failure and briefly caches failures", async () => {

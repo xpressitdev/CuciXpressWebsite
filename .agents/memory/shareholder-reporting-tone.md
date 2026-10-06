@@ -29,7 +29,7 @@ The user maintains a separate investor website at https://cucixpress-investors.r
 
 Do not present development/preview data-quality warnings as confirmed production deficiencies.
 
-**Why:** The user corrected a statement that Q4 depreciation was incomplete, saying it was already completed in live production; that statement had been based only on the preview API.
+**Why:** A preview-only warning was wrongly presented as a production deficiency. The user said depreciation was already completed in production and subsequently clarified they meant Q3, not Q4.
 
 **How to apply:** Verify the deployed reporting endpoint and its actual environment before asserting missing production records. If the new endpoint is not yet available in production, say production coverage remains unverified. Do not ask the owner to re-enter completed production settings based solely on a preview result.
 
@@ -38,3 +38,9 @@ Investor updates are monthly, not a five-minute live dashboard.
 **Why:** The user said the investor link is updated every month and questioned the cost of five-minute fetching.
 
 **How to apply:** Use durable monthly snapshots for visitors rather than polling the operational API. Preserve actual reporting cutoff and generation timestamps; do not label a monthly snapshot as live.
+
+The investor API integration was requested for Q3 2026 (1 July–30 September), not Q4-to-date.
+
+**Why:** The user explicitly corrected their original Q4 instruction: “what i meant was Q3, Q4 is not yet complete.”
+
+**How to apply:** Keep the requested report pinned to Q3 and preserve previously published snapshots. Do not silently advance an existing report into an unfinished quarter.
