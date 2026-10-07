@@ -263,3 +263,17 @@ mtime_ms = 1791322455883
 storage_uri = "gcs://replit-rams-assets-pike/rams/assets/repl:a39e6913-24fd-4227-b04c-ff8317815489/cb16202a-3a00-48a5-b28b-9545e829f65c/794f74e5-bbf9-4e49-b196-59659503de59"
 storage_version_token = "1791322486817848"
 content_type = "text/markdown"
+
+[[outputs]]
+id = "1JSW6xmE0619AstEGttKW"
+uri = "file://exports/Cuci_Xpress_2026_Profit_and_Loss.xlsx"
+type = "table"
+title = "2026 Profit & Loss — Cuci Xpress"
+description = "Excel workbook covering 1 January–7 October 2026, with monthly consolidated and five-branch statements, YTD totals and reporting notes."
+logical_id = "9caf420d-1aa8-47fd-a1b6-ca52f8e80207"
+content_hash = "sha256:27967492502a1aa544e8bbc71a51a2c5fd9afa52a70910f056de2f19a1e5bdc0"
+size = 35299
+mtime_ms = 1791376278396
+storage_uri = "gcs://replit-rams-assets-pike/rams/assets/repl:a39e6913-24fd-4227-b04c-ff8317815489/9caf420d-1aa8-47fd-a1b6-ca52f8e80207/d9d0d833-60e2-4dcc-a6e0-5c36ca6f0ab6"
+storage_version_token = "1791376288734223"
+content_type = "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
