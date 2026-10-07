@@ -277,3 +277,17 @@ mtime_ms = 1791376278396
 storage_uri = "gcs://replit-rams-assets-pike/rams/assets/repl:a39e6913-24fd-4227-b04c-ff8317815489/9caf420d-1aa8-47fd-a1b6-ca52f8e80207/a6aaa489-4096-4ec5-bd45-fe568b8a86ae"
 storage_version_token = "1791376527758803"
 content_type = "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+
+[[outputs]]
+id = "IWWKMmdlcwZXvse4FLHSY"
+uri = "file://exports/Cuci_Xpress_2026_Profit_and_Loss.xls"
+type = "table"
+title = "2026 Profit & Loss — Excel .xls"
+description = "Genuine Excel 97–2003 binary workbook, not ZIP-based. All eight worksheets and 3,295 populated cells verified against the original report."
+logical_id = "233a2b68-cdb4-476b-98c6-2ef54e868c5e"
+content_hash = "sha256:0952616aa3b340ad08adae31c491fe2b21a75a577a4f585cf53e82f7b8fa0740"
+size = 58880
+mtime_ms = 1791377366144
+storage_uri = "gcs://replit-rams-assets-pike/rams/assets/repl:a39e6913-24fd-4227-b04c-ff8317815489/233a2b68-cdb4-476b-98c6-2ef54e868c5e/ab28bd28-0938-4283-89b3-28d3b67efafa"
+storage_version_token = "1791377375709729"
+content_type = "application/vnd.ms-excel"
