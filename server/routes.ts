@@ -3022,7 +3022,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
         const orders = (await db.execute(sql`
           SELECT o.id, o.ticket_code, o.plate, o.created_at, o.payment_method,
                  o.package_name, o.total_cents, o.status, o.refunded_at,
-                 o.qr_provider, o.legacy_source,
+                 o.qr_provider, o.legacy_source, o.order_type, o.claimed_at,
                  b.name AS branch_name, s.name AS staff_name
             FROM orders o
             LEFT JOIN branches b ON b.id = o.branch_id
@@ -3123,7 +3123,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
       const orders = (await db.execute(sql`
         SELECT o.id, o.ticket_code, o.plate, o.created_at, o.payment_method,
                o.package_name, o.total_cents, o.status, o.refunded_at,
-               o.qr_provider,
+               o.qr_provider, o.order_type, o.claimed_at,
                b.name AS branch_name, s.name AS staff_name
           FROM orders o
           LEFT JOIN branches b ON b.id = o.branch_id

@@ -23,6 +23,7 @@ import {
 } from "lucide-react";
 import { apiRequest } from "@/lib/queryClient";
 import { useToast } from "@/hooks/use-toast";
+import { customerHistoryLabel } from "@/lib/customerHistoryLabel";
 import { SendReceiptButton } from "@/components/admin/SendReceiptButton";
 
 const formatBND = (cents: number) =>
@@ -150,6 +151,7 @@ interface CustomerDetailResp {
     payment_method: string; package_name: string; total_cents: number;
     status: string; refunded_at: string | null;
     qr_provider: string | null;
+    order_type: string | null; claimed_at: string | null;
     branch_name: string | null; staff_name: string | null;
   }>;
   branch_split: Array<{
@@ -1272,6 +1274,7 @@ function CustomerDetail({ id, onDeleted }: { id: number; onDeleted?: () => void 
         ) : (
           <div className="space-y-1.5 max-h-80 overflow-y-auto pr-1">
             {orders.map((o) => {
+              const historyLabel = customerHistoryLabel(o);
               const isRefunded = o.status === "refunded";
               const isPending  = o.status === "pending_payment";
               const isVoided   = o.status === "voided";
@@ -1303,11 +1306,11 @@ function CustomerDetail({ id, onDeleted }: { id: number; onDeleted?: () => void 
                       </div>
                       <div className="text-gray-600 flex items-center gap-1 mt-0.5">
                         <Receipt className="w-3 h-3" />
-                        {o.ticket_code
-                          ? <span>{o.ticket_code} · {o.plate}</span>
-                          : <span className="italic text-amber-700 flex items-center gap-1">
-                              <Clock className="w-3 h-3" /> awaiting scan · {o.plate}
-                            </span>}
+                        {historyLabel.awaitingScan
+                          ? <span className="italic text-amber-700 flex items-center gap-1">
+                              <Clock className="w-3 h-3" /> {historyLabel.text} · {o.plate}
+                            </span>
+                          : <span>{historyLabel.text} · {o.plate}</span>}
                       </div>
                       <div className="text-gray-500 mt-0.5">
                         {formatDateTime(o.created_at)} · {o.branch_name ?? "—"}
