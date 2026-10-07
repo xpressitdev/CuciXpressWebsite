@@ -11,3 +11,9 @@ Counter-sold Unlimited passes create a WALK-IN customer row (user_id NULL) keyed
 - Claim adoption is two-branched: user has no customers row → adopt the walk-in row (SET user_id, guarded WHERE user_id IS NULL); user already has one → re-point that vehicle's memberships + car to it. Both must stay atomic.
 
 **How to apply:** any new "sell at counter, claim online later" entitlement should reuse this pattern (walk-in row + phone match + limiter + collision confirm), not both-NULL unclaimed cars.
+
+Counter-paid Unlimited passes must support both existing customers and walk-ins without requiring walk-ins to register online first.
+
+**Why:** The owner explicitly confirmed that counter sales should support both existing and walk-in customers.
+
+**How to apply:** Keep online registration optional at sale time; retain later phone-based claiming and do not create fake login accounts to satisfy a sales-record relationship.

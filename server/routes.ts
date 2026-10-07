@@ -11528,6 +11528,14 @@ export async function registerRoutes(app: Express): Promise<Server> {
           `);
         }
 
+        // Memberships reference customers.id, but orders.customer_id references
+        // users.id. Walk-ins have no login yet and must leave that order FK null.
+        const holder = (await tx.execute(sql`
+          SELECT user_id FROM customers WHERE id = ${customerId} LIMIT 1
+        `)).rows[0] as { user_id: number | null } | undefined;
+        if (!holder) throw new Error('membership_customer_missing');
+        const orderUserId = holder.user_id ?? null;
+
         // 3. Membership: extend an existing active unlimited pass on this
         //    vehicle, otherwise create a fresh one-month pass.
         const existing = (await tx.execute(sql`
@@ -11598,7 +11606,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
             ${body.payment_method}, ${(body.payment_method === 'qr_code' || body.payment_method === 'bank_transfer') ? (body.qr_provider ?? null) : null}, ${body.payment_method === 'cash' ? null : (body.payment_ref ?? null)},
             ${paidAmountCents}, ${changeCents},
             NULL, 'done',
-            ${car!.id}, ${customerId},
+            ${car!.id}, ${orderUserId},
             ${shiftIdForOrder}, 'counter_subscription'
           )
         `);
