@@ -1145,6 +1145,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
       const rows = (await db.execute(sql`
         SELECT o.id, o.ticket_code, o.plate, o.ticket_day, o.created_at,
+               ${bizDay('o.')} AS report_at,
                o.payment_method, o.qr_provider, o.package_name, o.total_cents, o.paid_amount_cents,
                o.change_cents, o.status, o.refunded_at, o.refund_reason,
                o.customer_name_walkin, o.original_receipt_no, o.kedaipos_pos_name,
@@ -1719,6 +1720,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
       const rows = (await db.execute(sql`
         SELECT
           o.id, o.ticket_code, o.plate, o.created_at,
+          ${bizDay('o.')} AS report_at,
           o.payment_method, o.qr_provider, o.status,
           o.subtotal_cents, o.total_cents, o.paid_amount_cents,
           o.change_cents, o.discount_cents, o.promo_discount_cents,
@@ -1803,7 +1805,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
       }));
 
       for (const r of rows) {
-        const { dateSerial, timeFrac } = excelDateParts(new Date(r.created_at));
+        const { dateSerial, timeFrac } = excelDateParts(new Date(r.report_at));
         const excelRow = ws.addRow([
           'cucixpress_live_export',
           r.kedaipos_id ?? r.id,

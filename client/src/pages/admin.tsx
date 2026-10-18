@@ -1537,7 +1537,7 @@ interface OrdersReportResponse {
   page: number; per_page: number; total_count: number;
   rows: Array<{
     id: string; ticket_code: string; plate: string;
-    ticket_day: string; created_at: string;
+    ticket_day: string; created_at: string; report_at: string;
     payment_method: string; qr_provider: string | null;
     payment_label: string; package_name: string;
     total_cents: number; paid_amount_cents: number | null;
@@ -1855,7 +1855,7 @@ function OrdersReportTab() {
                 <TableBody>
                   {rows.map((r) => {
                     const isRefunded = r.status === "refunded";
-                    const dt = new Date(r.created_at);
+                    const dt = new Date(r.report_at);
                     const dateStr = dt.toLocaleString("en-GB", {
                       day: "2-digit", month: "short", year: "numeric",
                       hour: "2-digit", minute: "2-digit",
