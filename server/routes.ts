@@ -2,6 +2,8 @@ import type { Express, Request } from "express";
 import { createServer, type Server } from "http";
 import { z } from "zod";
 import { db } from "./db";
+import { resolveJubliEmasPlate } from "./jubliEmasPlates";
+import { plateSearchKey } from "../shared/plateFormat";
 import { collaborationSubmissions, insertCollaborationSubmissionSchema, subscriptionSignups, insertSubscriptionSignupSchema } from "@shared/schema";
 import { sendCollaborationEmail, sendPaymentConfirmation, sendSubscriptionNotification } from "./email";
 import { processPocketPayPayment, handlePaymentCallback, queryTransactionStatus } from "./payment";
@@ -5066,7 +5068,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   }
 
-  app.post("/api/process-payment", async (req, res) => {
+  app.post("/api/process-payment", resolveJubliEmasPlate("carPlate"), async (req, res) => {
     try {
       const paymentData = req.body;
       
@@ -6532,7 +6534,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
   }
 
   // POST /api/auth/customer/register/start
-  app.post('/api/auth/customer/register/start', async (req, res) => {
+  app.post('/api/auth/customer/register/start', resolveJubliEmasPlate("plate"), async (req, res) => {
     const ip = req.ip ?? 'unknown';
 
     // Per-IP: max 10 OTP send attempts per 10 minutes.
@@ -6709,7 +6711,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
   });
 
   // POST /api/auth/customer/register/verify
-  app.post('/api/auth/customer/register/verify', async (req, res) => {
+  app.post('/api/auth/customer/register/verify', resolveJubliEmasPlate("plate"), async (req, res) => {
     const parsed = registerVerifySchema.safeParse(req.body);
     if (!parsed.success) {
       return res.status(400).json({ ok: false, reason: 'invalid_request' });
@@ -7899,7 +7901,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
   const claimPhoneAttempts = new Map<string, { count: number; firstAt: number }>();
   const CLAIM_ATTEMPT_MAX = 5;
   const CLAIM_ATTEMPT_WINDOW_MS = 15 * 60 * 1000;
-  app.post('/api/customer/cars', requireLuciaUser, async (req, res) => {
+  app.post('/api/customer/cars', requireLuciaUser, resolveJubliEmasPlate("license_plate"), async (req, res) => {
     const parsed = customerCarSchema.safeParse(req.body);
     if (!parsed.success) {
       return res.status(400).json({ ok: false, reason: 'invalid_request' });
@@ -8693,7 +8695,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
     promo_code: z.string().trim().min(1).max(40).optional().nullable(),
   });
 
-  app.post('/api/pos/orders', requireStaff, requireStaffRole('owner', 'manager', 'lane', 'cashier'), async (req, res) => {
+  app.post('/api/pos/orders', requireStaff, requireStaffRole('owner', 'manager', 'lane', 'cashier'), resolveJubliEmasPlate("plate"), async (req, res) => {
     const parsed = posOrderSchema.safeParse(req.body);
     if (!parsed.success) {
       return res.status(400).json({
@@ -10938,7 +10940,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
   app.get('/api/pos/vehicles/search', requireStaff, async (req, res) => {
     const q = String(req.query.q ?? '').trim();
     if (q.length < 1) return res.json({ vehicles: [] });
-    const norm = normalizePlate(q);
+    const norm = plateSearchKey(q);
     try {
       const rows = (await db.execute(sql`
         SELECT c.id, c.license_plate, c.brand, c.model, c.color, c."type",
@@ -10946,9 +10948,10 @@ export async function registerRoutes(app: Express): Promise<Server> {
                cu.id AS customer_id, cu.phone AS customer_phone, cu.name AS customer_name
           FROM cars c
           LEFT JOIN customers cu ON cu.id = c.customer_id
-         WHERE UPPER(REGEXP_REPLACE(c.license_plate, '\s+', '', 'g')) LIKE ${norm + '%'}
+         WHERE REGEXP_REPLACE(UPPER(REGEXP_REPLACE(c.license_plate, '[[:space:]]', '', 'g')), '^JUBLIEMAS', 'JE') LIKE ${norm + '%'}
+            OR UPPER(REGEXP_REPLACE(c.license_plate, '[[:space:]]', '', 'g')) LIKE ${q.toUpperCase().replace(/\s+/g, '') + '%'}
          ORDER BY
-           (UPPER(REGEXP_REPLACE(c.license_plate, '\s+', '', 'g')) = ${norm}) DESC,
+           (REGEXP_REPLACE(UPPER(REGEXP_REPLACE(c.license_plate, '[[:space:]]', '', 'g')), '^JUBLIEMAS', 'JE') = ${norm}) DESC,
            COALESCE(c.last_seen_at, 'epoch'::timestamptz) DESC,
            c.id DESC
          LIMIT 20
@@ -11412,7 +11415,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
     // and the cashier must explicitly confirm before we reuse that row.
     confirm_existing_customer: z.boolean().optional(),
   });
-  app.post('/api/pos/subscriptions/sell', requireStaff, requireStaffRole('owner', 'manager', 'lane', 'cashier'), async (req, res) => {
+  app.post('/api/pos/subscriptions/sell', requireStaff, requireStaffRole('owner', 'manager', 'lane', 'cashier'), resolveJubliEmasPlate("plate"), async (req, res) => {
     const parsed = sellPosSubscriptionSchema.safeParse(req.body);
     if (!parsed.success) {
       return res.status(400).json({ error: 'invalid_request', details: parsed.error.flatten() });
@@ -11722,7 +11725,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
   // Trunk-owned cars (cars.user_id IS NOT NULL) are NEVER re-bound to a
   // different user from the POS surface; we only ever attach a POS
   // customer_id when it's currently null. This protects trunk semantics.
-  app.post('/api/pos/vehicles', requireStaff, requireStaffRole('owner', 'manager', 'lane', 'cashier'), async (req, res) => {
+  app.post('/api/pos/vehicles', requireStaff, requireStaffRole('owner', 'manager', 'lane', 'cashier'), resolveJubliEmasPlate("license_plate"), async (req, res) => {
     const schema = z.object({
       license_plate: z.string().trim().min(1).max(20),
       brand: z.string().trim().max(80).optional().nullable(),

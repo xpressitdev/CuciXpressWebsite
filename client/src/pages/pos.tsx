@@ -783,7 +783,9 @@ export default function POS() {
         setSellExistingName(name ?? "an existing customer");
         return;
       }
-      const msg = text.includes("customer_details_required")
+      const msg = text.includes("plate_review_required")
+        ? "This Jubli Emas number has multiple vehicle records. Ask the owner to review them; no records were merged."
+        : text.includes("customer_details_required")
         ? "Enter the customer's name and phone number."
         : text.includes("cash_amount_too_low")
           ? "Cash received is less than B$39.00."
@@ -1122,7 +1124,9 @@ export default function POS() {
       const msg = String(err?.message ?? err);
       toast({
         title: "Could not create order",
-        description: msg.includes("409")
+        description: msg.includes("plate_review_required")
+          ? "This Jubli Emas number has multiple vehicle records. Ask the owner to review them; no records were merged."
+          : msg.includes("409")
           ? "Ticket collision — please try again."
           : msg.includes("car_details_required")
             ? "First-time plate — enter the car's brand and model first."
@@ -1706,7 +1710,7 @@ export default function POS() {
                         // Delay so a click on a suggestion still registers.
                         setTimeout(() => setShowSuggestions(false), 150);
                       }}
-                      placeholder="BB1234"
+                      placeholder="BB1234 or JE2266"
                       autoCapitalize="characters"
                       autoComplete="off"
                       data-testid="input-plate"

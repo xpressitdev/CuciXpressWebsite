@@ -17,6 +17,7 @@ import type { Express } from "express";
 import { sql } from "drizzle-orm";
 import { z } from "zod";
 import { db } from "./db";
+import { resolveJubliEmasPlate } from "./jubliEmasPlates";
 import { requireLuciaUser, requireStaff, requireStaffRole } from "./auth/middleware";
 import {
   isCyberSourceConfigured,
@@ -442,7 +443,7 @@ export function registerSubscriptionRoutes(app: Express) {
     car_plate: z.string().trim().min(1).max(120),
   });
 
-  app.post("/api/subscriptions/confirm", requireLuciaUser, async (req, res) => {
+  app.post("/api/subscriptions/confirm", requireLuciaUser, resolveJubliEmasPlate("car_plate", true), async (req, res) => {
     if (!isCyberSourceConfigured()) {
       return res.status(503).json({ error: "payments_unavailable" });
     }
@@ -664,6 +665,7 @@ export function registerSubscriptionRoutes(app: Express) {
   app.post(
     "/api/subscriptions/pocketpay/start",
     requireLuciaUser,
+    resolveJubliEmasPlate("car_plate", true),
     async (req, res) => {
       const parsed = ppStartSchema.safeParse(req.body);
       if (!parsed.success) {

@@ -1,4 +1,5 @@
 - [P&L source reconciliation](pnl-source-reconciliation.md) — workbook is a historical reference, not a balancing target; live Connecteam revisions and POS lineage can differ legitimately.
+- [Jubli Emas standard](jubli-emas-standard.md) — new plates use JE; existing aliases retain identity and ambiguous duplicates require owner review, never automatic merging.
 - [Shareholder reporting tone](shareholder-reporting-tone.md) — updates address existing investors; describe reporting scope without implying unsupplied records are company deficiencies.
 - [Auth session cookies](auth-session-cookies.md) — customer login dropping on mobile? Check Lucia `sessionCookie.expires` (true=persistent, false=dies on tab close), not session-expiry bugs.
 - [Lane queue ordering](queue-ordering.md) — queue ordered by queue_position NULLS LAST then created_at; the 3 readers (snapshot SQL, LaneControl sort, today route SELECT) must stay in lockstep.
