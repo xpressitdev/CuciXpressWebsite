@@ -305,3 +305,17 @@ mtime_ms = 1792298859458
 storage_uri = "gcs://replit-rams-assets-pike/rams/assets/repl:a39e6913-24fd-4227-b04c-ff8317815489/cc8919af-6f16-47c0-acea-f5b78e7c26c9/954dc14c-4cf4-4ae0-b4e7-0213fab33efb"
 storage_version_token = "1792298904802369"
 content_type = "application/vnd.ms-excel"
+
+[[outputs]]
+id = "TqTHSgigC5mdru6tc7X43"
+uri = "file://exports/Cuci_Xpress_UTB_Interview_Responses.pdf"
+type = "pdf"
+title = "Cuci Xpress — UTB Interview Responses"
+description = "Six-page PDF with all 14 draft answers, confidentiality statement, and clearly marked confirmation notes."
+logical_id = "4d07f731-13c5-496d-b28b-7a4bce014222"
+content_hash = "sha256:7fad266d6d0954407715ab32d2a11ae07350ecb7759ff6fcd94f796b78062d38"
+size = 27003
+mtime_ms = 1792672702541
+storage_uri = "gcs://replit-rams-assets-pike/rams/assets/repl:a39e6913-24fd-4227-b04c-ff8317815489/4d07f731-13c5-496d-b28b-7a4bce014222/c4434300-31e3-4f0f-91cc-e58080286a10"
+storage_version_token = "1792672741410058"
+content_type = "application/pdf"
