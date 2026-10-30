@@ -20,6 +20,7 @@ import {
 } from "@/components/ui/dialog";
 import { apiRequest, queryClient } from "@/lib/queryClient";
 import { useToast } from "@/hooks/use-toast";
+import { subscriptionPaymentError } from "@/lib/subscriptionPaymentError";
 
 // --- Plan catalog (mirrors the handoff /tmp/handoff/.../landing.jsx tease) ---
 type Plan = {
@@ -216,20 +217,10 @@ export default function Subscriptions() {
         variant: "destructive",
       });
     },
-    onError: async (error: any) => {
-      let msg = "Please try again in a moment.";
-      if (error?.message) msg = error.message;
-      try {
-        const body = await error?.response?.json?.();
-        if (body?.error === "already_subscribed") {
-          msg = "You already have an active subscription.";
-        } else if (body?.error === "phone_in_use") {
-          msg = "That phone number is linked to another account.";
-        }
-      } catch {}
+    onError: (error: unknown) => {
       toast({
         title: "Couldn't start payment",
-        description: msg,
+        description: subscriptionPaymentError(error),
         variant: "destructive",
       });
     },

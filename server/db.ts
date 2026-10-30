@@ -12,4 +12,12 @@ if (!process.env.DATABASE_URL) {
 }
 
 export const pool = new Pool({ connectionString: process.env.DATABASE_URL });
+// An idle connection can close during autoscaling/network interruption.
+// The pool removes that client itself; without a listener its error event
+// crashes Node. In-flight query errors still reject normally to their caller.
+pool.on("error", (error: Error & { code?: string }) => {
+  console.error("[database.pool] idle connection failed", {
+    code: error.code ?? "connection_error",
+  });
+});
 export const db = drizzle({ client: pool, schema });

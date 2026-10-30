@@ -29,6 +29,7 @@ import {
 import { getSubscriptionPlan } from "@shared/subscriptionPlans";
 import { processPocketPayPayment } from "./payment";
 import { registerInteriorRefreshRoutes } from "./interiorRefresh";
+import { isUniqueViolation, postgresErrorCode, subscriptionClaimConflict } from "./subscriptionClaimErrors";
 
 // Renewal worker tuning.
 const POLL_INTERVAL_MS = 15 * 60_000; // every 15 minutes
@@ -42,12 +43,15 @@ function genId(prefix: string): string {
     .slice(2, 8)}`;
 }
 
-/** True when a DB error is a Postgres unique-constraint violation (23505). */
-function isUniqueViolation(err: any): boolean {
-  return (
-    err?.code === "23505" ||
-    /duplicate key|unique constraint/i.test(String(err?.message ?? ""))
-  );
+async function claimConflictForUser(userId: number) {
+  const row = (await db.execute(sql`
+    SELECT status,
+      GREATEST(1, EXTRACT(EPOCH FROM (created_at + interval '15 minutes' - now()))) AS retry_seconds
+    FROM subscriptions
+    WHERE user_id=${userId} AND status IN ('incomplete','active','past_due')
+    LIMIT 1
+  `)).rows[0] as any;
+  return subscriptionClaimConflict(row?.status, Number(row?.retry_seconds ?? 900));
 }
 
 /**
@@ -515,9 +519,9 @@ export function registerSubscriptionRoutes(app: Express) {
       `);
     } catch (err: any) {
       if (isUniqueViolation(err)) {
-        return res.status(409).json({ error: "already_subscribed" });
+        return res.status(409).json(await claimConflictForUser(userId));
       }
-      console.error("[subscriptions.confirm] claim error:", err?.message ?? err);
+      console.error("[subscriptions.confirm] claim error:", postgresErrorCode(err) ?? "unknown_database_error");
       return res.status(500).json({ error: "claim_failed" });
     }
 
@@ -759,11 +763,11 @@ export function registerSubscriptionRoutes(app: Express) {
         `);
       } catch (err: any) {
         if (isUniqueViolation(err)) {
-          return res.status(409).json({ error: "already_subscribed" });
+          return res.status(409).json(await claimConflictForUser(userId));
         }
         console.error(
           "[subscriptions.pocketpay.start] claim error:",
-          err?.message ?? err,
+          postgresErrorCode(err) ?? "unknown_database_error",
         );
         return res.status(500).json({ error: "claim_failed" });
       }

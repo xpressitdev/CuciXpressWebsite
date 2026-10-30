@@ -5,6 +5,19 @@ description: Two partial unique indexes are the only thing preventing CyberSourc
 
 # Subscription billing double-charge protection
 
+Treat an incomplete subscription as an in-flight checkout, not proof of an
+active paid membership. Preserve the duplicate-payment guard while explaining
+the wait to the customer.
+
+**Why:** Pocket Pay can create a payment link before the customer retries.
+Drizzle wraps the subsequent PostgreSQL uniqueness error in `cause`; inspecting
+only the outer error misclassified this expected conflict as `claim_failed`.
+An earlier provider link does not prove settlement or successful browser redirect.
+
+**How to apply:** Inspect nested database error codes, avoid logging query
+parameters, and verify provider settlement before manually clearing a pending
+checkout or telling a customer to pay again.
+
 CyberSource auto-renewing subscriptions (server/subscriptions.ts) rely on TWO
 partial unique indexes (migrations/manual/2026-06-19_01_subscriptions.sql) to
 guarantee "charge at most once". They are load-bearing — do not remove or weaken
