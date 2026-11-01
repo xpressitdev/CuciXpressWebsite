@@ -319,3 +319,17 @@ mtime_ms = 1792672702541
 storage_uri = "gcs://replit-rams-assets-pike/rams/assets/repl:a39e6913-24fd-4227-b04c-ff8317815489/4d07f731-13c5-496d-b28b-7a4bce014222/c4434300-31e3-4f0f-91cc-e58080286a10"
 storage_version_token = "1792672741410058"
 content_type = "application/pdf"
+
+[[outputs]]
+id = "QY0FlzH0G1ogCAKuQ9wNe"
+uri = "file://generated-artifacts/CuciXpress-Sales-Expenses-Nov2025-Oct2026.xlsx"
+type = "table"
+title = "12-Month Sales & Expenses"
+description = "November 2025–October 2026. Monthly summary, category breakdown and data-coverage notes. BND; not a reconciled cashflow statement."
+logical_id = "2844d352-214f-4c99-9593-7c17b661bf95"
+content_hash = "sha256:4d0de63f75bc9067c8f2ecc7c5b62776fae45604021dfcfaf43c844f2d691864"
+size = 14710
+mtime_ms = 1793563027025
+storage_uri = "gcs://replit-rams-assets-pike/rams/assets/repl:a39e6913-24fd-4227-b04c-ff8317815489/2844d352-214f-4c99-9593-7c17b661bf95/05ce2d2d-2e97-4a55-a297-bc4156a9baf8"
+storage_version_token = "1793563036593324"
+content_type = "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
