@@ -333,3 +333,17 @@ mtime_ms = 1793563027025
 storage_uri = "gcs://replit-rams-assets-pike/rams/assets/repl:a39e6913-24fd-4227-b04c-ff8317815489/2844d352-214f-4c99-9593-7c17b661bf95/05ce2d2d-2e97-4a55-a297-bc4156a9baf8"
 storage_version_token = "1793563036593324"
 content_type = "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+
+[[outputs]]
+id = "YreHfb3m_4R-wXW-crbxk"
+uri = "file://generated-artifacts/CuciXpress-Profit-and-Loss-Nov2025-Oct2026.xlsx"
+type = "table"
+title = "Profit & Loss — 12-Month Excel"
+description = "P&L tab layout: line items down the left, November 2025–October 2026 across the top, bold subtotals and a period-total column. All original figures preserved."
+logical_id = "e9a4aab3-ce0b-477f-9c57-3d2134ece1a6"
+content_hash = "sha256:6645863894019409083a00e78a0eea3eef1874d1550d8e0a87180692714898d3"
+size = 13096
+mtime_ms = 1793646016743
+storage_uri = "gcs://replit-rams-assets-pike/rams/assets/repl:a39e6913-24fd-4227-b04c-ff8317815489/e9a4aab3-ce0b-477f-9c57-3d2134ece1a6/9ef99ff0-f652-40ef-a687-9ef7e210414b"
+storage_version_token = "1793646033942012"
+content_type = "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
