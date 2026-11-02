@@ -1,4 +1,5 @@
 import { useEffect, useState } from "react";
+import { AuditYearSelect, useExpenseAuditFilters } from "./ExpenseAuditFilters";
 import { useQuery } from "@tanstack/react-query";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -67,7 +68,8 @@ export default function ExpenseProfitLossTab({ staffId }: { staffId: string }) {
     queryKey: [auditUrl, "expense_viewer", staffId],
     enabled: Boolean(report),
   });
-  const entries = auditQuery.data?.entries ?? [];
+  const auditFilters = useExpenseAuditFilters(auditQuery.data?.entries ?? [], () => setPage(1));
+  const entries = auditFilters.entries;
   const pageCount = Math.max(1, Math.ceil(entries.length / PAGE_SIZE));
   const activePage = Math.min(page, pageCount);
   const visibleEntries = entries.slice((activePage - 1) * PAGE_SIZE, activePage * PAGE_SIZE);
@@ -167,11 +169,12 @@ export default function ExpenseProfitLossTab({ staffId }: { staffId: string }) {
       <CardHeader className="pb-3"><CardTitle className="text-base">Expense audit drilldown</CardTitle></CardHeader>
       <CardContent className="space-y-3">
         {dateRange ? <p className="text-sm text-muted-foreground">All dates in the selected custom range</p> : (
-          <div className="flex items-center gap-2">
+          <div className="flex flex-wrap items-center gap-2">
+            <AuditYearSelect year={year} onChange={setYear} />
             <label className="text-sm" htmlFor="profit-loss-audit-month">Month</label>
             <Select value={month} onValueChange={setMonth}>
-              <SelectTrigger id="profit-loss-audit-month" className="w-28"><SelectValue /></SelectTrigger>
-              <SelectContent>{PNL_MONTHS.map((name, index) => <SelectItem key={name} value={String(index + 1)}>{name}</SelectItem>)}</SelectContent>
+              <SelectTrigger id="profit-loss-audit-month" className="w-36"><SelectValue /></SelectTrigger>
+              <SelectContent>{PNL_MONTHS.map((name, index) => <SelectItem key={name} value={String(index + 1)}>{name} {year}</SelectItem>)}</SelectContent>
             </Select>
           </div>
         )}
@@ -183,7 +186,7 @@ export default function ExpenseProfitLossTab({ staffId }: { staffId: string }) {
         <Table className="min-w-[700px]">
           <TableHeader><TableRow>
             <TableHead>Expense date</TableHead><TableHead>Category</TableHead><TableHead>Status</TableHead><TableHead>Allocation</TableHead><TableHead className="text-right">Amount</TableHead>
-          </TableRow></TableHeader>
+          </TableRow>{auditFilters.controls}</TableHeader>
           <TableBody>
             {visibleEntries.map((entry) => <TableRow key={`${entry.submission_id}-${entry.branch_id ?? entry.allocation_status}`}>
               <TableCell className="whitespace-nowrap">{entry.expense_date}</TableCell>
@@ -192,7 +195,7 @@ export default function ExpenseProfitLossTab({ staffId }: { staffId: string }) {
               <TableCell>{entry.allocation_status === "excluded_advance_salary" ? "Information only — excluded from expenses" : entry.pnl_category ?? entry.allocation_status}</TableCell>
               <TableCell className="whitespace-nowrap text-right">{bnd(entry.cents)}</TableCell>
             </TableRow>)}
-            {!auditQuery.isPending && !auditQuery.isError && !entries.length && <TableRow><TableCell colSpan={5} className="py-8 text-center text-muted-foreground">No persisted expense entries for this period.</TableCell></TableRow>}
+            {!auditQuery.isPending && !auditQuery.isError && !entries.length && <TableRow><TableCell colSpan={5} className="py-8 text-center text-muted-foreground">{auditFilters.hasFilters ? "No expense entries match these filters." : "No persisted expense entries for this period."}</TableCell></TableRow>}
           </TableBody>
         </Table>
         {entries.length > 0 && <div className="flex flex-wrap items-center justify-between gap-2 text-sm">

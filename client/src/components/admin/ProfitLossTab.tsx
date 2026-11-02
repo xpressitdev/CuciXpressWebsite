@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
+import { AuditYearSelect, useExpenseAuditFilters } from "./ExpenseAuditFilters";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { AlertTriangle, CheckCircle2, RefreshCw, Settings2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
@@ -257,7 +258,8 @@ export default function ProfitLossTab() {
     },
   });
   const rows = useMemo(() => report?.months[0]?.lines ?? [], [report]);
-  const expenseEntries = expensesQuery.data?.entries ?? [];
+  const auditFilters = useExpenseAuditFilters(expensesQuery.data?.entries ?? [], () => setExpensePage(1));
+  const expenseEntries = auditFilters.entries;
   const expensePageCount = Math.max(1, Math.ceil(expenseEntries.length / EXPENSES_PER_PAGE));
   const visibleExpensePage = Math.min(expensePage, expensePageCount);
   const visibleExpenseEntries = expenseEntries.slice(
@@ -527,10 +529,11 @@ export default function ProfitLossTab() {
             <p className="text-sm text-muted-foreground">All dates in the selected custom range</p>
           ) : (
             <>
+              <AuditYearSelect year={year} onChange={setYear} />
               <label className="text-sm" htmlFor="profit-loss-audit-month">Month</label>
               <Select value={drilldownMonth} onValueChange={setDrilldownMonth}>
-                <SelectTrigger id="profit-loss-audit-month" className="w-28"><SelectValue /></SelectTrigger>
-                <SelectContent>{PNL_MONTHS.map((name, index) => <SelectItem key={name} value={String(index + 1)}>{name}</SelectItem>)}</SelectContent>
+                <SelectTrigger id="profit-loss-audit-month" className="w-36"><SelectValue /></SelectTrigger>
+                <SelectContent>{PNL_MONTHS.map((name, index) => <SelectItem key={name} value={String(index + 1)}>{name} {year}</SelectItem>)}</SelectContent>
               </Select>
             </>
           )}
@@ -543,14 +546,14 @@ export default function ProfitLossTab() {
           : null}
         <div className="overflow-x-auto">
           <Table className="min-w-[700px]">
-            <TableHeader><TableRow><TableHead className="whitespace-nowrap">Expense date</TableHead><TableHead className="whitespace-nowrap">Category</TableHead><TableHead className="whitespace-nowrap">Status</TableHead><TableHead className="whitespace-nowrap">Allocation</TableHead><TableHead className="whitespace-nowrap text-right">Amount</TableHead></TableRow></TableHeader>
+            <TableHeader><TableRow><TableHead className="whitespace-nowrap">Expense date</TableHead><TableHead className="whitespace-nowrap">Category</TableHead><TableHead className="whitespace-nowrap">Status</TableHead><TableHead className="whitespace-nowrap">Allocation</TableHead><TableHead className="whitespace-nowrap text-right">Amount</TableHead></TableRow>{auditFilters.controls}</TableHeader>
             <TableBody>{visibleExpenseEntries.map((entry) => <TableRow key={`${entry.submission_id}-${entry.branch_id ?? entry.allocation_status}`}>
               <TableCell className="whitespace-nowrap">{entry.expense_date}</TableCell><TableCell>{entry.source_category ?? "Unmapped"}</TableCell>
               <TableCell>{entry.source_status ?? "No status"}</TableCell><TableCell>{entry.allocation_status === "excluded_advance_salary" ? "Information only — excluded from expenses" : entry.pnl_category ?? entry.allocation_status}</TableCell>
               <TableCell className="whitespace-nowrap text-right">{bnd(entry.cents)}</TableCell>
             </TableRow>)}
             {!expensesQuery.isPending && !expensesQuery.isFetching && !expensesQuery.isError && expensesQuery.data
-              && !expenseEntries.length && <TableRow><TableCell colSpan={5} className="text-center text-muted-foreground">No persisted expense entries for this period.</TableCell></TableRow>}
+              && !expenseEntries.length && <TableRow><TableCell colSpan={5} className="text-center text-muted-foreground">{auditFilters.hasFilters ? "No expense entries match these filters." : "No persisted expense entries for this period."}</TableCell></TableRow>}
             </TableBody>
           </Table>
         </div>
